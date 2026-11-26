@@ -236,7 +236,7 @@ test('RP-03 the review lists the diff, marks the capability field and Apply send
   await frame(page, testInfo, '02-dialog-diff', 'dialog')
 
   await page.getByTestId('role-pack-apply').click()
-  await expect(page.getByTestId('role-pack-result')).toContainText('Updated instructions')
+  await expect(page.getByTestId('role-pack-result')).toContainText('Updated lead: instructions')
   await expect(page.getByTestId('role-pack-backup')).toContainText('/home/user/.smind/backups/role-pack/20261126T101500Z-pack-v9')
   expect(stub.applies()).toHaveLength(1)
   expect(stub.applies()[0].params.take).toEqual([])
@@ -309,6 +309,6 @@ test('RP-07 a capability take asks first', async ({ app }, testInfo) => {
   expect(stub.applies()).toHaveLength(0)
   await page.getByTestId('role-pack-take-lead-permissionMode').click()
   await page.getByTestId('role-pack-capability-confirm-confirm').click()
-  await expect(page.getByTestId('role-pack-result')).toContainText('Updated permissionMode')
+  await expect(page.getByTestId('role-pack-result')).toContainText('Updated lead: permissionMode')
   expect(stub.applies().map((c) => c.params.take)).toEqual([['lead.permissionMode']])
 })
