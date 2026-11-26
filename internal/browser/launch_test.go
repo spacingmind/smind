@@ -289,6 +289,28 @@ func TestBrowserEnvDropsSecrets(t *testing.T) {
 	}
 }
 
+func TestBrowserEnvDropsProxyVariables(t *testing.T) {
+	in := []string{"PATH=/bin"}
+	for _, n := range []string{"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+		"http_proxy", "https_proxy", "all_proxy", "no_proxy"} {
+		in = append(in, n+"=http://u:pw@p:1")
+	}
+	out := strings.Join(browserEnv(in), " ")
+	if strings.Contains(out, "PROXY") || strings.Contains(out, "proxy") || strings.Contains(out, "pw@") {
+		t.Fatalf("browser env carries a proxy variable: %q", out)
+	}
+	if !strings.Contains(out, "PATH=/bin") {
+		t.Fatalf("browser env lost PATH: %q", out)
+	}
+	args, err := buildArgs(t.TempDir(), LaunchOpts{ProxyAddr: "127.0.0.1:4555"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(args, "\n"), "--proxy-server=http://127.0.0.1:4555") {
+		t.Fatalf("launcher args miss the browser's own proxy: %v", args)
+	}
+}
+
 func TestLaunchFailsWhenTheOwnerFileCannotBeWritten(t *testing.T) {
 	old := ownerWriter
 	ownerWriter = func(string) error { return errors.New("disk full") }
