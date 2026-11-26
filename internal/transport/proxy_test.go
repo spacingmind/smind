@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http/httpproxy"
@@ -540,5 +541,119 @@ func TestProxy_EnvIsReadAtConstruction(t *testing.T) {
 	want := "example.com:" + srvPort(t, u.tlsSrv)
 	if got := proxy.connectsSeen(); len(got) != 1 || got[0] != want {
 		t.Errorf("proxy CONNECTs = %v, want [%s]", got, want)
+	}
+}
+
+func TestProxy_ConnectTargetWithControlBytesRefused(t *testing.T) {
+	u := newUpstream(t)
+	proxy := startProxy(t, u.tlsAddr(), 0)
+
+	rt := New(utls.HelloChrome_Auto, WithProxyConfig(&httpproxy.Config{}))
+	proxyURL, err := url.Parse(proxy.url("", ""))
+	if err != nil {
+		t.Fatalf("url.Parse(%q) error = %v", proxy.url("", ""), err)
+	}
+	for _, target := range []string{
+		"a.com\r\nX-y:443",
+		"a b:443",
+		"host",
+		":443",
+		"a.com:",
+	} {
+		_, err := rt.dialViaProxy(context.Background(), proxyURL, target)
+		if err == nil || !strings.Contains(err.Error(), "invalid CONNECT target") {
+			t.Errorf("dialViaProxy(%q) error = %v, want invalid CONNECT target", target, err)
+		}
+	}
+	if got := proxy.connectsSeen(); len(got) != 0 {
+		t.Errorf("proxy CONNECTs = %v, want none (the proxy must not be dialled at all)", got)
+	}
+}
+
+func TestProxy_ConnectHonoursContext(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	var mu sync.Mutex
+	var held []net.Conn
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			held = append(held, conn)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range held {
+			_ = c.Close()
+		}
+	})
+
+	rt := New(utls.HelloChrome_Auto, WithProxyConfig(&httpproxy.Config{}))
+	proxyURL := &url.URL{Scheme: "http", Host: ln.Addr().String()}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err = rt.dialViaProxy(ctx, proxyURL, "example.com:443")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("dialViaProxy() error = nil, want the cancelled context to fail the exchange")
+	}
+	if elapsed >= 5*time.Second {
+		t.Fatalf("dialViaProxy() took %v, want < 5s", elapsed)
+	}
+	if elapsed >= 2*time.Second {
+		t.Errorf("dialViaProxy() took %v, want < 2s", elapsed)
+	}
+}
+
+func TestProxy_ConnectHeaderIsCapped(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func(conn net.Conn) {
+				defer conn.Close()
+				if _, err := conn.Write([]byte("HTTP/1.1 200 OK\r\n")); err != nil {
+					return
+				}
+				for {
+					if _, err := conn.Write([]byte("X-A: aaaa\r\n")); err != nil {
+						return
+					}
+				}
+			}(conn)
+		}
+	}()
+
+	rt := New(utls.HelloChrome_Auto, WithProxyConfig(&httpproxy.Config{}))
+	proxyURL := &url.URL{Scheme: "http", Host: ln.Addr().String()}
+
+	start := time.Now()
+	_, err = rt.dialViaProxy(context.Background(), proxyURL, "example.com:443")
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatal("dialViaProxy() error = nil, want the endless header to fail the exchange")
+	}
+	if elapsed >= 5*time.Second {
+		t.Fatalf("dialViaProxy() took %v, want < 5s", elapsed)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -273,6 +274,15 @@ func (rt *RoundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 // credentials go into the Proxy-Authorization header and nowhere else: never
 // into an error or a log line.
 func (rt *RoundTripper) dialViaProxy(ctx context.Context, p *url.URL, target string) (net.Conn, error) {
+	for i := 0; i < len(target); i++ {
+		if target[i] <= 0x20 || target[i] == 0x7f {
+			return nil, errors.New("transport: invalid CONNECT target")
+		}
+	}
+	thost, tport, err := net.SplitHostPort(target)
+	if err != nil || thost == "" || tport == "" {
+		return nil, errors.New("transport: invalid CONNECT target")
+	}
 	paddr := p.Host
 	if _, _, err := net.SplitHostPort(paddr); err != nil {
 		paddr += ":80"
@@ -282,7 +292,13 @@ func (rt *RoundTripper) dialViaProxy(ctx context.Context, p *url.URL, target str
 	if err != nil {
 		return nil, fmt.Errorf("transport: dial proxy %s: %w", paddr, err)
 	}
-	conn.SetDeadline(time.Now().Add(dialTimeout))
+	stop := context.AfterFunc(ctx, func() { conn.Close() })
+	fail := func(err error) (net.Conn, error) {
+		stop()
+		conn.Close()
+		return nil, err
+	}
+	_ = conn.SetDeadline(time.Now().Add(dialTimeout))
 
 	var req strings.Builder
 	req.WriteString("CONNECT " + target + " HTTP/1.1\r\nHost: " + target + "\r\n")
@@ -294,24 +310,21 @@ func (rt *RoundTripper) dialViaProxy(ctx context.Context, p *url.URL, target str
 	req.WriteString("\r\n")
 
 	if _, err := conn.Write([]byte(req.String())); err != nil {
-		conn.Close()
-		return nil, errors.New("transport: write CONNECT to proxy failed")
+		return fail(errors.New("transport: write CONNECT to proxy failed"))
 	}
-	br := bufio.NewReader(conn)
+	br := bufio.NewReader(io.LimitReader(conn, 16<<10))
 	resp, err := http.ReadResponse(br, &http.Request{Method: http.MethodConnect})
 	if err != nil {
-		conn.Close()
-		return nil, errors.New("transport: read CONNECT response from proxy failed")
+		return fail(errors.New("transport: read CONNECT response from proxy failed"))
 	}
 	if resp.StatusCode != http.StatusOK {
-		conn.Close()
-		return nil, fmt.Errorf("transport: proxy refused CONNECT (status %d)", resp.StatusCode)
+		return fail(fmt.Errorf("transport: proxy refused CONNECT (status %d)", resp.StatusCode))
 	}
 	if br.Buffered() > 0 {
-		conn.Close()
-		return nil, errors.New("transport: proxy sent data before the tunnel opened")
+		return fail(errors.New("transport: proxy sent data before the tunnel opened"))
 	}
-	conn.SetDeadline(time.Time{})
+	_ = conn.SetDeadline(time.Time{})
+	stop()
 	return conn, nil
 }
 
