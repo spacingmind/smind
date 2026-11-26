@@ -79,9 +79,11 @@ func WithProxyConfig(c *httpproxy.Config) Option {
 	}
 }
 
-// WithDirectDialer is a TEST ONLY option: it replaces only the direct dial of
-// a target, never the dial to a proxy, which always uses the transport's own
-// dialer.
+// WithDirectDialer is a TEST ONLY option: it replaces the dial of a target (a
+// TLS target dialled directly, and every dial of a plain-HTTP request, which
+// includes the dial to an http proxy: a hook that redirects everything must let
+// the proxy's address through). The dial to a proxy for an HTTPS tunnel always
+// uses the transport's own dialer.
 func WithDirectDialer(d func(ctx context.Context, network, addr string) (net.Conn, error)) Option {
 	return func(rt *RoundTripper) {
 		rt.dialHook = d

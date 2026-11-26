@@ -193,10 +193,18 @@ func (p *recProxy) url(user, pass string) string {
 }
 
 // directTo dials addr whatever target it is given; used with
-// WithDirectDialer so a fake target name reaches a real server.
-func directTo(addr string) func(ctx context.Context, network, a string) (net.Conn, error) {
+// WithDirectDialer so a fake target name reaches a real server. The hook also
+// carries the dial of a plain-HTTP request to an http proxy, so a test with a
+// proxy configured passes the proxy's address in passthrough: it is dialled
+// for real, and a request that wrongly reaches the proxy is then seen by it.
+func directTo(addr string, passthrough ...string) func(ctx context.Context, network, a string) (net.Conn, error) {
 	return func(ctx context.Context, network, a string) (net.Conn, error) {
 		var d net.Dialer
+		for _, p := range passthrough {
+			if a == p {
+				return d.DialContext(ctx, network, a)
+			}
+		}
 		return d.DialContext(ctx, "tcp", addr)
 	}
 }
@@ -370,7 +378,7 @@ func TestProxy_LoopbackNeverProxied(t *testing.T) {
 	// server, and the proxy must be bypassed all the same.
 	hooked := Client(utls.HelloChrome_Auto,
 		WithProxyConfig(cfg),
-		WithDirectDialer(directTo(u.plainAddr())),
+		WithDirectDialer(directTo(u.plainAddr(), proxy.ln.Addr().String())),
 	)
 	for _, host := range []string{"127.0.0.1", "localhost", "a.localhost", "[::1]"} {
 		if body := get(t, hooked, u.plainTarget(host)+"/"); body != "ok-plain" {
