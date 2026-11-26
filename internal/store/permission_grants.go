@@ -8,7 +8,7 @@ import (
 )
 
 // PermissionGrant is one saved "allow always in this project" decision
-// (docs/plans/active/saved-grants.md). It is keyed by project and the SHA-256
+// (docs/plans/completed/saved-grants.md). It is keyed by project and the SHA-256
 // of the exact RAW command; CommandDisplay is the redacted text a human saw,
 // never what is matched.
 type PermissionGrant struct {

@@ -9,7 +9,7 @@ import (
 )
 
 // The path rules and the secret rules below implement the redaction contract
-// of docs/plans/active/crash-capture.md (Decisions): no path under the user's
+// of docs/plans/completed/crash-capture.md (Decisions): no path under the user's
 // directories and no known secret shape reaches disk. It is a defence in
 // depth for the stack text and for runtime error messages (non-runtime panic
 // messages are never stored at all); it cannot recognise a secret of an

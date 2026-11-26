@@ -2,7 +2,7 @@
 v: 1
 milestone: "Per-task scratch dir and cleanup on archive/delete"
 base: origin/develop
-planRef: docs/plans/active/task-scratch.md
+planRef: docs/plans/completed/task-scratch.md
 acs:
   - id: AC-S1
     text: "Nothing outside scratch/<taskId> is ever removed: a symlink inside (or at) the task dir pointing outside is deleted as a link and its target survives."
@@ -63,4 +63,4 @@ limits: { budgetUsd: 2, maxMinutes: 40 }
 C2 skips `TestServe_DaemonLogAndManagedBy`: it runs `smind service logs`, which reads the machine's real service log, so it fails on a host whose daemon log tail lacks "smind listening on" (environment dependent, unrelated to scratch).
 
 Isolated temp dirs only; no model call. Key assertion: nothing outside `scratch/<taskId>` is ever removed.
-Spec: `docs/plans/active/task-scratch.md`.
+Spec: `docs/plans/completed/task-scratch.md`.

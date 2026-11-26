@@ -2,7 +2,7 @@
 v: 1
 milestone: "Z.AI GLM plan-usage meter (provider.usage, cached-window cooldown, web)"
 base: origin/develop
-planRef: docs/plans/active/zai-usage-meter.md
+planRef: docs/plans/completed/zai-usage-meter.md
 acs:
   - id: AC1
     text: "The Z.AI quota/limit body parses into five_hour/weekly windows (used %, reset from nextResetTime) and a monthly tool balance; one odd entry never drops the rest; malformed bodies are errors."

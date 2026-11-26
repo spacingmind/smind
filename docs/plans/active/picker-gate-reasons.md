@@ -7,7 +7,7 @@ Size: L (11) — scope 3 (daemon derivation + wire, MCP/Lead errors, web + mobil
 The provider/model picker lets a user choose a provider or model that cannot run,
 or greys it out with a bare "Unavailable" (web: only the PATH health check sets
 `unavailableReason`). Run failures already get a typed class and a next action
-(`docs/plans/active/run-failure-classes.md`, ADR-0050 in its PR1). This item is
+(`docs/plans/completed/run-failure-classes.md`, ADR-0050 in its PR1). This item is
 the **preventive twin**: the same state, computed before the send, shown per row
 with the same way out. One derivation helper on the daemon, one action type, no
 client-side guessing.

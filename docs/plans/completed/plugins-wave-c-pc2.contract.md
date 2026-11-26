@@ -2,7 +2,7 @@
 v: 1
 milestone: "Plugins PC2: web renderer for the ui:1 declarative plugin UI, plugin tab, sidebar, palette, actions"
 base: origin/develop
-planRef: docs/plans/active/plugins-wave-c.md
+planRef: docs/plans/completed/plugins-wave-c.md
 acs:
   - id: AC-W1
     text: "Every shared ui:1 fixture renders in the web renderer without throwing; every node type has golden text; an unknown or malformed node degrades to an 'Unsupported in this app version' placeholder and never crashes the panel."

@@ -465,7 +465,7 @@ func TestEventBytesTracksHeap(t *testing.T) {
 }
 
 // TestGenerateSyntheticDB writes the dogfood database used for the memory
-// measurements (docs/plans/active/daemon-memory.md): SMIND_GEN_SYNTH_DB=<dir>
+// measurements (docs/plans/completed/daemon-memory.md): SMIND_GEN_SYNTH_DB=<dir>
 // SMIND_GEN_RUNS=200 SMIND_GEN_RUN_MB=4 go test ./internal/runs -run GenerateSyntheticDB.
 // Skipped otherwise; it never touches a real home.
 func TestGenerateSyntheticDB(t *testing.T) {

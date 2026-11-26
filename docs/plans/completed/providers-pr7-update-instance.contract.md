@@ -2,7 +2,7 @@
 v: 1
 milestone: "Providers PR7: provider.updateInstance (daemon, CLI, web editors)"
 base: origin/develop
-planRef: docs/plans/active/providers-pr7-update-instance.md
+planRef: docs/plans/completed/providers-pr7-update-instance.md
 acs:
   - id: AC1
     text: "updateInstance on one providers.custom entry leaves every other byte of config.yaml (other entries, comments, blank lines, ordering) identical."

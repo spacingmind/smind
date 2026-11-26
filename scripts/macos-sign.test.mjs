@@ -1,4 +1,4 @@
-// Tests for scripts/macos-sign/*.sh (docs/plans/active/desktop-notarization-prep.md, AC1-AC5).
+// Tests for scripts/macos-sign/*.sh (docs/plans/completed/desktop-notarization-prep.md, AC1-AC5).
 // The scripts call macOS tools by bare name, so a directory of fake tools goes first on PATH and
 // the real scripts run under `bash`. Each fake appends "<tool><US><arg>..." per call to
 // $FAKE_LOG; FAKE_* env knobs steer the fakes. Real tools (bash, base64, tar, mktemp, ...)

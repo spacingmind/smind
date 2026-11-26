@@ -2,7 +2,7 @@
 v: 1
 milestone: "Run failure classes PR1: classifier, wire action, migration, retry/cooldown policy"
 base: origin/develop
-planRef: docs/plans/active/run-failure-classes.md
+planRef: docs/plans/completed/run-failure-classes.md
 acs:
   - id: AC1-6
     text: "failureKind takes auth_expired, plan_window_exhausted, model_not_in_plan, transient_429, cli_exited and the residual rate_limited; precedence is plan window/signal > typed backend code > auth text > model text > generic 429 words (transient only with a Retry-After or an overload body, else residual)."

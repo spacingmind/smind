@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Read-only check of a signed, notarized macOS app (and optionally its dmg): the gate that runs
 # after signing and that the Human can run on any Mac. Needs no secrets and changes nothing.
-# docs/plans/active/desktop-notarization-prep.md, ADR-0060 draft.
+# docs/plans/completed/desktop-notarization-prep.md, ADR-0060 draft.
 #
 # usage: verify.sh --app <sMind.app> [--dmg <file.dmg>] [--entitlements-app <file>] [--entitlements-sidecar <file>]
 #

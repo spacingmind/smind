@@ -71,7 +71,7 @@ type PermissionDetail struct {
 	// so the card can show what matched instead of a bare command line.
 	Policy *PolicyInfo `json:"policy,omitempty"`
 	// Grant is set by internal/runs only on a request a human may save as
-	// "allow always in this project" (docs/plans/active/saved-grants.md): the
+	// "allow always in this project" (docs/plans/completed/saved-grants.md): the
 	// exact scope the saved choice would cover. Absent for everything else.
 	Grant *GrantOffer `json:"grant,omitempty"`
 	// Browser is set (Kind "browser") on the card the daemon raises for an agent's

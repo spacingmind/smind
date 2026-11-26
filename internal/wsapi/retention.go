@@ -10,7 +10,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
-// Run events retention RPCs (docs/plans/active/run-events-retention.md).
+// Run events retention RPCs (docs/plans/completed/run-events-retention.md).
 // Human-local only, like debug.memory: refused to run-scoped agents, over the
 // relay and on a non-loopback connection; on no method list for either.
 

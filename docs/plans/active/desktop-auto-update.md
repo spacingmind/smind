@@ -303,7 +303,7 @@ workflow's `publish` job end to end.
   - U7 daemon interplay: no code change, never verified live (`daemon-survives-app-update`).
   - Local end-to-end in a real window (`local-update-end-to-end`, `local-menu-check`, `local-bad-signature-rejected`, `local-later-dismiss`, `local-endpoint-down-launch-silent`).
   - The Windows NSIS updater path on a real Windows machine; the first real in-app update from one published release to the next (two releases with updater artifacts now exist, but no evidence it was done).
-  - ~~Follow-up from `desktop-update-e2e`: `requireSignedVersion` is not enabled in `tauri.conf.json`.~~ Done: `docs/plans/active/desktop-require-signed-version.md` (flag on, release scripts check the signed version).
+  - ~~Follow-up from `desktop-update-e2e`: `requireSignedVersion` is not enabled in `tauri.conf.json`.~~ Done: `docs/plans/completed/desktop-require-signed-version.md` (flag on, release scripts check the signed version).
 
 - [x] U1 config, keys, plugin (`ecaaccf`)
 - [x] U2 Rust check/install (`05bd511`, review fixes `4cf553e`)

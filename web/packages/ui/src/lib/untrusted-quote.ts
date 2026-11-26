@@ -1,5 +1,5 @@
 /**
- * Quoting third-party text (review comments, check logs) before it goes into a prompt (docs/plans/active/pr-panel.md,
+ * Quoting third-party text (review comments, check logs) before it goes into a prompt (docs/plans/completed/pr-panel.md,
  * decision 8). The text is wrapped in a fenced block whose fence is longer than any backtick run inside it, so the
  * text cannot close the block, and is introduced by a label that says it is data, not instructions. The text is kept
  * intact apart from line endings (the daemon already bounded it); context lines (file:line, author, PR number) are

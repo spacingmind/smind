@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 
-// Smoke suite of the web demo (ADR-0051, docs/plans/active/web-demo-mode.md): the real UI against the scripted in-browser daemon.
+// Smoke suite of the web demo (ADR-0051, docs/plans/completed/web-demo-mode.md): the real UI against the scripted in-browser daemon.
 // It builds web/packages/ui/dist-demo and serves it with `vite preview` on 127.0.0.1:4173 -- no daemon, no Go, no network.
 //   cd web/e2e && bunx playwright test -c playwright.demo.config.ts
 //   E2E_FULL=1 ...   adds dark-1280 and light-390

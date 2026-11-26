@@ -2,7 +2,7 @@
 v: 1
 milestone: "Agent self-approval hardening: CLI refusal in agent runs + no-self-approve floor rule"
 base: origin/develop
-planRef: docs/plans/active/agent-self-approve-hardening.md
+planRef: docs/plans/completed/agent-self-approve-hardening.md
 acs:
   - id: SA1
     text: "Every harness launch of an agent run carries SMIND_AGENT_RUN=1 in its environment."

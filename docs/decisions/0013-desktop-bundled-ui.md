@@ -200,7 +200,7 @@ Human decision (via the Supervisor): the desktop app may open a task in its own 
 
 Residuals accepted and stated: the core window permissions a drawn caption bar needs accept a target label, so a task window's page could minimise or toggle-maximize `main` and close other task windows (the page is the bundled UI, and `main`'s close only hides it; a loopback-port subframe could do the same, see the remote scope above); and `core:event:allow-listen` lets a task window hear app-wide events, so events that must not run in every window (the menu action, the update-check request) are emitted to one window, never broadcast.
 
-Consequences: a task window is the same bundled UI on the same origin, so it shares `localStorage` and the proxy with `main`; the web side makes a task window never reach for the main-only commands (no connection picker, no daemon banner, no update badge). Threat model and tests: `docs/plans/active/desktop-multi-window.md`.
+Consequences: a task window is the same bundled UI on the same origin, so it shares `localStorage` and the proxy with `main`; the web side makes a task window never reach for the main-only commands (no connection picker, no daemon banner, no update badge). Threat model and tests: `docs/plans/completed/desktop-multi-window.md`.
 
 ## Amendment 2026-11-15: proxy origin only (enforced in commands and in the ACL)
 

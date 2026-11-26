@@ -2,7 +2,7 @@
 v: 1
 milestone: "UX audit PR B: Deny with a reason, new-file content, demo card parity"
 base: origin/develop
-planRef: docs/plans/active/ux-audit-small-fixes.md
+planRef: docs/plans/completed/ux-audit-small-fixes.md
 acs:
   - id: B1
     text: "run.respondPermission accepts an optional reason only with a reject option of the pending request; the text is trimmed and cleaned, at most 500 characters, valid UTF-8 without NUL. An allow with a reason, an unknown option or a bad text is refused and the request stays pending."

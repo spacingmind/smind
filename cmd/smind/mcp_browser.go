@@ -19,7 +19,7 @@ import (
 	"github.com/spacingmind/smind/internal/version"
 )
 
-// The browser MCP child (docs/plans/active/browser-for-agents-designs.md,
+// The browser MCP child (docs/plans/completed/browser-for-agents-designs.md,
 // ADR-0061): `smind mcp browser` is a stdio MCP server one run's agent
 // speaks to, exposing exactly the seven browser_* tools below and nothing
 // else. The child holds NO browser logic and NO secret: every call is

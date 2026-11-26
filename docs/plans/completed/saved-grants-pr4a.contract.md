@@ -2,7 +2,7 @@
 v: 1
 milestone: "Saved grants PR4a: the daemon (grantable classification, store, evaluation, scoped answer, list/revoke, CLI)"
 base: origin/develop
-planRef: docs/plans/active/saved-grants.md
+planRef: docs/plans/completed/saved-grants.md
 acs:
   - id: AC1
     text: "A grant exists only after a human answered a pending, offered request with scope project and its allow_once option; an agent run cannot create, list or revoke one; the three names are on the human-only table."

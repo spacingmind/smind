@@ -7,7 +7,7 @@ import (
 )
 
 // The Tauri build rewrites desktop/src-tauri/gen/schemas on every build (capability schemas for editor autocompletion), so
-// they are not source: untracked and ignored (docs/plans/active/desktop-generated-schemas.md). Tracking them again brings
+// they are not source: untracked and ignored (docs/plans/completed/desktop-generated-schemas.md). Tracking them again brings
 // back the diffs that every Lead's build produced.
 func TestGeneratedTauriSchemasAreIgnoredAndUntracked(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {

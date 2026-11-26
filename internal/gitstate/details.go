@@ -10,7 +10,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
-// The PR panel's reads (docs/plans/active/pr-panel.md, decisions 3-5, 7, 9).
+// The PR panel's reads (docs/plans/completed/pr-panel.md, decisions 3-5, 7, 9).
 // Nothing here runs on a timer: the cache is filled by reads, and a read only
 // fetches for a connection that focused the PR tab.
 const (

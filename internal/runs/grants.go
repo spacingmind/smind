@@ -14,7 +14,7 @@ import (
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
-// Saved grants (ADR-0055 section 8, docs/plans/active/saved-grants.md): a human
+// Saved grants (ADR-0055 section 8, docs/plans/completed/saved-grants.md): a human
 // answer with scope "project" saves "allow this exact command in this project";
 // a later identical request is allowed without asking, until the grant expires,
 // is revoked or is voided. The order is fixed: seat floor -> AutoAccept ->

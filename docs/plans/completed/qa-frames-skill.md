@@ -40,7 +40,7 @@ Mutations (each must fail its test): real home used; send allowed with non-haiku
 
 ## PR split
 
-1. **PR0 (this file)** — docs only, `docs/plans/active/qa-frames-skill.md`.
+1. **PR0 (this file)** — docs only, `docs/plans/completed/qa-frames-skill.md`.
 2. **PR1** — `internal/qaframes/**` (package, driver, cmd), `internal/skills/bundle/smind-validator-frames/**`, `internal/profiles/rolepack*.go` (validator `Skills`), `public-docs/orchestration.md`, this plan's Progress/Validation. Write scopes do not overlap PR0 except this file.
 
 ## Progress

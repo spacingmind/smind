@@ -166,7 +166,7 @@ One status payload per task, one read, one event. **Reads are cache-first and ne
 - `task.gitRefresh {taskId}` → `TaskGit`: an explicit refresh; the only read that may spend a forge call, under the explicit-refresh floor
   and budget. Refuses run-scoped (agent) callers.
 - `task.prDetailsFocus {taskId|null}` → `{}`, `task.prDetails {taskId, refresh?}` → `PRDetails`, `task.prCheckLog {taskId, checkId}` →
-  `{checkId, text, lines, truncated, fetchedAt}`: the PR panel (G9; `docs/plans/active/pr-panel.md`). A detail read fetches only for a
+  `{checkId, text, lines, truncated, fetchedAt}`: the PR panel (G9; `docs/plans/completed/pr-panel.md`). A detail read fetches only for a
   connection that focused the PR tab, two `gh` calls booked together, under the same floors, budget and suspension as the poller; all
   three refuse run-scoped callers.
 - `workspace.defaultBase {workspaceId}` / `workspace.setDefaultBase {workspaceId, branch}`; `task.setBase {taskId, baseRef}`.

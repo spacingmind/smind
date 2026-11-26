@@ -3,7 +3,7 @@ import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
 // Smoke suite of the web demo build (ADR-0051). Every test loads the page fresh, so each starts a fresh scripted session.
-// IDs are the plan's (docs/plans/active/web-demo-mode.md). No waitForTimeout: web-first assertions only.
+// IDs are the plan's (docs/plans/completed/web-demo-mode.md). No waitForTimeout: web-first assertions only.
 // The tasks are the landing hero's nine (checkout-api, web-app, platform); their ids are the scenario's (src/demo/scenario/index.ts).
 
 const main = (page: Page) => page.getByTestId('app-main-content')

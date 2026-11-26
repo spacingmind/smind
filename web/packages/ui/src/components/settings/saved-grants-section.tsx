@@ -31,7 +31,7 @@ function expiryText(g: SavedGrant): string {
 }
 
 /**
- * Settings -> Saved grants (saved grants, docs/plans/active/saved-grants.md): every "always allow in this
+ * Settings -> Saved grants (saved grants, docs/plans/completed/saved-grants.md): every "always allow in this
  * project" decision, with the exact command, project, class, expiry and use count, and a Revoke for any
  * that is not already revoked. A grant is created only on a permission card, by a human; this page can
  * only read and revoke. Commands render as plain text.

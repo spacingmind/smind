@@ -53,7 +53,7 @@ func TestMCP_NoToolAnswersQuestions(t *testing.T) {
 }
 
 // TestMCP_NoToolSavesOrRevokesGrants: a saved "allow always in this project" is a
-// human's standing decision (docs/plans/active/saved-grants.md), so the MCP
+// human's standing decision (docs/plans/completed/saved-grants.md), so the MCP
 // catalog has no tool that lists, saves or revokes one.
 func TestMCP_NoToolSavesOrRevokesGrants(t *testing.T) {
 	env := newMCPSession(t)

@@ -2,7 +2,7 @@
 v: 1
 milestone: "Plugins PC1: ui:1 view schema, panel manifest, plugin.panels/plugin.view/ui.refresh, fixtures, hello-process panel"
 base: origin/develop
-planRef: docs/plans/active/plugins-wave-c.md
+planRef: docs/plans/completed/plugins-wave-c.md
 acs:
   - id: AC-C1
     text: "Every ui:1 node type and action has a valid fixture; invalid documents (unknown type or field, depth, node, size, row, column, field caps) are refused with the exact JSON path and nothing is truncated; output is deterministic."
@@ -90,4 +90,4 @@ writeScope:
 # PC1 validation contract
 
 Daemon-only: no UI, no model call, isolated temp dirs. Key assertions: untrusted view data cannot carry HTML, script, remote images or non-http(s) URLs; a view can only name rpcs and panels its plugin declares; agents and plugin processes cannot reach plugin.view or plugin.panels; nothing is truncated.
-Spec: `docs/plans/active/plugins-wave-c.md` (PC1).
+Spec: `docs/plans/completed/plugins-wave-c.md` (PC1).
