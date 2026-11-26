@@ -27,7 +27,7 @@ question, then answer with evidence (file paths, line numbers, quoted code).
 Don't guess at behavior you haven't read.
 
 **(b) Bounded changes.** Make the smallest coherent change that satisfies the
-request. Run `task test` and `task lint` before considering the change done.
+request. Run `task test` and `task lint` before considering the change done (`sh scripts/verify.sh` runs them with a PASS / FAIL / INCONCLUSIVE result; INCONCLUSIVE, such as a missing tool or no network, is never "done": see the `verify` skill).
 
 **(c) Multi-session work — spec-driven.** Before implementation starts,
 create `docs/plans/active/<slug>.md` with concrete acceptance criteria and

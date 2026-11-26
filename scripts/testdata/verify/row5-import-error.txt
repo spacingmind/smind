@@ -1,0 +1,2 @@
+internal/foo/foo.go:4:2: no required module provides package github.com/x/y; to add it:
+FAIL	github.com/spacingmind/smind/internal/foo [setup failed]

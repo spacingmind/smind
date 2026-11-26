@@ -1,0 +1,2 @@
+ok  	github.com/spacingmind/smind/internal/foo	0.5s
+WARN refresh failed: dial tcp: i/o timeout

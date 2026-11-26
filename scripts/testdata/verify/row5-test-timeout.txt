@@ -1,0 +1,3 @@
+panic: test timed out after 10m0s
+running tests:
+	TestHang (10m0s)

@@ -1,0 +1,1 @@
+go: github.com/foo/bar@v1.2.3: Get "https://proxy.golang.org/github.com/foo/bar/@v/v1.2.3.mod": dial tcp: lookup proxy.golang.org: no such host

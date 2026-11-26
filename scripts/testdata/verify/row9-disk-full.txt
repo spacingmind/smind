@@ -1,0 +1,1 @@
+write /tmp/go-build123/b001/x.a: no space left on device

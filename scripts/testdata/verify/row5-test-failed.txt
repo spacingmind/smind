@@ -1,0 +1,4 @@
+--- FAIL: TestSomething (0.01s)
+    foo_test.go:42: want 1 got 2
+FAIL
+FAIL	github.com/spacingmind/smind/internal/foo	0.034s

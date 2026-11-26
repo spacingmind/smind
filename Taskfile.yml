@@ -104,6 +104,8 @@ tasks:
       - sh scripts/desktop-audit-build_test.sh
       - sh scripts/desktop-audit-smoke_test.sh
       - sh scripts/mobile-check-filter_test.sh
+      - sh scripts/verify-classify_test.sh
+      - sh scripts/verify_test.sh
 
   docs:cli:
     desc: Regenerate the CLI summary blocks of public-docs/cli-reference.md from smind --help
@@ -141,7 +143,7 @@ tasks:
       - cd web && bun install --frozen-lockfile && bun run --filter '@smind/ui' typecheck
       - |
         if command -v shellcheck >/dev/null 2>&1; then
-          shellcheck scripts/macos-sign/lib.sh scripts/macos-sign/sign-notarize.sh scripts/macos-sign/verify.sh scripts/macos-sign/check-release.sh scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh scripts/task-setup.sh scripts/task_setup_test.sh scripts/desktop-audit-build.sh scripts/desktop-audit-build_test.sh scripts/desktop-audit-smoke.sh scripts/desktop-audit-smoke_test.sh
+          shellcheck scripts/macos-sign/lib.sh scripts/macos-sign/sign-notarize.sh scripts/macos-sign/verify.sh scripts/macos-sign/check-release.sh scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh scripts/task-setup.sh scripts/task_setup_test.sh scripts/desktop-audit-build.sh scripts/desktop-audit-build_test.sh scripts/desktop-audit-smoke.sh scripts/desktop-audit-smoke_test.sh scripts/verify-classify.sh scripts/verify-classify_test.sh scripts/verify.sh scripts/verify_test.sh
         else
           echo "shellcheck not installed; skipping install script lint" >&2
         fi
