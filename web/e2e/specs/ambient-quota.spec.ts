@@ -144,7 +144,7 @@ test('AQ-01 a window at 92 percent shows the notice with its name and local rese
   await openSeededTask(app)
   const notice = page.getByTestId('ambient-quota-notice')
   await expect(notice).toBeVisible()
-  await expect(page.getByTestId('ambient-quota-text')).toHaveText(/^5-hour window 92% used, resets \d\d:\d\d$/)
+  await expect(page.getByTestId('ambient-quota-text')).toHaveText(/^5-hour window 92% used, resets (\w{3} )?\d\d:\d\d$/) // a reset past local midnight adds the weekday
   const noticeBox = await notice.boundingBox()
   const cardBox = await page.getByTestId('composer-card').boundingBox()
   if (!noticeBox || !cardBox) throw new Error('no bounding box')
