@@ -3,12 +3,14 @@ package link
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -113,4 +115,32 @@ func TestDirectDialWSSPinMismatchFails(t *testing.T) {
 		t.Fatalf("correct pin: %v", err)
 	}
 	c.Close()
+}
+
+func TestDirectLoginIgnoresProxyEnv(t *testing.T) {
+	var proxied int64
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt64(&proxied, 1)
+		http.Error(w, "no proxying fleet logins", http.StatusBadGateway)
+	}))
+	defer proxy.Close()
+	t.Setenv("HTTPS_PROXY", proxy.URL)
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("NO_PROXY", "")
+
+	srv := fakeDaemon(t, false)
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := DialDirect(ctx, Transport{Kind: KindDirect, URL: wsURL(srv)}, "pw-canary"); err != nil {
+		t.Fatalf("login through a set proxy env failed: %v", err)
+	}
+	if got := atomic.LoadInt64(&proxied); got != 0 {
+		t.Fatalf("the counting proxy saw %d requests", got)
+	}
+	// The loopback peer above is never proxied by Go anyway; the transport
+	// itself is what a non-loopback peer would use, and its Proxy must be nil.
+	if directTransport(&tls.Config{}).Proxy != nil {
+		t.Fatal("directTransport must not use the environment proxy")
+	}
 }

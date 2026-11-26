@@ -96,7 +96,7 @@ func runDoctor(ctx context.Context, args []string, stdout, stderr io.Writer) int
 		ReadFile: os.ReadFile, ReadDir: os.ReadDir, RetentionDays: days,
 		ManagedSettings: claudeManagedSettingsPaths(),
 	}
-	findings := append(doctor.ProviderRetention(denv), doctor.ClaudeAutoMode(denv)...)
+	findings := append(append(doctor.ProviderRetention(denv), doctor.ClaudeAutoMode(denv)...), doctor.OutboundProxy(denv)...)
 	if findings == nil {
 		findings = []doctor.Finding{}
 	}

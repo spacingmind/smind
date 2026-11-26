@@ -65,6 +65,12 @@ func DialDirect(ctx context.Context, t Transport, password string) (Conn, error)
 	return c, nil
 }
 
+// directTransport never uses the environment proxy: a fleet peer is not an
+// outbound provider call, so its login must not be sent to a corporate proxy.
+func directTransport(tlsCfg *tls.Config) *http.Transport {
+	return &http.Transport{TLSClientConfig: tlsCfg} // Proxy left nil, never http.ProxyFromEnvironment
+}
+
 // login exchanges the password for a bearer token at /api/login on the same
 // host. Failures are reported without the password or any response body.
 func login(ctx context.Context, base *url.URL, password string, tlsCfg *tls.Config) (string, error) {
@@ -89,7 +95,7 @@ func login(ctx context.Context, base *url.URL, password string, tlsCfg *tls.Conf
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{
 		Timeout:   loginTimeout,
-		Transport: &http.Transport{TLSClientConfig: tlsCfg, Proxy: http.ProxyFromEnvironment},
+		Transport: directTransport(tlsCfg),
 	}
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)

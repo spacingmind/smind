@@ -323,3 +323,40 @@ func TestClaudeManagedSettingsPathsAreAbsolute(t *testing.T) {
 		}
 	}
 }
+
+func unsetAllProxyVars(t *testing.T) {
+	t.Helper()
+	for _, n := range []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy"} {
+		t.Setenv(n, "")
+	}
+}
+
+func TestDoctorShowsOutboundProxy(t *testing.T) {
+	doctorHome(t)
+	stubDoctor(t, nil, errors.New("down"))
+	t.Setenv("HTTPS_PROXY", "http://u:topsecret@proxy.corp:3128")
+
+	code, out, _ := runDoctorCmd()
+	if code != 0 || !strings.Contains(out, "[info] network: outbound proxy from the environment:") ||
+		!strings.Contains(out, "HTTPS_PROXY=http://proxy.corp:3128") {
+		t.Fatalf("code %d plain out %q", code, out)
+	}
+	if strings.Contains(out, "topsecret") {
+		t.Fatalf("plain output leaks the proxy password: %q", out)
+	}
+	_, jsonOut, _ := runDoctorCmd("--json")
+	if !strings.Contains(jsonOut, "network.proxy") {
+		t.Fatalf("json output misses network.proxy: %q", jsonOut)
+	}
+	if strings.Contains(jsonOut, "topsecret") {
+		t.Fatalf("json output leaks the proxy password")
+	}
+
+	unsetAllProxyVars(t)
+	if code, out, _ = runDoctorCmd(); code != 0 || strings.Contains(out, "network.proxy") {
+		t.Fatalf("unset variables still report a proxy: code %d out %q", code, out)
+	}
+	if _, out, _ := runDoctorCmd("--json"); strings.Contains(out, "network.proxy") {
+		t.Fatalf("json output reports network.proxy with no variable set")
+	}
+}
