@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { NoticeAction, NoticeBanner } from "@/components/ui/notice-banner";
 import { useRolePackCheck } from "@/hooks/use-role-pack";
+import { RolePackReviewDialog } from "@/components/settings/role-pack-review";
 import { bannerText, currentLine } from "@/lib/role-pack-text";
 
 /**
@@ -29,9 +30,9 @@ export function RolePackBanner() {
   const data = check.data;
   if (data === null || data === undefined) return null;
 
-  if (data.seatsWithUpdates > 0) {
-    return (
-      <>
+  return (
+    <>
+      {data.seatsWithUpdates > 0 ? (
         <NoticeBanner
           tone="info"
           testId="role-pack-banner"
@@ -43,14 +44,13 @@ export function RolePackBanner() {
         >
           {bannerText(data.seatsWithUpdates)}
         </NoticeBanner>
-        {reviewOpen ? null : null}
-      </>
-    );
-  }
-
-  return (
-    <p data-testid="role-pack-current" className="text-ui-sm text-foreground-muted">
-      {currentLine(data.packVersion)}
-    </p>
+      ) : (
+        <p data-testid="role-pack-current" className="text-ui-sm text-foreground-muted">
+          {currentLine(data.packVersion)}
+        </p>
+      )}
+      {/* Kept mounted while open even after the refreshed check is all current, so the apply result stays visible. */}
+      <RolePackReviewDialog open={reviewOpen} onOpenChange={setReviewOpen} check={data} />
+    </>
   );
 }
