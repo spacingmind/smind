@@ -259,7 +259,7 @@ test('RP-04 a refused or conflicting apply is shown as received', async ({ app }
   await frame(page, testInfo, '04-conflict', 'dialog')
   await page.getByTestId('role-pack-apply').click()
   const err = page.getByTestId('role-pack-apply-error')
-  await expect(err).toContainText('backup directory /root/x: permission denied')
+  await expect(err).toContainText('Backup directory /root/x: permission denied.')
   await expect(page.getByTestId('role-pack-review')).toBeVisible() // the dialog stays open on error
   expect(stub.applies()).toHaveLength(2)
   await frame(page, testInfo, '04-refused', 'dialog')
@@ -281,7 +281,7 @@ test('RP-06 a failed check shows the error with a Retry', async ({ app }, testIn
   const stub = await stubRolePack(page, { checkErrors: ['profile.rolePack.check: database is locked'] })
   await openSection(app)
   const err = page.getByTestId('role-pack-error')
-  await expect(err).toContainText('database is locked')
+  await expect(err).toContainText('Database is locked.')
   await expect(page.getByTestId('role-pack-retry')).toBeVisible()
   await expect(page.getByTestId('role-pack-banner')).toHaveCount(0)
   await frame(page, testInfo, '06-check-error')
@@ -311,4 +311,22 @@ test('RP-07 a capability take asks first', async ({ app }, testInfo) => {
   await page.getByTestId('role-pack-capability-confirm-confirm').click()
   await expect(page.getByTestId('role-pack-result')).toContainText('Updated lead: permissionMode')
   expect(stub.applies().map((c) => c.params.take)).toEqual([['lead.permissionMode']])
+})
+
+test('RP-08 with nothing to apply by default there is no Apply button and the hint sits above the footer', async ({ app }, testInfo) => {
+  const { page } = app
+  const check = driftedCheck()
+  const lead = check.seats.find((s) => s.name === 'lead')!
+  const instr = lead.fields.find((f) => f.name === 'instructions')!
+  instr.state = 'current'
+  instr.diff = ''
+  const stub = await stubRolePack(page, { check })
+  await openSection(app)
+  await page.getByTestId('role-pack-review-open').click()
+  await expect(page.getByTestId('role-pack-review')).toBeVisible()
+  await expect(page.getByTestId('role-pack-apply')).toHaveCount(0)
+  await expect(page.getByTestId('role-pack-close')).toBeVisible()
+  await expect(page.getByTestId('role-pack-nothing-by-default')).toHaveText('Nothing to apply by default. Use Take on a field to change it.')
+  expect(stub.applies()).toHaveLength(0)
+  await frame(page, testInfo, '08-nothing-by-default', 'dialog')
 })
