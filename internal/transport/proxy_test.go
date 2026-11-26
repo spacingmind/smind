@@ -347,7 +347,7 @@ func TestProxy_NoProxyBypasses(t *testing.T) {
 	})
 	t.Run("cidr", func(t *testing.T) {
 		client := Client(utls.HelloChrome_Auto,
-			WithProxyConfig(&httpproxy.Config{HTTPProxy: proxy.url("", ""), NoProxy: "10.0.0.0/8"}),
+			WithProxyConfig(&httpproxy.Config{HTTPProxy: proxy.url("", ""), NoProxy: "10.1.0.0/16"}),
 			WithDirectDialer(directTo(u.plainAddr())),
 		)
 		if body := get(t, client, u.plainTarget("10.1.2.3")+"/"); body != "ok-plain" {
@@ -409,7 +409,7 @@ func TestProxy_LoopbackNeverProxied(t *testing.T) {
 		{"127.1", true},
 		{"0x7f.0.0.1", true},
 		{"2130706433", true},
-		{"0.0.0.0", true},
+		{net.IPv4zero.String(), true}, // the unspecified address
 		{"example.com", false},
 		{"10.0.0.1", false},
 		{"10.1.2.3", false},
