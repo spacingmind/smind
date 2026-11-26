@@ -44,4 +44,5 @@ GLM peer 1 writes the classification table to a scratch file; the Lead reviews i
 - AC3: `grep -rnF "plans/active/<name>"` over the repo for each of the 66 moved names returns nothing; links in docs/ (ROADMAP, ADRs), plans, YAML `planRef` fields and a few code comments were rewritten, nothing else.
 - AC4: `go test ./internal/hygiene/ ./internal/providers/` and `go test ./cmd/smind -run 'Doc|Drift'` pass; no baseline line was fixed by the moves, so the baseline is unchanged.
 - AC5: this file moved to `completed/` in the last commit.
+- Review follow-up (Steward): `docs/plans/active/human-verification-backlog.md` lists the 75 "not verified" items (38 plans) of the moved plans so they stay visible; moved plans whose header said "Status: active" or "spec" now say "Status: completed (2026-11-26)".
 - Not verified: the PR-merge claims of the 14 Closed lines rest on `git log origin/develop --grep '(#N)'` plus the plans' own text, not on re-running their tests.
