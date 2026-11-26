@@ -167,6 +167,16 @@ the note says why and the summary stays:
 | another history is loading / this chat is running | try again in a moment, or when the chat's run ends |
 | large tool output was removed after the retention period | the daily retention pass deleted the trimmed copies of large tool output; the summary stays, and Load full history still works while the provider's session file exists |
 
+## Behind a proxy
+
+sMind sends its own provider calls (model requests, sign-in and token refresh, usage checks) through the proxy named in `HTTPS_PROXY` and `HTTP_PROXY`, and skips it for hosts matched by `NO_PROXY` (host names, `.suffix`, IP addresses and CIDR ranges); the lower-case spellings work too. `ALL_PROXY` is not used. The variables are read when the daemon starts, so restart it after changing them.
+
+- Only `http://` proxy URLs are supported for these calls (HTTPS goes through a CONNECT tunnel and keeps its TLS verification). A proxy with another scheme, such as `socks5://`, makes those calls fail with a clear message instead of going direct.
+- Traffic to this machine (`localhost`, `127.0.0.1`, `[::1]`, `*.localhost`), the agent browser and fleet peers never use the proxy, whatever `NO_PROXY` says.
+- Credentials in the proxy URL are sent to the proxy only and are never printed.
+- The agent programs sMind starts (and `gh`) keep your environment as it is and decide for themselves.
+- `smind doctor` shows which proxy variables are set (host only, never credentials) and warns about a proxy scheme that is not supported.
+
 ## The daemon uses a lot of memory
 
 Run `smind debug memory`. The daemon keeps only a bounded amount of finished
