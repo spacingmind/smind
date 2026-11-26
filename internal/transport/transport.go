@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -146,11 +147,17 @@ func (rt *RoundTripper) ConnectionState() (utls.ConnectionState, bool) {
 	return rt.state, rt.haveState
 }
 
+// numericHostRe matches all-numeric or hex dotted host spellings (127.1,
+// 0x7f.0.0.1, 2130706433) that ParseIP rejects but libc may resolve to a
+// loopback address.
+var numericHostRe = regexp.MustCompile(`^(0[xX][0-9a-fA-F]*|[0-9]+)(\.(0[xX][0-9a-fA-F]*|[0-9]+))*$`)
+
 // neverProxyHost reports whether host must never be sent through a proxy:
 // localhost and any *.localhost name, loopback IPs and the unspecified
-// address. The rule is applied before the proxy configuration and cannot be
-// configured away, so a misconfigured proxy can never intercept local
-// traffic.
+// address (zoned IPv6 spellings included), and all-numeric spellings that
+// libc may resolve to a loopback address. The rule is applied before the
+// proxy configuration and cannot be configured away, so a misconfigured
+// proxy can never intercept local traffic.
 func neverProxyHost(host string) bool {
 	host = strings.ToLower(host)
 	host = strings.TrimSuffix(host, ".")
@@ -162,10 +169,14 @@ func neverProxyHost(host string) bool {
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
 	}
-	if ip := net.ParseIP(strings.Trim(host, "[]")); ip != nil {
+	host = strings.Trim(host, "[]")
+	if i := strings.Index(host, "%"); i >= 0 {
+		host = host[:i]
+	}
+	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback() || ip.IsUnspecified()
 	}
-	return false
+	return numericHostRe.MatchString(host)
 }
 
 // proxyFor decides which proxy a target URL goes through, or nil for direct.
