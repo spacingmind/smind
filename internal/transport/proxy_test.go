@@ -1,6 +1,7 @@
 package transport
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/x509"
@@ -659,4 +660,110 @@ func TestProxy_ConnectHeaderIsCapped(t *testing.T) {
 	if elapsed >= 5*time.Second {
 		t.Fatalf("dialViaProxy() took %v, want < 5s", elapsed)
 	}
+}
+
+func TestProxy_ConnectReplyWithTrailingBytesRefused(t *testing.T) {
+	// startRawProxy plays a raw CONNECT proxy: it reads the request headers,
+	// then writes reply in ONE Write (so any trailing bytes land in the
+	// client's bufio buffer together with the reply) and blocks on io.Copy
+	// until the client closes. It counts accepted connections and records
+	// whether any bytes arrive after the reply — the TLS ClientHello would.
+	startRawProxy := func(t *testing.T, reply string) (addr string, accepted *atomic.Int32, gotHandshake *atomic.Bool, waitDone func() bool) {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("net.Listen() error = %v", err)
+		}
+		t.Cleanup(func() { _ = ln.Close() })
+
+		var conns atomic.Int32
+		var handshake atomic.Bool
+		done := make(chan struct{})
+		var closeOnce sync.Once
+		go func() {
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				conns.Add(1)
+				go func(conn net.Conn) {
+					defer conn.Close()
+					br := bufio.NewReader(conn)
+					for {
+						line, err := br.ReadString('\n')
+						if err != nil {
+							return
+						}
+						if line == "\r\n" || line == "\n" {
+							break
+						}
+					}
+					if _, err := conn.Write([]byte(reply)); err != nil {
+						return
+					}
+					_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+					buf := make([]byte, 16)
+					if n, _ := conn.Read(buf); n > 0 {
+						handshake.Store(true)
+					}
+					_ = conn.SetReadDeadline(time.Time{})
+					_, _ = io.Copy(io.Discard, conn)
+					closeOnce.Do(func() { close(done) })
+				}(conn)
+			}
+		}()
+		return ln.Addr().String(), &conns, &handshake, func() bool {
+			select {
+			case <-done:
+				return true
+			case <-time.After(3 * time.Second):
+				return false
+			}
+		}
+	}
+
+	// A 200 reply with 4 trailing bytes in the same Write: the junk must be
+	// caught in the client's bufio buffer and the tunnel must not open.
+	addr, accepted, gotHandshake, waitDone := startRawProxy(t, "HTTP/1.1 200 OK\r\n\r\njunk")
+	rt := New(utls.HelloChrome_Auto, WithProxyConfig(&httpproxy.Config{}))
+	proxyURL := &url.URL{Scheme: "http", Host: addr}
+
+	conn, err := rt.dialViaProxy(context.Background(), proxyURL, "example.com:443")
+	if err == nil || !strings.Contains(err.Error(), "before the tunnel opened") {
+		t.Errorf("dialViaProxy() error = %v, want data before the tunnel opened", err)
+	}
+	if conn != nil {
+		conn.Close()
+		t.Fatal("dialViaProxy() conn != nil, want nil for a reply with trailing bytes")
+	}
+	if !waitDone() {
+		t.Fatal("proxy handler did not finish within 3s")
+	}
+	if gotHandshake.Load() {
+		t.Error("proxy saw bytes after the reply, want none (the exchange must fail before any handshake)")
+	}
+	if n := accepted.Load(); n != 1 {
+		t.Errorf("proxy accepted %d connections, want 1", n)
+	}
+
+	t.Run("clean reply still opens the tunnel", func(t *testing.T) {
+		addr, accepted, _, waitDone := startRawProxy(t, "HTTP/1.1 200 OK\r\n\r\n")
+		rt := New(utls.HelloChrome_Auto, WithProxyConfig(&httpproxy.Config{}))
+		proxyURL := &url.URL{Scheme: "http", Host: addr}
+
+		conn, err := rt.dialViaProxy(context.Background(), proxyURL, "example.com:443")
+		if err != nil {
+			t.Fatalf("dialViaProxy() error = %v, want nil for a clean reply", err)
+		}
+		if conn == nil {
+			t.Fatal("dialViaProxy() conn = nil, want a tunnel for a clean reply")
+		}
+		conn.Close()
+		if !waitDone() {
+			t.Fatal("proxy handler did not finish within 3s")
+		}
+		if n := accepted.Load(); n != 1 {
+			t.Errorf("proxy accepted %d connections, want 1", n)
+		}
+	})
 }
