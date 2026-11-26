@@ -1,5 +1,7 @@
 # Task hierarchy tiers (supervisor → leader → coder), made visible and manageable
 
+Open: explicit role column (decision 6.1) is Human-gated; no AC other than that is open per the file itself
+
 **Question (2026-10-11):** does smind now manage tasks like a reference workbench, but with
 *clearer layering*? The user runs a 3-tier workflow every day (a supervisor,
 then leaders, then coders). On a reference workbench the sub-agents are shown mostly flat,

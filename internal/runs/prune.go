@@ -14,7 +14,7 @@ import (
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
-// Run events retention (docs/plans/active/run-events-retention.md): finished
+// Run events retention (docs/plans/completed/run-events-retention.md): finished
 // runs older than the configured number of days lose their event rows but keep
 // the run row, usage, failure class and a final text.
 

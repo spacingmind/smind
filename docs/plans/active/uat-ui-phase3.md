@@ -1,5 +1,7 @@
 # UAT UI phase 3 — the Playwright regression suite in CI
 
+Open: mutation per spec recorded and budget measured on a real GitHub runner not done; no Actions run verified
+
 Parent: [uat-ui.md](uat-ui.md) (phase 1 catalogue and harness, phase 2 fixes). This is the spec for the last phase: turn the journeys that found real bugs into a regression suite that runs in CI against a real daemon with a fake agent. Nothing in this PR changes code; it asks the Human for the decisions marked **Decision**.
 Size: L (7) — scope 2 (new e2e package, CI job, a daemon fixture), PRs 2 (suite plus the CI job; ordering matters), risk 1 (a new CI job on every PR, flake risk), decisions 1 (new dev dependency, required-check policy), verification 1 (the suite is its own verification).
 

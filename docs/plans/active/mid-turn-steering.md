@@ -1,5 +1,7 @@
 # Mid-turn steering (ADR-0021 amendment 2026-11-09)
 
+Open: spec only - ADR-0021 amendment decisions D1-D10 unanswered, nothing implemented
+
 Status: **spec, not started.** Nothing is implemented until the Human answers the decisions D1-D10 in the
 [ADR-0021 amendment](../../decisions/0021-per-chat-prompt-queue.md#amendment-2026-11-09--mid-turn-steering-proposed). Size: L (wsapi, store event, provider runners, UI on two
 surfaces): a validation contract (ADR-0045) per PR.

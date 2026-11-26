@@ -12,7 +12,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
-// Saved grants over the wire (docs/plans/active/saved-grants.md). All three
+// Saved grants over the wire (docs/plans/completed/saved-grants.md). All three
 // methods are human-only: none is on RunScopedMethods or in a plugin
 // capability, each refuses a run-scoped caller, and all three names are on
 // permpolicy.HumanOnlyRPCs so the policy floor denies a shell command that

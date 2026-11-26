@@ -1,5 +1,7 @@
 # Plugins Wave D: plugin-contributed providers (AC33, AC36)
 
+Open: PD2b (plugin_unavailable gate, send guard, kill on disable, failover), PD3 (UI/CLI/MCP) and PD4 (docs, example, release note) not done
+
 Status: **spec, 2026-11-01. Nothing is implemented until the Steward says this spec is accepted.** Parent plan: [plugins.md](plugins.md) (item PD, rows AC33, AC36);
 decisions: [ADR-0042](../../decisions/0042-plugin-system.md) section 7 (accepted) and [ADR-0046](../../decisions/0046-provider-spec-harness-overlay.md) (provider = spec + harness + overlay).
 Related plans: [providers-epic.md](providers-epic.md), [picker-gate-reasons.md](picker-gate-reasons.md), [run-failure-classes.md](run-failure-classes.md), [plugins-wave-c.md](plugins-wave-c.md) (style).

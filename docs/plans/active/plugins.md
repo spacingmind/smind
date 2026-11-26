@@ -1,5 +1,7 @@
 # Plugin system (ADR-0042)
 
+Open: Wave D incomplete (PD2b/PD3/PD4); DOC.1 second example and example CI job not done; PC checkboxes stale
+
 Status: **spec only, 2026-10-24.** [ADR-0042](../../decisions/0042-plugin-system.md) is **Proposed**; no implementation starts until the Human answers its open
 questions. This plan assumes the ADR's recommendations; where an answer changes the plan, the item says so.
 

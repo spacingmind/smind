@@ -1,7 +1,7 @@
 import type { BrowserProviderReach, BrowserReach } from "@/lib/browser-settings-types";
 
 /**
- * Item 8 of `docs/plans/active/browser-for-agents-settings-ui.md` (AC8): the
+ * Item 8 of `docs/plans/completed/browser-for-agents-settings-ui.md` (AC8): the
  * "Which agents get it" list. Pure renderer of the daemon's `providers` reach
  * table; the list is never hard-coded, so state is carried by the group titles
  * and the per-entry text, never by colour.

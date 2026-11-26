@@ -3,7 +3,7 @@
 ## Status
 
 **Accepted — 2026-11-01, Supervisor default, Human may veto.** The Human was away; the Steward accepted the spec
-(`docs/plans/active/run-failure-classes.md`) and decisions D1–D3 below as Supervisor defaults. A veto changes the PR named next to it
+(`docs/plans/completed/run-failure-classes.md`) and decisions D1–D3 below as Supervisor defaults. A veto changes the PR named next to it
 in the plan. Amends [ADR-0041](0041-in-smind-orchestration.md) B1 (the typed `failureKind`) and F1/F2b (cooldown, failover), and
 points at [ADR-0028](0028-account-usage-windows.md) (usage windows and routing failover, whose bare-429 back-off versus hard
 rejection split this reuses).

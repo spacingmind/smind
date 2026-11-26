@@ -1,5 +1,7 @@
 # Multi-agent orchestration primitives + proxy metering
 
+Open: Step 3 as specified (lead + 2 peers on a non-smind project) not done; live-provider usage check unverified; Step 4 demand-gated, not started
+
 Two tracks, one plan, because they meet at the same place: a **run**.
 
 - **Track O (orchestration).** Let a smind *user* run a lead/peer

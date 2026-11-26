@@ -11,7 +11,7 @@ import (
 )
 
 // runPermissionGrants is `smind permission grants ls|show|revoke`: the human's
-// view of saved grants (docs/plans/active/saved-grants.md). The whole
+// view of saved grants (docs/plans/completed/saved-grants.md). The whole
 // `smind permission` group is human-only (permpolicy.HumanOnlyCLI), so an agent
 // shell cannot run these.
 func runPermissionGrants(ctx context.Context, args []string, stdout, stderr io.Writer) int {

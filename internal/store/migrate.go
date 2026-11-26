@@ -668,7 +668,7 @@ var migrations = []migration{
 		},
 	},
 	{
-		// Run failure classes (docs/plans/active/run-failure-classes.md, D1):
+		// Run failure classes (docs/plans/completed/run-failure-classes.md, D1):
 		// a rate_limited row with a window or a reset time is a plan window
 		// (plan_window_exhausted); the rest stay the residual rate_limited.
 		// Idempotent (every Open runs it): the residual never carries a window
@@ -698,7 +698,7 @@ var migrations = []migration{
 		},
 	},
 	{
-		// Saved grants (docs/plans/active/saved-grants.md): the class and the
+		// Saved grants (docs/plans/completed/saved-grants.md): the class and the
 		// runner opt-in. The table is new in the same release as the columns, so
 		// schema.sql already carries them; this keeps a database made from an
 		// earlier build of the branch working.

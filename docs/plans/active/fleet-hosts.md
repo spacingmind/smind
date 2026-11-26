@@ -1,5 +1,7 @@
 # Fleet: connected hosts (ADR-0048)
 
+Open: AC14 out rows, AC25 mobile device frames + two chips; follow-ups: validators re-run on 0.17, hello channel binding, remote tree guard, real two-daemon runs
+
 Status: active (2026-10-31). Binding text: [`docs/decisions/0048-fleet-connected-hosts.md`](../../decisions/0048-fleet-connected-hosts.md) (Accepted; D1–D7 are
 the Human's answers, S1–S18 are Supervisor defaults 2026-10-31, Human may veto; a veto changes the PR named in the ADR's table).
 

@@ -1,5 +1,7 @@
 # Permission and question cards: one calm surface, a clear Allow/Deny, Deny reason on request (web + mobile)
 
+Open: PR to wave/desktop not landed; mobile question-card and failed-answer frames, real-device and real-window desktop frames not done
+
 Status: active (2026-11-15). Size: M (6): scope 2 (web and mobile), PRs 1, risk 1 (UI, but the cards gate every agent run), decisions 0 (the Human decided the shared badge stays), verification 2 (light/dark frames at 1280 and 390, both test suites).
 
 ## Why

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Page initiators (docs/plans/active/browser-for-agents-live-findings.md).
+// Page initiators (docs/plans/completed/browser-for-agents-live-findings.md).
 //
 // The browser makes requests of its own that no page asked for (the Google sign-in
 // cookie query, search pre-connects, update and metrics services). The proxy refuses

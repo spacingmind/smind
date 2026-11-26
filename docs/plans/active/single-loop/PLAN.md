@@ -1,5 +1,7 @@
 # Single loop plan
 
+Open: After-check table filled but its status box unticked; reviewer-seat decision and Check-in 1 answer pending with the Human; AGENTS.md links to this folder
+
 Audit date: 2026-10-25
 Repo and commit: smind, `origin/develop` at `79f9b94e` (role pack at `internal/profiles/rolepack.go`, ADR-0041 in `docs/decisions/0041-in-smind-orchestration.md`)
 

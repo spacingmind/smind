@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Refuses to let a release be signed unless it is a real, published, stable release whose tag commit
 # is on develop. Runs BEFORE any secret is in the environment (no secret is read here), in the signing
-# workflow's own download step. docs/plans/active/desktop-notarization-prep.md, ADR-0060.
+# workflow's own download step. docs/plans/completed/desktop-notarization-prep.md, ADR-0060.
 #
 # usage: check-release.sh --tag vX.Y.Z --repo owner/name        (run inside a clone that has the tags and
 #        origin/develop; needs `gh` with a read token in GH_TOKEN, `git`, `jq`)

@@ -1,4 +1,4 @@
-# DISABLED SKELETON (docs/plans/active/desktop-notarization-prep.md, ADR-0060 draft). It does
+# DISABLED SKELETON (docs/plans/completed/desktop-notarization-prep.md, ADR-0060 draft). It does
 # nothing until the Human has an Apple Developer account, has added the six SMIND_* secrets to the
 # protected Environment `macos-signing`, and has set the repository variable
 # MACOS_SIGNING_ENABLED to `true`. Without the variable the `gate` job says why and the signing job is

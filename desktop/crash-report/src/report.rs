@@ -1,6 +1,6 @@
 //! Static pieces of a report: the directory the shell's crashes live in, time
 //! formatting without a time crate, Go-vocabulary os/arch, the panic-message
-//! allow-list and the dedupe frame (docs/plans/active/crash-capture-desktop.md).
+//! allow-list and the dedupe frame (docs/plans/completed/crash-capture-desktop.md).
 
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;

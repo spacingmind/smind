@@ -1,5 +1,7 @@
 # Mobile push notifications
 
+Open: AC24 native checklist on a real Android device (PR 7 runbook never run); PR 8 iOS blocked on Human decision H2, not started
+
 **Status 2026-10-25 (plans hygiene): PARTIAL.** PRs 1-6 are merged (#481, #487, #499, #520, #493, #517, plus the #521 follow-up); AC1-AC23 and AC25 are covered by automated tests (see Validation). Open: AC24, the native checklist on a real Android device with a development build and the Human's own Firebase/Expo project (PR 7; runbook below, never run); PR 8 iOS (Notification Service Extension, APNs) is blocked on Human decision H2 (no Apple program) and is not started.
 
 Size: **XL (10)** by the protocol table — scope 2 (daemon + mobile + native config), PRs 2 (seven, with ordering), risk 2 (secrets, crypto, a

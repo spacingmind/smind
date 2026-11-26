@@ -1,5 +1,7 @@
 # Orchestration roles: Supervisor → Lead → Peer natively in smind
 
+Open: parked until the section 2 trigger fires; Human decision pending: keep parked or move to completed as not-built
+
 Size: L (7) — scope 2, PRs 1, risk 1, decisions 2, verify 1.
 
 **Status 2026-10-25 (plans hygiene): PARTIAL, PARKED BY DESIGN (ADR-0041 says this plan keeps its parked status).** Built elsewhere, in reduced form, under ADR-0041 (plan `completed/in-smind-orchestration.md`): the seat contract and daemon-side profile (#561, #564), the built-in `smind` MCP entry with run identity and a fail-closed method allowlist (#565), admission for seat callers (#567), the role pack (#566), and a per-tree spend cap (#602, #604; the budget part of R6). R1 (`needs-continue` disposition) is #373. Still open, exactly: R5 per-profile `maxTurns` / limits, R6 `handoff_submit` / `handoff_review` and derived dispositions beyond `needs-continue`, R8 sizing and the structured `brief` with write-scope overlap warning, and tier-scoped learned skills. Trigger to build (section 2) has not fired. ADR-0027 is still Proposed.

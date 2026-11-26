@@ -1,5 +1,7 @@
 # Run skeleton storage: keep the skeleton, rebuild the full history from the provider
 
+Open: parked: fleet skeletonRev mirror, Codex thread/read, smind runs skeletonize, runs.skeletonRetentionDays; Validation section is a placeholder
+
 Status: **accepted, in implementation** (2026-11-05, Human decision: H1–H8 all as recommended, with H7 narrowed below).
 Decision record: [ADR-0053](../../decisions/0053-run-skeleton-storage-and-native-history-rebuild.md) (**Accepted**).
 Order of work (Human, 2026-11-05): PR-A docs; PR0 read-only measurement of the real data, thresholds frozen from it; PR1 write-time

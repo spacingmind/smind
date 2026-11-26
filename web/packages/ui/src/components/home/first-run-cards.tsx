@@ -31,7 +31,7 @@ export function agentSummaryShort(providers: ProviderInfo[], health: Record<stri
 }
 
 /**
- * The home screen of a machine with no project (docs/plans/active/home-and-sidebar-ui.md PR 3): the composer cannot be used yet, so
+ * The home screen of a machine with no project (docs/plans/completed/home-and-sidebar-ui.md PR 3): the composer cannot be used yet, so
  * the two things that unblock it are the whole page, as two cards built from the Get started block's own steps and actions:
  * *Add a project* (the same `onAddProject` as the card) and *Set up providers* (the same Settings -> Providers navigation and the same
  * readiness sentence). Nothing here sends a prompt.

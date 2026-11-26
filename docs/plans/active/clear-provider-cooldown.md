@@ -1,5 +1,7 @@
 # Clear a provider cooldown ("I reset my quota, retry now")
 
+Open: mobile follow-up + local full task test unchecked (disk full; CI is the check)
+
 Size: M (5) — scope 2, PRs 1, risk 1, decisions 0, verify 1.
 
 After a provider rate limit the daemon holds a provider cooldown (ADR-0041 F1)

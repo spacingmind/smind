@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Verifies an assembled release dist/ directory as one consistent set
-// (docs/plans/active/desktop-release-hygiene.md, item 1): source version
+// (docs/plans/completed/desktop-release-hygiene.md, item 1): source version
 // fields, daemon archives, desktop assets, checksums.txt + minisign
 // signature, latest.json, and the versions embedded in the sidecar
 // binaries. Read-only; pure functions + CLI; no dependencies; tar/unzip

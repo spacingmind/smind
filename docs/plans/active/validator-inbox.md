@@ -1,5 +1,7 @@
 # Validator seat and Human inbox (ADR-0045)
 
+Open: P3-P5 (AC15-AC20) landed as #665/#670/#671 but are neither ticked nor validated in this file; AC13 flaky rule delivered as prompt text, not daemon code
+
 Status: active (2026-10-27). Binding text: [`docs/decisions/0045-validator-and-inbox.md`](../../decisions/0045-validator-and-inbox.md) (Accepted, all 12 answers as recommended).
 
 Size: XL as one item (9) → split into five L/M PRs below, one Lead, sequential, non-stacked. Scope 2, PRs 2, risk 2 (authority: who may issue a verdict; permissions surface), decisions 0 (ADR accepted), verification 2 (UI screenshots, fake-LLM seat run).

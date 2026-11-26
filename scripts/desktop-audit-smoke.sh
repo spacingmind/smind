@@ -11,7 +11,7 @@
 #      never made for an app that failed (1), and it has a short timeout.
 #
 # An app that keeps running is killed after the timeout and fails. See
-# docs/plans/active/desktop-audit-guard-wiring.md.
+# docs/plans/completed/desktop-audit-guard-wiring.md.
 #
 # Usage: scripts/desktop-audit-smoke.sh <path to smind-desktop>
 # Env:   SMOKE_TIMEOUT        seconds to wait for the first refusal (default 15)

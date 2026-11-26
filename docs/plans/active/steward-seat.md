@@ -1,5 +1,7 @@
 # Steward seat: permission policy engine and review loop (ADR-0047)
 
+Open: the Human own pilot (AC30 second half: policy enabled for one workspace) not done; S2b steward_annotate deferred until after S4 evidence
+
 Status: active (2026-10-31). Binding text: [`docs/decisions/0047-steward-seat.md`](../../decisions/0047-steward-seat.md) (Proposed; every decision D1–D18 is a Supervisor default
 2026-10-31 under the Human's directive, Human may veto; a veto changes the PR named in the ADR's table).
 

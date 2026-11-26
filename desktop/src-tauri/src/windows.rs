@@ -9,7 +9,7 @@
 //! Task windows use the standard chrome, deny `window.open`, keep the
 //! navigation guard, and are DESTROYED on close (the hide-to-tray handler is
 //! `main`'s alone); closing frees the pool slot. See
-//! `docs/plans/active/desktop-multi-window.md` and the ADR-0013 amendment.
+//! `docs/plans/completed/desktop-multi-window.md` and the ADR-0013 amendment.
 
 use tauri::webview::{NewWindowResponse, WebviewWindowBuilder};
 use tauri::{AppHandle, Manager, State, WindowEvent};

@@ -1,4 +1,4 @@
-//! The shell's crash-capture wiring (docs/plans/active/crash-capture-desktop.md, AC5).
+//! The shell's crash-capture wiring (docs/plans/completed/crash-capture-desktop.md, AC5).
 
 /// crash-shell-installs-first-in-run: `run()` installs the crash hook before anything else
 /// (only the audit-build guard, which may exit, may come first).

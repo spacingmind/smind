@@ -1,5 +1,7 @@
 # Browser for agents: acceptance criteria for the implementation PRs
 
+Open: Windows Job-Object check, persistent profiles, desktop proxy origin deny entry; some Left items shipped later (PR5 #969, B3 #971, PR6 #970)
+
 Governing ADR: `docs/decisions/0061-browser-for-agents.md` (DRAFT; nothing here starts until the Human has answered its decisions). This file is the spec the later PRs are written against: acceptance criteria and named tests first. One PR at a time, each from a fresh base, never stacked. Order (recommendation 3 of the ADR): B1 broker and policy, B2 headless host, B3 settings toggle and allowlist, B4 desktop host.
 
 ## Provider reach (evidence, read from the daemon code)

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Shared by sign-notarize.sh and verify.sh (docs/plans/active/desktop-notarization-prep.md,
+# Shared by sign-notarize.sh and verify.sh (docs/plans/completed/desktop-notarization-prep.md,
 # ADR-0060 draft). Sourced, never run.
 #
 # The rules every script here keeps:

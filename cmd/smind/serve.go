@@ -125,7 +125,7 @@ func cmdServe(args []string) int {
 	}
 	wm.SetWorktreesConfig(wtSettings)
 
-	// Per-task scratch dirs (docs/plans/active/task-scratch.md): every agent
+	// Per-task scratch dirs (docs/plans/completed/task-scratch.md): every agent
 	// run gets scratch/<taskID>/ as TMPDIR, closed tasks' dirs are cleaned on
 	// archive/delete and swept periodically, and the shared build caches join
 	// the launch env. scratchW.start (below, once the server exists) attaches
