@@ -36,8 +36,7 @@ import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { RunConfigToolbar, type LiveRunControls, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
 import { RunConfigOptions } from "@/components/run-config-options";
 import { Button } from "@/components/ui/button";
-import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
-import { formatCombo } from "@/keyboard/shortcut-string";
+import { useActionHandler } from "@/keyboard/keyboard-provider";
 import { COMPOSER_ACTION_BUTTON_CLASS, COMPOSER_CARD_CLASS } from "@/lib/composer-shell";
 import { reasoningLevels } from "@/lib/thinking-levels";
 import type { AttachmentMeta, AttachmentRequest, ChatQueueItem, ConfigOptionParams, PermissionSettings, TaskGit, ThinkingLevel } from "@/lib/types";
@@ -76,7 +75,7 @@ export function composerPlaceholder({
 /**
  * The task composer (ui-redesign-parity Item 10, reshaped to the input
  * card anatomy by web-ui-dogfood-polish Item 5, then to ZCode's card with
- * Paseo's chips and focus hint by docs/plans/active/composer-redesign.md):
+ * Paseo's chips by docs/plans/active/composer-redesign.md):
  * one rounded card whose top is the autogrowing prompt textarea (two rows
  * at rest) and whose bottom edge is the toolbar -- icon+label run-config
  * pills on the left, the icon-only Send/Stop cluster on the right -- with
@@ -214,7 +213,6 @@ export function Composer({
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [focused, setFocused] = useState(false);
   const attach = useAttachmentDraft(taskId, chatId);
   const [caret, setCaret] = useState(0);
   // The caret to restore once the controlled value lands (after accepting a mention).
@@ -260,12 +258,8 @@ export function Composer({
   }, [prefill]);
 
   // `composer.focus` is in the shortcut registry but nothing claimed it
-  // until now. The hint shows the *effective* combo (a user rebinding is
-  // honoured; an unbound action shows nothing), Paseo-style: only while the
-  // box is unfocused and empty, and only where a keyboard exists (md+).
+  // until now.
   useActionHandler("composer.focus", () => textareaNode.current?.focus());
-  const { bindings, isMac } = useKeyboard();
-  const focusCombo = bindings.find((b) => b.id === "composer-focus")?.effectiveCombo ?? null;
 
   const canSend = connected && taskId !== null;
   const running = runningRunId !== null;
@@ -564,8 +558,6 @@ export function Composer({
   const hasText = draft.value.trim() !== "";
   const noImageProvider = providers.find((p) => p.id === provider);
   const showImageHint = attachLimits !== null && noImageProvider?.images === "no" && attachItems.some((i) => i.kind === "image");
-  // Not while the tray is showing: the hint sits at the card's top-right and would read as part of the tray row.
-  const showFocusHint = focusCombo !== null && canSend && !focused && draft.value === "" && attachItems.length === 0;
 
   return (
     <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl @[1100px]/chat:max-w-4xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
@@ -621,24 +613,13 @@ export function Composer({
           onCaret={setCaret}
           textareaProps={slashState.open ? slashState.textareaProps : mentionState.textareaProps}
           onFocus={() => {
-            setFocused(true);
             useComposerInsertStore.getState().setTarget(insertKey);
           }}
-          onBlur={() => setFocused(false)}
           onPaste={handlePaste}
           placeholder={composerPlaceholder({ connected, hasTask: taskId !== null, running })}
           disabled={inactive}
           className="rounded-none border-0 bg-transparent px-4 pb-1 pt-3.5 focus-visible:border-transparent focus-visible:ring-0"
         />
-        {showFocusHint && (
-          <span
-            data-testid="composer-focus-hint"
-            aria-hidden
-            className="pointer-events-none absolute right-4 top-3.5 text-ui-sm text-foreground-subtlest max-md:hidden"
-          >
-            {formatCombo(focusCombo, isMac)} to focus
-          </span>
-        )}
 
         {formError && (
           <p role="alert" className="px-4 pb-1 text-ui-sm text-destructive">

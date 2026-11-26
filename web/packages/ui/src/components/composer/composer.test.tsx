@@ -1592,50 +1592,6 @@ describe("Composer redesign (composer-redesign plan)", () => {
     expect(textarea()).toHaveFocus();
   });
 
-  it("focus hint shows the effective combo when empty and unfocused, hides on focus or text", () => {
-    renderComposer();
-    expect(screen.getByTestId("composer-focus-hint")).toHaveTextContent("Ctrl+L to focus");
-
-    fireEvent.focus(textarea());
-    expect(screen.queryByTestId("composer-focus-hint")).not.toBeInTheDocument();
-
-    fireEvent.blur(textarea());
-    expect(screen.getByTestId("composer-focus-hint")).toBeInTheDocument();
-
-    fireEvent.change(textarea(), { target: { value: "typing" } });
-    expect(screen.queryByTestId("composer-focus-hint")).not.toBeInTheDocument();
-  });
-
-  it("focus hint follows a rebound shortcut and hides when unbound", () => {
-    const props = {
-      client: new FakeWsClient(),
-      taskId: 1,
-      chatId: 10,
-      isDefaultChat: true,
-      boundProvider: null,
-      connected: true,
-      runningRunId: null,
-      queuedItems: [],
-      onCancelQueued: async () => {},
-      onSubmit: async () => ({ kind: "started" as const, runId: "r" }),
-      onStop: async () => {},
-    };
-    const { unmount } = render(
-      <KeyboardProvider readOverrides={() => ({ "composer-focus": "Mod+J" })}>
-        <Composer {...props} />
-      </KeyboardProvider>,
-    );
-    expect(screen.getByTestId("composer-focus-hint")).toHaveTextContent("Ctrl+J to focus");
-    unmount();
-
-    render(
-      <KeyboardProvider readOverrides={() => ({ "composer-focus": "" })}>
-        <Composer {...props} />
-      </KeyboardProvider>,
-    );
-    expect(screen.queryByTestId("composer-focus-hint")).not.toBeInTheDocument();
-  });
-
   it("placeholder does not advertise unsupported features", () => {
     const { rerender } = renderComposer();
     for (const running of [null, "run-1"]) {
