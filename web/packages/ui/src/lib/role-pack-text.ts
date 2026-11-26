@@ -43,12 +43,12 @@ export function outcomeText(r: RolePackApplyResult): string {
   const fields = r.fields.join(", ");
   switch (r.outcome) {
     case "updated":
-      return `Updated ${fields}`;
+      return `Updated ${r.seat}: ${fields}`;
     case "changed_meanwhile":
       return `${r.seat} changed since the check; the list was refreshed, review it again`;
     case "failed":
       return `Failed: ${r.error ?? ""}`;
     case "dry_run":
-      return `Would update ${fields}`;
+      return `Would update ${r.seat}: ${fields}`;
   }
 }

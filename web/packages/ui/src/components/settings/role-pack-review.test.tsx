@@ -161,7 +161,7 @@ describe("role-pack review dialog", () => {
     });
     fireEvent.click(screen.getByTestId("role-pack-apply"));
     expect(await screen.findByTestId("role-pack-backup")).toHaveTextContent("/home/u/backups/role-pack/20261126T101500Z-pack-v9");
-    expect(screen.getByTestId("role-pack-result")).toHaveTextContent("Updated instructions");
+    expect(screen.getByTestId("role-pack-result")).toHaveTextContent("Updated lead: instructions");
     await waitFor(() => expect(count(d, "profile.rolePack.check")).toBe(2));
     await waitFor(() => expect(screen.queryByTestId("role-pack-banner")).toBeNull());
   });

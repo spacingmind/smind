@@ -24,7 +24,7 @@ function DiffText({ diff }: { diff: string }) {
           <div
             key={i}
             data-diff={kind}
-            className={cn("whitespace-pre-wrap break-all", kind === "add" ? "text-success" : kind === "del" ? "text-destructive" : "text-foreground-muted")}
+            className={cn("whitespace-pre-wrap break-words", kind === "add" ? "text-success" : kind === "del" ? "text-destructive" : "text-foreground-muted")}
           >
             {line === "" ? " " : line}
           </div>
