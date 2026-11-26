@@ -40,10 +40,10 @@ tests:
   - { name: ui_cleanup_no_application_menu_and_no_help_icon, run: "cd web/packages/ui && bunx vitest run src/components/app-header.test.tsx -t ui_cleanup_no_application_menu_and_no_help_icon", timeoutSec: 900 }
   - { name: ui_cleanup_header_right_cluster_order, run: "cd web/packages/ui && bunx vitest run src/components/app-header.test.tsx -t ui_cleanup_header_right_cluster_order", timeoutSec: 900 }
   - { name: icon_registry_binds_each_concept, run: "cd web/packages/ui && bunx vitest run src/lib/icons.test.ts", timeoutSec: 900 }
-  - { name: ui_cleanup_shortcuts_help_keystroke_still_opens_overlay, run: "cd web/packages/ui && bunx vitest run src/components/ui-cleanup-b1.test.tsx -t ui_cleanup_shortcuts_help_keystroke_still_opens_overlay", timeoutSec: 900 }
+  - { name: ui_cleanup_shortcuts_help_keystroke_still_opens_overlay, run: "cd web/packages/ui && bunx vitest run src/components/ui-cleanup-b1-header.test.tsx -t ui_cleanup_shortcuts_help_keystroke_still_opens_overlay", timeoutSec: 900 }
   - { name: ui_cleanup_composer_focus_keystroke_still_focuses, run: "cd web/packages/ui && bunx vitest run src/components/ui-cleanup-b1.test.tsx -t ui_cleanup_composer_focus_keystroke_still_focuses", timeoutSec: 900 }
   - { name: ui_cleanup_composer_has_no_focus_hint, run: "cd web/packages/ui && bunx vitest run src/components/ui-cleanup-b1.test.tsx -t ui_cleanup_composer_has_no_focus_hint", timeoutSec: 900 }
-  - { name: ui_cleanup_terminal_key_bar_keeps_its_keyboard_toggle, run: "cd web/packages/ui && bunx vitest run src/components/ui-cleanup-b1.test.tsx -t ui_cleanup_terminal_key_bar_keeps_its_keyboard_toggle", timeoutSec: 900 }
+  - { name: ui_cleanup_terminal_key_bar_keeps_its_keyboard_toggle, run: "cd web/packages/ui && bunx vitest run src/components/ui-cleanup-b1-header.test.tsx -t ui_cleanup_terminal_key_bar_keeps_its_keyboard_toggle", timeoutSec: 900 }
   - { name: ui_cleanup_sidebar_plus_removed_footer_add_workspace_kept, run: "cd web/packages/ui && bunx vitest run src/components/ui-cleanup-b1.test.tsx -t ui_cleanup_sidebar_plus_removed_footer_add_workspace_kept", timeoutSec: 900 }
   - { name: ui_cleanup_sidebar_search_toggle_and_automation_filter_kept, run: "cd web/packages/ui && bunx vitest run src/components/ui-cleanup-b1.test.tsx -t ui_cleanup_sidebar_search_toggle_and_automation_filter_kept", timeoutSec: 900 }
   - { name: hygiene_and_scope, run: "go test ./internal/hygiene/ -count=1 && test -z \"$(git diff origin/develop...HEAD --name-only -- mobile internal cmd)\"", timeoutSec: 900 }
