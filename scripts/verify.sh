@@ -84,7 +84,7 @@ for step in build test lint; do
 	$tw "$task_cmd" "$step" >"$out/$step.log" 2>&1
 	code=$?
 
-	cls=$("$classifier" "$step" "$code" "$out/$step.log")
+	cls=$(sh "$classifier" "$step" "$code" "$out/$step.log")
 	cls_code=$?
 	if [ "$cls_code" -eq 64 ]; then
 		echo "VERIFY: FAIL (classifier usage error)"
