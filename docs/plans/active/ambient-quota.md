@@ -54,4 +54,30 @@ e2e (`web/e2e/specs/ambient-quota.spec.ts`, frames only with `QUOTA_FRAMES_DIR`)
 
 ## Validation
 
-(filled in when the work is done)
+### When is the usage cache filled? (can the notice appear without opening a usage surface?)
+
+The notice reads `queryKeys.accountUsage()` and never fills it (`hooks/use-quota-notice.ts`:
+`useUsageReports({ enabled: false })`). Code evidence for what fills that entry in a real session:
+
+| Filler | Where | Mode | When |
+| --- | --- | --- | --- |
+| Settings -> Usage | `components/account-usage/use-usage-surface.ts:54` (`useUsageReports({ touch })`) | touch | while the section is mounted |
+| Usage modal | `components/account-usage/usage-modal.tsx` (same hook) | touch | while it is open |
+| Sidebar footer summary | `components/account-usage/usage-sidebar-item.tsx:203` (`useUsageReports({ touch: true })`) | touch | only while "Show summary in sidebar" is ON, and not on the collapsed rail. The default is OFF (`lib/account-usage/preferences.ts`: `inSidebar: false`) |
+| Providers screen / provider detail / accounts card | `hooks/use-account-rows.ts:29`, `components/providers/accounts-card.tsx:32` (`useUsageReports()`, default) | one `cached` read | when that screen mounts |
+| `account.usage` daemon event (the poller) | `lib/query/event-bridge.ts:71-90` | none (no request) | only UPDATES an existing cache: `if (!held) return;`. It never creates it. |
+
+Not fillers: the chat composer, the chat header and any "chat usage pill" (no `useUsageReports` caller outside the
+list above; the "chat pill" wording in the hook's doc comment describes a design that has no caller today).
+
+Conclusion, stated plainly: **with the sidebar summary off (the default) the notice can NOT appear until the
+person has opened Settings -> Usage, the Usage modal or a Providers screen in that session (that connection's
+QueryClient).** After any of those has filled the cache, the daemon's `account.usage` events keep it current and
+the notice then appears and updates on its own, in any task, with no further call. With the sidebar summary ON
+the cache is filled at app start by that surface's own touch, so the notice works without opening anything. This
+PR does not widen the call budget (ADR-0028 AC54; `App.test.tsx command_palette_opens_usage_modal` stays green);
+whether the composer should do a one-time `cached` peek is the Human's decision.
+
+Frame of the real flow: `~/.smind/dogfood/ambient-quota/pair-01-notice-92.png` (e2e AQ-01: cold start shows no
+notice with `account.usage` requests = 0, Settings -> Usage fills the cache, back in the task the notice shows
+at 92 %). The cold-start frame is `pair-00-cold-start.png`.
