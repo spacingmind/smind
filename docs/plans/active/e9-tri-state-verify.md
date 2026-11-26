@@ -27,7 +27,7 @@ Today `verify` is prose: run `task build`, `task test`, `task lint`, report ok o
 | 2 | E = 0, kind `test`, no `^ok` / `Tests .* passed` / `PASS` line | INCONCLUSIVE | `no-signal` |
 | 3 | E = 0, kind `test`, every `^ok` line carries `[no tests to run]`, or output has `testing: warning: no tests to run` | INCONCLUSIVE | `no-tests-matched` |
 | 4 | E = 0 otherwise | PASS | `ok` |
-| 5 | E != 0 and a FAIL marker: `^--- FAIL: `, `^FAIL[[:space:]]+\S+[[:space:]]+[0-9.]+s`, `\[build failed\]`, `^panic: ` (includes `panic: test timed out`), `\.go:[0-9]+:[0-9]+:`, `error TS[0-9]+`, `^[[:space:]]*FAIL[[:space:]]`, `Test Files[[:space:]]+[0-9]+ failed`, `Tests[[:space:]]+[0-9]+ failed`, `no required module provides package`, `is not in std` | FAIL | `build-error` for `[build failed]`, `.go:L:C:` (when no `--- FAIL`), the two import messages; `type-error` for `error TS`; else `test-failed` |
+| 5 | E != 0 and a FAIL marker: `^--- FAIL: `, `^FAIL[[:space:]]+\S+[[:space:]]+[0-9.]+s`, `\[build failed\]`, `^panic: ` (includes `panic: test timed out`), `\.go:[0-9]+:[0-9]+:`, `error TS[0-9]+`, `^[[:space:]]*FAIL[[:space:]]`, `Test Files[[:space:]]+[0-9]+ failed`, `Tests[[:space:]]+[0-9]+ failed`, `no required module provides package`, `is not in std`, and the other runners `task test` drives: `^FAIL:` (the sh tests), `^not ok` (TAP), `^[[:space:]]*✖ ` and `ℹ fail [1-9]` (node --test), `^# fail [1-9]`, `\(fail\)` (bun test) | FAIL | `build-error` for `[build failed]`, `.go:L:C:` (when no `--- FAIL`), the two import messages; `type-error` for `error TS`; else `test-failed` |
 | 6 | E in 124, 137, 143 (timeout(1), SIGKILL, SIGTERM) | INCONCLUSIVE | `timeout` (124), `killed` (137, 143) |
 | 7 | E != 0, `command not found` or `executable file not found in $PATH` | INCONCLUSIVE | `missing-tool` |
 | 8 | E != 0, `Cannot find module`, `ERR_MODULE_NOT_FOUND`, `error: Cannot find package`, `Cannot find package '` | INCONCLUSIVE | `deps-not-installed` |
@@ -38,6 +38,8 @@ Today `verify` is prose: run `task build`, `task test`, `task lint`, report ok o
 A runner precheck (not an output rule): when `TMPDIR` resolves to a path under `$HOME/.smind` or `$SMIND_HOME`, `verify.sh` prints `VERIFY: INCONCLUSIVE (tmpdir-in-daemon-home)` and exits 2 without running a step (tests there collide with a daemon's files; the repo's rule is TMPDIR outside `~/.smind`).
 
 The Go deadline `panic: test timed out` is FAIL on purpose: a test that hangs is a defect (a deadlock), not an environment problem; only the RUNNER's own wall-clock limit (exit 124) is INCONCLUSIVE.
+
+Known limit (row 2): "has a signal" is the union over everything `task test` runs, so one `PASS` from a sh test counts even if the Go step only printed `[no test files]`; the Go suite is large, so this is accepted.
 
 ## Acceptance criteria
 

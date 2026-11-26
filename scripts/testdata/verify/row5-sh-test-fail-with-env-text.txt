@@ -1,0 +1,3 @@
+ok: foo
+FAIL: case-x: got 1, want 2
+curl: (7) connection refused

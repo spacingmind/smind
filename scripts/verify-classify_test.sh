@@ -53,6 +53,9 @@ case_ row5-type-error lint 2 row5-type-error.txt FAIL type-error
 case_ row5-vitest-failed test 1 row5-vitest-failed.txt FAIL test-failed
 case_ row5-import-error build 1 row5-import-error.txt FAIL build-error
 case_ row5-test-timeout test 2 row5-test-timeout.txt FAIL test-failed
+case_ row5-node-test-fail-with-env-text test 1 row5-node-test-fail-with-env-text.txt FAIL test-failed
+case_ row5-sh-test-fail-with-env-text test 1 row5-sh-test-fail-with-env-text.txt FAIL test-failed
+case_ row5-tap-fail test 1 row5-tap-fail.txt FAIL test-failed
 case_ row6-timeout test 124 row6-timeout.txt INCONCLUSIVE timeout
 case_ row6-killed test 137 row6-timeout.txt INCONCLUSIVE killed
 case_ row6-terminated test 143 row6-timeout.txt INCONCLUSIVE killed

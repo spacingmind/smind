@@ -57,7 +57,7 @@ emit() { # RESULT CAUSE PATTERN (empty pattern -> empty DETAIL)
 row1='^shellcheck not installed; skipping'
 row2='^ok|Tests .* passed|PASS'
 row3='testing: warning: no tests to run'
-row5='^--- FAIL: |^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9.]+s|\[build failed\]|^panic: |\.go:[0-9]+:[0-9]+:|error TS[0-9]+|^[[:space:]]*FAIL[[:space:]]|Test Files[[:space:]]+[0-9]+ failed|Tests[[:space:]]+[0-9]+ failed|no required module provides package|is not in std'
+row5='^--- FAIL: |^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9.]+s|\[build failed\]|^panic: |\.go:[0-9]+:[0-9]+:|error TS[0-9]+|^[[:space:]]*FAIL[[:space:]]|Test Files[[:space:]]+[0-9]+ failed|Tests[[:space:]]+[0-9]+ failed|no required module provides package|is not in std|^FAIL:|^not ok|^[[:space:]]*✖ |ℹ fail [1-9]|^# fail [1-9]|\\(fail\\)'
 row5_build='\[build failed\]|no required module provides package|is not in std'
 row5_golc='\.go:[0-9]+:[0-9]+:'
 row5_ts='error TS[0-9]+'

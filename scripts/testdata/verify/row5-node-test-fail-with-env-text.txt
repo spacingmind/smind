@@ -1,0 +1,5 @@
+✖ failing tests:
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/repo/desktop/scripts/a.mjs'
+ℹ tests 3
+ℹ pass 2
+ℹ fail 1

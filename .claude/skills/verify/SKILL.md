@@ -11,8 +11,9 @@ Spec: `docs/plans/completed/e9-tri-state-verify.md` (the table of causes).
 
 ## The three results
 
-- **PASS**: every step ran, exited 0 and produced a signal. Only an overall
-  PASS means the change is verified.
+- **PASS**: every step exited 0 and produced a signal (the one optional
+  step the Taskfile itself skips, `shellcheck`, is noted as `optional-skip`).
+  Only an overall PASS means the change is verified.
 - **FAIL**: something ran and failed: a failing test, a compile or type error,
   a vet or gofmt finding, a panic, a test binary that hit its own deadline.
   **A flaky test that failed is FAIL.** Nothing retries it or downgrades it;
