@@ -640,14 +640,9 @@ func TestProxy_ConnectHeaderIsCapped(t *testing.T) {
 			}
 			go func(conn net.Conn) {
 				defer conn.Close()
-				if _, err := conn.Write([]byte("HTTP/1.1 200 OK\r\n")); err != nil {
-					return
-				}
-				for {
-					if _, err := conn.Write([]byte("X-A: aaaa\r\n")); err != nil {
-						return
-					}
-				}
+				// A valid 200 whose headers total about 20 KiB: well inside what
+				// net/http would accept, past the 16 KiB cap of the CONNECT reply.
+				_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nX-A: " + strings.Repeat("a", 20000) + "\r\n\r\n"))
 			}(conn)
 		}
 	}()
@@ -659,7 +654,7 @@ func TestProxy_ConnectHeaderIsCapped(t *testing.T) {
 	_, err = rt.dialViaProxy(context.Background(), proxyURL, "example.com:443")
 	elapsed := time.Since(start)
 	if err == nil {
-		t.Fatal("dialViaProxy() error = nil, want the endless header to fail the exchange")
+		t.Fatal("dialViaProxy() error = nil, want a CONNECT reply over the 16 KiB cap to fail the exchange")
 	}
 	if elapsed >= 5*time.Second {
 		t.Fatalf("dialViaProxy() took %v, want < 5s", elapsed)
