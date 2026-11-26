@@ -23,7 +23,7 @@ acs:
     text: "With several windows over the threshold one shows at a time in the documented order."
     covers: { tests: [ambient_quota_orders_windows], frames: [] }
   - id: AC7
-    text: "Zero added provider calls: no touch, no refresh, no account.usage request when the cache holds the reports."
+    text: "Zero added calls: the notice sends no account.usage request of any mode and the app call budget test stays green."
     covers: { tests: [ambient_quota_adds_no_touch_or_refresh_calls], frames: [] }
   - id: AC8
     text: "The notice sits in the composer flow above the input card and never overlays it; the composer mounts it."
