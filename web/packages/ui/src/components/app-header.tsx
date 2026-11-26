@@ -1,7 +1,6 @@
 import { Icons } from "@/lib/icons";
 import type { ReactNode } from "react";
 
-import { AppMenu } from "@/components/app-menu";
 import { HeaderTaskMenu, HeaderTaskTitle } from "@/components/app-header-task";
 import { TaskBudgetControl } from "@/components/task-budget-control";
 import { DesktopWindowControls } from "@/components/desktop-window-controls";
@@ -85,8 +84,8 @@ function HeaderTask({
  * inset content panel. Left: the sidebar toggle + update badge when the
  * sidebar has no room for them (collapsed rail / compact sheet; expanded,
  * the sidebar's own top strip hosts them), then the task identity. Right: an
- * open-in-editor pill, help, terminal, and on Windows/Linux the app menu and
- * drawn caption buttons.
+ * open-in-editor pill, help, terminal and drawn caption buttons (the
+ * application menu's items live in the command palette, ui-cleanup-b1 H1).
  *
  * In the desktop build it is also the window's title bar: its empty area
  * drags the window (and double-click maximizes) and it pads clear of the
@@ -210,7 +209,6 @@ export function AppHeader({
               <Icons.terminal aria-hidden />
             </HeaderIconButton>
           )}
-          <AppMenu />
         </div>
         <DesktopWindowControls />
       </header>

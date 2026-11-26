@@ -71,7 +71,6 @@ describe("icon registry", () => {
         "lock": "Lock",
         "mcp": "Plug",
         "mention": "AtSign",
-        "menu": "Menu",
         "merge": "GitMerge",
         "model": "Cpu",
         "more": "Ellipsis",

@@ -230,6 +230,23 @@ describe("AppHeader task identity", () => {
 });
 
 describe("AppHeader right cluster", () => {
+  it("ui_cleanup_no_application_menu_and_no_help_icon", async () => {
+    const cases: { name: string; opts: PlatformOpts }[] = [
+      { name: "windows", opts: { desktop: true, os: "windows" } },
+      { name: "linux", opts: { desktop: true, os: "linux" } },
+      { name: "macos", opts: { desktop: true, os: "macos" } },
+      { name: "web", opts: { desktop: false, os: null } },
+    ];
+    for (const { name, opts } of cases) {
+      vi.resetModules();
+      vi.doUnmock("@/lib/platform");
+      mockPlatform(opts);
+      await mountHeader({ onOpenTerminal: () => {} });
+      expect(screen.queryByTestId("app-menu-trigger"), name).not.toBeInTheDocument();
+      cleanup();
+    }
+  });
+
   it("AH-AC5 right cluster order", async () => {
     for (const os of ["windows", "linux"] as const) {
       vi.resetModules();
@@ -241,7 +258,6 @@ describe("AppHeader right cluster", () => {
         screen.getByTestId("open-in-editor"),
         screen.getByTestId("app-header-help"),
         screen.getByTestId("app-header-terminal"),
-        screen.getByTestId("app-menu-trigger"),
         screen.getByTestId("desktop-window-controls"),
       ];
       for (let i = 0; i < order.length - 1; i++) {
@@ -351,10 +367,9 @@ describe("AppHeader status and toggle", () => {
     expect(header).toHaveAttribute("data-tauri-drag-region", "deep");
     const controls = screen.getByTestId("desktop-window-controls");
     expect(header.lastElementChild).toBe(controls);
-    expect(before(screen.getByTestId("app-menu-trigger"), controls)).toBe(true);
     expect(controls.hasAttribute("data-tauri-drag-region")).toBe(false);
     for (const el of controls.querySelectorAll("*")) expect(el.hasAttribute("data-tauri-drag-region")).toBe(false);
-    for (const id of ["app-header-help", "app-header-terminal", "app-header-task-menu", "app-menu-trigger"]) {
+    for (const id of ["app-header-help", "app-header-terminal", "app-header-task-menu"]) {
       expect(screen.getByTestId(id).hasAttribute("data-tauri-drag-region"), id).toBe(false);
     }
   });

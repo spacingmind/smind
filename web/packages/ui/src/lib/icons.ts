@@ -89,7 +89,6 @@ import {
   ListChecks,
   LoaderCircle,
   Mail,
-  Menu,
   MessageSquare,
   MessageSquarePlus,
   Minus,
@@ -180,7 +179,6 @@ export const Icons = {
   stop: Square,
   /** Interrupt the running turn and send now. */
   sendNow: Zap,
-  menu: Menu,
   sidebarToggle: PanelLeft,
   addComment: MessageSquarePlus,
   /** Split left / right. */

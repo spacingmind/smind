@@ -228,9 +228,10 @@ export function KeyboardProvider({
         entry.handler(payload);
         return true;
       }
-      // A native-menu click (or the header app menu) moves focus out of the
-      // webview/pane, so every focus-gated handler is disabled by the time
-      // the action arrives. Route it to the pane that was focused last.
+      // A native-menu click (or the command palette, ui-cleanup-b1 H1) moves
+      // focus out of the webview/pane, so every focus-gated handler is
+      // disabled by the time the action arrives. Route it to the pane that
+      // was focused last.
       if (options.source === "menu") {
         const owner = lastEnabledOwner.current.get(action);
         const entry = owner ? stack.find((e) => e.owner === owner) : undefined;
