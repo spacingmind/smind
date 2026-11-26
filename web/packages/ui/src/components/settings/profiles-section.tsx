@@ -6,6 +6,7 @@ import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { useLastDefined } from "@/hooks/use-last-defined";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
+import { RolePackBanner } from "@/components/settings/role-pack-banner";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
@@ -217,6 +218,8 @@ function ProfilesSection(_props: SettingsSectionContext) {
     <div className="flex flex-col gap-6" data-testid="settings-section-profiles">
       <section className="flex flex-col gap-2">
         <SettingsSectionTitle title="Profiles" actions={newAgentButton} />
+
+        <RolePackBanner />
 
         {profiles === null ? (
           <LoadingRows />

@@ -37,6 +37,7 @@ var HumanOnlyRPCs = []string{
 	"chat.forkSeed",
 	"profile.create",
 	"profile.update",
+	"profile.rolePack.apply",
 }
 
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not

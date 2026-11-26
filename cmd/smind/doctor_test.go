@@ -20,20 +20,76 @@ import (
 
 func stubDoctor(t *testing.T, result any, dialErr error) {
 	t.Helper()
+	fakeDoctorDaemon(t, result, errors.New("not served"), dialErr)
+}
+
+// fakeDoctorDaemon serves doctor.sessions from sessions and
+// profile.rolePack.check from rolePack; an error value makes that method fail.
+func fakeDoctorDaemon(t *testing.T, sessions, rolePack any, dialErr error) {
+	t.Helper()
 	old := doctorDial
 	doctorDial = func(context.Context) (wsCaller, func(), error) {
 		if dialErr != nil {
 			return nil, nil, dialErr
 		}
 		return func(_ context.Context, method string, _ any, out any) error {
-			if method != "doctor.sessions" {
+			var result any
+			switch method {
+			case "doctor.sessions":
+				result = sessions
+			case "profile.rolePack.check":
+				result = rolePack
+			default:
 				t.Errorf("method %q", method)
+			}
+			if err, ok := result.(error); ok {
+				return err
 			}
 			raw, _ := json.Marshal(result)
 			return json.Unmarshal(raw, out)
 		}, func() {}, nil
 	}
 	t.Cleanup(func() { doctorDial = old })
+}
+
+func TestDoctorShowsRolePack(t *testing.T) {
+	check := func(n int) map[string]int { return map[string]int{"seatsWithUpdates": n, "packVersion": 3} }
+	cases := []struct {
+		name     string
+		rolePack any
+		dialErr  error
+		want     string
+	}{
+		{"two", check(2), nil, "[info] role pack: 2 seats have updates"},
+		{"one", check(1), nil, "[info] role pack: 1 seat has updates"},
+		{"zero", check(0), nil, "[ok] role pack: every seat is current"},
+		{"unreachable", check(2), errors.New("down"), ""},
+		{"check errors", errors.New("boom"), nil, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			doctorHome(t)
+			fakeDoctorDaemon(t, doctorSessions{}, c.rolePack, c.dialErr)
+			code, out, _ := runDoctorCmd()
+			if code != 0 {
+				t.Fatalf("code %d", code)
+			}
+			if c.want == "" {
+				if strings.Contains(out, "role pack") {
+					t.Fatalf("unexpected role pack line: %q", out)
+				}
+			} else if !strings.Contains(out, c.want) {
+				t.Fatalf("missing %q in %q", c.want, out)
+			}
+			code, out, _ = runDoctorCmd("--json")
+			if code != 0 {
+				t.Fatalf("json code %d", code)
+			}
+			if got := strings.Contains(out, "rolepack.updates"); got != (c.want != "") {
+				t.Fatalf("json finding present=%v want %v: %q", got, c.want != "", out)
+			}
+		})
+	}
 }
 
 // doctorHome points HOME and SMIND_HOME at fresh temp dirs with a ~/.claude.

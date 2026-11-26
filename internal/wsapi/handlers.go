@@ -116,6 +116,8 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"profile.list":             handleProfileList(profReg),
 		"profile.get":              handleProfileGet(profReg),
 		"profile.update":           handleProfileUpdate(profReg),
+		"profile.rolePack.check":   handleProfileRolePackCheck(profReg),
+		"profile.rolePack.apply":   handleProfileRolePackApply(profReg),
 		"profile.delete":           handleProfileDelete(profReg),
 		"usage.list":               handleUsageList(db),
 		"usage.summary":            handleUsageSummary(db),

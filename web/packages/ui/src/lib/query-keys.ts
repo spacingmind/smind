@@ -61,6 +61,8 @@ export const queryKeys = {
   /** `provider.recipes`: the catalog rows the add-provider flow offers as templates. */
   providerRecipes: () => ["provider.recipes"] as const,
   profileList: () => ["profile.list"] as const,
+  /** `profile.rolePack.check` (role-pack sync, PR 2): read when the Profiles section opens; never polled (ADR-0058 D4). */
+  rolePackCheck: () => ["profile.rolePack.check"] as const,
   /** `plugin.list` (ADR-0042): the global switch and every plugin; live via the `plugin.updated` event. */
   pluginList: () => ["plugin.list"] as const,
   /** `fleet.host.list` (ADR-0048): every connected host and its link state; live via the `fleet.hosts.changed` event. */

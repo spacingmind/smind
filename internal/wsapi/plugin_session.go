@@ -95,7 +95,7 @@ var pluginNeverMethods = []string{
 	"run.attach", "run.attachment", "run.logs", "run.listConfigOptions",
 	"session.identify", "daemon.setPassword", "set-password",
 	"mcp.create", "mcp.update", "mcp.delete", "mcp.setEnabled",
-	"profile.create", "profile.update", "profile.delete",
+	"profile.create", "profile.update", "profile.delete", "profile.rolePack.apply", "profile.rolePack.check",
 	"workspace.create", "workspace.delete", "workspace.get", "workspace.readiness", "workspace.setScripts",
 	"task.prompt", "task.diff", "task.fileDiff", "task.files",
 }
