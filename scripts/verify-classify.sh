@@ -53,7 +53,8 @@ emit() { # RESULT CAUSE PATTERN (empty pattern -> empty DETAIL)
 	esac
 }
 
-row1='shellcheck not installed; skipping'
+# At line start: task echoes the command text (indented) even when shellcheck exists.
+row1='^shellcheck not installed; skipping'
 row2='^ok|Tests .* passed|PASS'
 row3='testing: warning: no tests to run'
 row5='^--- FAIL: |^FAIL[[:space:]]+[^[:space:]]+[[:space:]]+[0-9.]+s|\[build failed\]|^panic: |\.go:[0-9]+:[0-9]+:|error TS[0-9]+|^[[:space:]]*FAIL[[:space:]]|Test Files[[:space:]]+[0-9]+ failed|Tests[[:space:]]+[0-9]+ failed|no required module provides package|is not in std'

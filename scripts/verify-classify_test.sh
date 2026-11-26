@@ -43,6 +43,7 @@ case_() { # name kind exit file want_result want_cause
 }
 
 case_ row1-optional-skip lint 0 row1-shellcheck-skip.txt PASS optional-skip
+case_ row1-echoed-command-is-not-a-skip lint 0 row1-skip-text-echoed-only.txt PASS ok
 case_ row2-no-signal test 0 row2-no-signal.txt INCONCLUSIVE no-signal
 case_ row3-no-tests-matched test 0 row3-no-tests-run.txt INCONCLUSIVE no-tests-matched
 case_ row4-pass test 0 row4-pass.txt PASS ok
