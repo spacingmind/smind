@@ -1,6 +1,6 @@
 # Never-list floor: deny-only rules for catastrophic commands
 
-Status: active (2026-11-15). Size: M (5): scope 1 (`internal/permpolicy` + docs), PRs 1, risk 2 (permission floor), decisions 0, verification 1 (unit tests, mutation table).
+Status: completed (2026-11-26; started 2026-11-15). Size: M (5): scope 1 (`internal/permpolicy` + docs), PRs 1, risk 2 (permission floor), decisions 0, verification 1 (unit tests, mutation table).
 
 ## Why
 

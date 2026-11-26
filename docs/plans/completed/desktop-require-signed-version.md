@@ -1,6 +1,6 @@
 # Desktop updater: `requireSignedVersion` (DT1 item 4)
 
-Status: active (2026-11-15). Size: M (6): scope 2 (updater config + release scripts), PRs 1, risk 3 (changes what the updater trusts, and a mistake in the release flow can make every installed app refuse the next update), decisions 0, verification 2. **HIGH-RISK** (updater trust, release path): two fresh-context reviews and a Supervisor second read.
+Status: completed (2026-11-26; started 2026-11-15). Size: M (6): scope 2 (updater config + release scripts), PRs 1, risk 3 (changes what the updater trusts, and a mistake in the release flow can make every installed app refuse the next update), decisions 0, verification 2. **HIGH-RISK** (updater trust, release path): two fresh-context reviews and a Supervisor second read.
 
 ## What it is, and what happens today
 

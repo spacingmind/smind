@@ -1,6 +1,6 @@
 # Providers PR7: `provider.updateInstance`
 
-Status: active (2026-10-31). Binding text: ADR-0046, section "Amendment 2026-10-31: provider.updateInstance" (Human-approved 2026-10-31). Parent plan: [providers-epic.md](providers-epic.md).
+Status: completed (2026-11-26; started 2026-10-31). Binding text: ADR-0046, section "Amendment 2026-10-31: provider.updateInstance" (Human-approved 2026-10-31). Parent plan: [providers-epic.md](providers-epic.md).
 
 Size: L (7), scope 2 (daemon, CLI, web), PRs 1, risk 2 (writes config.yaml, human-only authority), decisions 1 (amendment written), verification 1 (UI frames).
 

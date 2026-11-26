@@ -1,6 +1,6 @@
 # Daemon memory: lazy run history, byte-budget cap, diagnostics
 
-Status: spec (docs-only PR), 2026-11-05. Owner: Lead of task `daemon-memory`.
+Status: completed (2026-11-26; spec 2026-11-05). Owner: Lead of task `daemon-memory`.
 Size: L (7) — scope 1, PRs 2, risk 2 (data loss, concurrency), decisions 1, verify 1.
 
 ## Problem (measured on the Human's Mac, 2026-11-05)

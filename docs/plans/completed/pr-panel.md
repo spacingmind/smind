@@ -5,7 +5,7 @@ Closed 2026-11-26: every acceptance criterion is validated below (#588, #593, fo
 **Status 2026-10-25 (plans hygiene): PARTIAL.** Both PRs shipped: daemon #588, web #593; every named Go and web test below exists on `origin/develop` and covers A1-A6, B1, B2, B4. B3 and B5 CONFIRMED 2026-10-25 by a screenshot pass (below). Still open: a real-GitHub check of `task.prDetails` (all tests and the screenshot pass use a scripted `gh`). Validation below is filled for what is confirmed.
 
 Size: L (6) — scope 2, PRs 2, risk 1, decisions 0, verify 1.
-Status: active. Binding design: ADR-0039 (§3 reads, §4 poller and call budget, §6 error codes, §9) and ADR-0038 (`pr` and `file_ref`
+Status: completed (2026-11-26). Binding design: ADR-0039 (§3 reads, §4 poller and call budget, §6 error codes, §9) and ADR-0038 (`pr` and `file_ref`
 attachment kinds, §6). Product spec: the G9 section of the local-only git/GitHub UX study. Web only; mobile is out of scope.
 
 Two PRs, both from `origin/develop`, not stacked: **PR 1 daemon** (`task.prDetails` and friends), **PR 2 web** (the tab; says in its body

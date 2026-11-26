@@ -1,6 +1,6 @@
 # Plugins Wave C: declarative UI (AC24-AC30)
 
-Status: **spec, 2026-10-31.** Parent plan: [plugins.md](plugins.md) (item PC); decision: [ADR-0042](../../decisions/0042-plugin-system.md) section 5 (accepted).
+Status: completed (2026-11-26; spec 2026-10-31). Parent plan: [plugins.md](plugins.md) (item PC); decision: [ADR-0042](../../decisions/0042-plugin-system.md) section 5 (accepted).
 Waves A and B are merged (host, contributions, process, hooks, `task.send`, `plugin.call`, `plugin-examples/hello-process`).
 
 Size: **L (8)**: scope 2 (daemon, web, mobile), PRs 2 (three, ordered by waiting for merges), risk 1 (untrusted data rendered in the app; no client code), decisions 1

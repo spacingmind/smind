@@ -2,7 +2,7 @@
 
 Closed 2026-11-26: shipped as #897 (landed with wave #948); the PR-to-wave box below was never ticked.
 
-Status: active (2026-11-15). Follows `desktop-audit-build.md` and `desktop-audit-app-guard.md`. Size: S (3): scope 1 (two scripts, their tests, Taskfile), PRs 1, risk 1 (a build script; the guard itself is already reviewed), decisions 0, verification 1 (a macOS build run).
+Status: completed (2026-11-26; started 2026-11-15). Follows `desktop-audit-build.md` and `desktop-audit-app-guard.md`. Size: S (3): scope 1 (two scripts, their tests, Taskfile), PRs 1, risk 1 (a build script; the guard itself is already reviewed), decisions 0, verification 1 (a macOS build run).
 
 ## Why
 

@@ -2,7 +2,7 @@
 
 Closed 2026-11-26: shipped as #891 (landed with wave #948); the PR-to-wave box below was never ticked.
 
-Status: active (2026-11-15). Size: S (3): scope 1 (one script, one test, Taskfile), PRs 1, risk 1 (a build script that must never touch an installed app), decisions 0, verification 1 (macOS build run once by hand).
+Status: completed (2026-11-26; started 2026-11-15). Size: S (3): scope 1 (one script, one test, Taskfile), PRs 1, risk 1 (a build script that must never touch an installed app), decisions 0, verification 1 (macOS build run once by hand).
 
 ## Why
 

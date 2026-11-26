@@ -1,6 +1,6 @@
 # macOS signing and notarization: prepared, gated on the Human's Apple account (DT1 item 5)
 
-Status: active (2026-11-15). Size: M (7): scope 3 (scripts, workflow skeleton, ADR draft), PRs 1, risk 3 (handles signing credentials; a CI workflow that can see secrets), decisions 8 (all in the ADR draft, each with a recommendation), verification 3 (nothing can run against Apple). **HIGH-RISK** (secret handling, release path): two fresh-context reviews and a Supervisor second read.
+Status: completed (2026-11-26; started 2026-11-15). Size: M (7): scope 3 (scripts, workflow skeleton, ADR draft), PRs 1, risk 3 (handles signing credentials; a CI workflow that can see secrets), decisions 8 (all in the ADR draft, each with a recommendation), verification 3 (nothing can run against Apple). **HIGH-RISK** (secret handling, release path): two fresh-context reviews and a Supervisor second read.
 
 ## Human decision (2026-11-15)
 

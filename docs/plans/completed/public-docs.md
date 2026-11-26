@@ -1,6 +1,6 @@
 # Public docs: user documentation in `public-docs/`
 
-Status: active (2026-10-25).
+Status: completed (2026-11-26; started 2026-10-25).
 
 Size: L (6) — scope 1 (docs plus one Go test), PRs 2 (several, in sequence), risk 0 (docs and a test), decisions 1 (per-section homelab/README split, below), verification 2 (every statement checked against the binary and the real UI).
 

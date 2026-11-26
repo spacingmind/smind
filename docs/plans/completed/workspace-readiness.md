@@ -1,6 +1,6 @@
 # Workspace agent-readiness check (B6)
 
-Status: active (2026-10-27). Human pre-approved the checklist (A-D); no ADR needed (one read-only RPC, no new data model).
+Status: completed (2026-11-26; started 2026-10-27). Human pre-approved the checklist (A-D); no ADR needed (one read-only RPC, no new data model).
 
 Size: M (4) — scope 2 (daemon + CLI + web), PRs 1, risk 1 (reads repo files that an agent may have edited), decisions 0, verification 1 (UI screenshots).
 

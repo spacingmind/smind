@@ -1,6 +1,6 @@
 # Crash capture: the desktop shell (DT1 item 3b)
 
-Status: active (2026-11-15). Size: L (10): scope 2 (a new small Rust crate, the shell's `run()`), PRs 1, risk 3 (a panic hook runs in every thread of the app and writes files; redaction is the same privacy promise as the daemon's), decisions 1, verification 3. Second half of `crash-capture.md` (3a, merged: `internal/crash`, the daemon recorder, `smind doctor`, `docs/crash-reports.md`); read its Decisions first, they are not repeated here.
+Status: completed (2026-11-26; started 2026-11-15). Size: L (10): scope 2 (a new small Rust crate, the shell's `run()`), PRs 1, risk 3 (a panic hook runs in every thread of the app and writes files; redaction is the same privacy promise as the daemon's), decisions 1, verification 3. Second half of `crash-capture.md` (3a, merged: `internal/crash`, the daemon recorder, `smind doctor`, `docs/crash-reports.md`); read its Decisions first, they are not repeated here.
 
 ## Why
 

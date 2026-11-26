@@ -1,6 +1,6 @@
 # Run events retention (30 days)
 
-Status: spec (docs-only PR), 2026-11-05. Owner: Lead of task `daemon-memory`.
+Status: completed (2026-11-26; spec 2026-11-05). Owner: Lead of task `daemon-memory`.
 Size: L (7) — scope 2 (store, registry, wsapi, CLI), PRs 2, risk 2 (data
 deletion, write locks), decisions 1, verify 1 (synthetic 1 GB db).
 Follows `daemon-memory.md` (#822/#823): that work bounded RAM; this bounds the

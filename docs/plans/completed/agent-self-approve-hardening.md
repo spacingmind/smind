@@ -1,6 +1,6 @@
 # Agents must not answer their own requests: CLI refusal and a compiled-in floor rule
 
-Status: active (2026-11-09). Defence in depth, not a fix: see Limits. Size: M (4): scope 2 (CLI, policy engine, run launch env), risk 2 (permissions).
+Status: completed (2026-11-26; started 2026-11-09). Defence in depth, not a fix: see Limits. Size: M (4): scope 2 (CLI, policy engine, run launch env), risk 2 (permissions).
 
 ## The hole
 

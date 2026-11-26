@@ -1,8 +1,10 @@
 # Tree budget: opt-in spend cap on a task tree (ADR-0041 A5 / T1, open question 9)
 
+Closed 2026-11-26: AC1 to AC12 are validated below (#602, #604); AC13 was only run with seeded cost rows, and the live-model run crossing a tiny budget was never done (listed in `docs/plans/active/human-verification-backlog.md`).
+
 **Status 2026-10-25 (plans hygiene): PARTIAL.** Daemon (#602) and web (#604) shipped; AC1-AC11 confirmed by tests. AC12 CONFIRMED 2026-10-25 (screenshot pass below, one visual bug found and fixed). Open: AC13 only run with seeded cost rows, never with a real Haiku run crossing a tiny budget (needs a live-model run, a Human go-ahead); the optional mobile read-only budget line is not built.
 
-Status: active (2026-10-24).
+Status: completed (2026-11-26; started 2026-10-24).
 
 Size: L (7) — scope 2 (daemon + web, mobile read-only if cheap), PRs 2, risk 1 (admission path, migration; no data loss), decisions 1 (setter reading, below), verification 1 (UI screenshots + one scripted live smoke).
 

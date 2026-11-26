@@ -1,6 +1,6 @@
 # Stop tracking the generated Tauri capability schemas
 
-Status: active (2026-11-15). Size: S (2): scope 1 (a gitignore and one doc), PRs 1, risk 0 (files the build rewrites), decisions 1 (below), verification 1 (a clean build regenerates them).
+Status: completed (2026-11-26; started 2026-11-15). Size: S (2): scope 1 (a gitignore and one doc), PRs 1, risk 0 (files the build rewrites), decisions 1 (below), verification 1 (a clean build regenerates them).
 
 ## Why
 

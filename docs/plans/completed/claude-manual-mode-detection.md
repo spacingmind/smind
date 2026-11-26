@@ -1,6 +1,6 @@
 # Claude silently starts in Manual mode: detect it from the init frame (E1.2)
 
-Status: active (spec, 2026-11-15). Size: S-M (4): scope 2 (taskrunner, doctor), PRs 2, risk 1 (a notice, no permission change), decisions 1, verification 1 (fake CLI plus one measured probe). Code starts from a fresh `develop`.
+Status: completed (2026-11-26; spec 2026-11-15). Size: S-M (4): scope 2 (taskrunner, doctor), PRs 2, risk 1 (a notice, no permission change), decisions 1, verification 1 (fake CLI plus one measured probe). Code starts from a fresh `develop`.
 
 ## Problem
 

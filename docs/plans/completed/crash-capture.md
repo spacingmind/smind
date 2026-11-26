@@ -2,7 +2,7 @@
 
 Closed 2026-11-26: 3a is validated below and 3b (desktop shell) shipped as #905 (`crash-capture-desktop.md`).
 
-Status: active (2026-11-15). Size: L (13): scope 3 (daemon, desktop shell, doctor), PRs 2, risk 3 (runs inside every request and every goroutine; writes files; redaction is a privacy promise), decisions 1, verification 3. Part of `desktop-release-hygiene.md` item 3. Two PRs: **3a** the Go side + `smind doctor` + docs (this plan is its first commit); **3b** the Rust panic hook in the desktop shell.
+Status: completed (2026-11-26; started 2026-11-15). Size: L (13): scope 3 (daemon, desktop shell, doctor), PRs 2, risk 3 (runs inside every request and every goroutine; writes files; redaction is a privacy promise), decisions 1, verification 3. Part of `desktop-release-hygiene.md` item 3. Two PRs: **3a** the Go side + `smind doctor` + docs (this plan is its first commit); **3b** the Rust panic hook in the desktop shell.
 
 ## Why
 

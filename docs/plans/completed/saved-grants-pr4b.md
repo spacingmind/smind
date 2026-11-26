@@ -1,6 +1,6 @@
 # Saved grants PR4b: the card control, the Saved grants lists, and the mobile question-card polish
 
-Status: active (2026-11-15). Surfaces for the daemon half in PR #886 (`docs/plans/completed/saved-grants.md`: strict classes, runners need a per-grant opt-in, human decision 2026-11-15). Branched from develop; it needs #886 merged to work against a real daemon, and its tests use the wire shape of #886 (fixtures and an injected daemon socket), so it builds and tests without it. Size: M (UI on two surfaces, no daemon change).
+Status: completed (2026-11-26; started 2026-11-15). Surfaces for the daemon half in PR #886 (`docs/plans/completed/saved-grants.md`: strict classes, runners need a per-grant opt-in, human decision 2026-11-15). Branched from develop; it needs #886 merged to work against a real daemon, and its tests use the wire shape of #886 (fixtures and an injected daemon socket), so it builds and tests without it. Size: M (UI on two surfaces, no daemon change).
 
 ## Acceptance criteria
 

@@ -1,6 +1,6 @@
 # Home first run, the trimmed-history notice, and the sidebar rows
 
-Status: active (2026-11-15). Three small PRs in this order: the history notice (rank 4), the sidebar (rank 5), the first-run home (rank 3). Size: M (5): scope 1 (web package, one mobile word list check), PRs 3, risk 1 (UI), decisions 1 (below, recommendations taken as the default), verification 2 (light and dark frames, web and mobile suites).
+Status: completed (2026-11-26; started 2026-11-15). Three small PRs in this order: the history notice (rank 4), the sidebar (rank 5), the first-run home (rank 3). Size: M (5): scope 1 (web package, one mobile word list check), PRs 3, risk 1 (UI), decisions 1 (below, recommendations taken as the default), verification 2 (light and dark frames, web and mobile suites).
 
 ## Why
 
