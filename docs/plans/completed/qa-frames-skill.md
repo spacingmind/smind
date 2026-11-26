@@ -1,6 +1,6 @@
 # QA frame harness as the validator's bundled skill (B5)
 
-Status: active (2026-10-27). Binding text: [`docs/decisions/0045-validator-and-inbox.md`](../../decisions/0045-validator-and-inbox.md) §7 and question 11 ("its own later item", Human pre-approved). Related plan: [`validator-inbox.md`](validator-inbox.md).
+Status: shipped (PRs #676, #677, fix #811). Binding text: [`docs/decisions/0045-validator-and-inbox.md`](../../decisions/0045-validator-and-inbox.md) §7 and question 11 ("its own later item", Human pre-approved). Related plan: [`validator-inbox.md`](validator-inbox.md).
 
 Size: M (5) — scope 1, PRs 1, risk 1 (processes, browser, an LLM-send guard), decisions 0 (ADR accepted; entry-point choice below), verification 2 (real browser, frames). One Lead, solo.
 

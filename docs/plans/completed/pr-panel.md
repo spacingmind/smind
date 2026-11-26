@@ -1,5 +1,7 @@
 # PR panel (G9): checks, reviews and threads of a task's PR, and "Send to chat"
 
+Closed 2026-11-26: every acceptance criterion is validated below (#588, #593, follow-up #614); the real-GitHub check of `task.prDetails` named in the status line was never run (unverified by decision, scripted `gh` only) and is not an acceptance criterion.
+
 **Status 2026-10-25 (plans hygiene): PARTIAL.** Both PRs shipped: daemon #588, web #593; every named Go and web test below exists on `origin/develop` and covers A1-A6, B1, B2, B4. B3 and B5 CONFIRMED 2026-10-25 by a screenshot pass (below). Still open: a real-GitHub check of `task.prDetails` (all tests and the screenshot pass use a scripted `gh`). Validation below is filled for what is confirmed.
 
 Size: L (6) — scope 2, PRs 2, risk 1, decisions 0, verify 1.

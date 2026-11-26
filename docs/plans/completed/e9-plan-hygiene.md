@@ -32,11 +32,16 @@ GLM peer 1 writes the classification table to a scratch file; the Lead reviews i
 
 ## Progress
 
-- [ ] spec (this file)
-- [ ] classification table reviewed
-- [ ] moves and link fixes applied
-- [ ] hygiene tests, link grep, counts
+- [x] spec (this file)
+- [x] classification table (103 plans, two GLM peers), reviewed (26 spot checks by the Lead, one fresh reviewer)
+- [x] moves, Closed/Open notes and link fixes applied (third GLM peer)
+- [x] hygiene tests, link grep, counts
 
 ## Validation
 
-(filled in when the work is done)
+- AC1: 103 parent plans classified (43 moved on the peers' verdicts, 14 more moved by the Lead as "shipped but the in-file boxes were never ticked", each with a Closed line naming the merged PRs, 46 kept); contracts followed their `planRef:` parent. The Lead spot-checked 26 verdicts (named tests and files exist on develop: TestSliceACPTurn, TestFloor_SelfApproveCLIDenied, TestBrowserReachDriftEveryProviderHasARow, TestFleetPeerByNameIsDeniedByAddress, TestClaudeModeMismatchNote, TestDispositionOf, TestNeverList_, TestClassify_Fixtures, reorderTabInLayout, requireSignedVersion and others; the tab e2e specs). One fresh reviewer checked 15 moves, all 14 Closed lines and 10 Open lines: it found one move needing a Closed line (pr-panel), one overclaim (browser-for-agents-pr3), one stale Open line (run-skeleton-storage), one garbled Open line (permission-heredoc-reveal) and one stale status header (qa-frames-skill); all fixed in this PR.
+- AC2: 66 `git mv` (git shows them as renames); active 136 -> 70 plus this file moving last, completed 123 -> 189 (+1).
+- AC3: `grep -rnF "plans/active/<name>"` over the repo for each of the 66 moved names returns nothing; links in docs/ (ROADMAP, ADRs), plans, YAML `planRef` fields and a few code comments were rewritten, nothing else.
+- AC4: `go test ./internal/hygiene/ ./internal/providers/` and `go test ./cmd/smind -run 'Doc|Drift'` pass; no baseline line was fixed by the moves, so the baseline is unchanged.
+- AC5: this file moved to `completed/` in the last commit.
+- Not verified: the PR-merge claims of the 14 Closed lines rest on `git log origin/develop --grep '(#N)'` plus the plans' own text, not on re-running their tests.
