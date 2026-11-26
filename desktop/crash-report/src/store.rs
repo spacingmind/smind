@@ -1,6 +1,6 @@
 //! Port of `internal/crash` Record + store/rotate: the bounded, redacted,
 //! local-only crash report store shared with the daemon
-//! (docs/plans/active/crash-capture-desktop.md).
+//! (docs/plans/completed/crash-capture-desktop.md).
 
 use std::collections::HashMap;
 use std::fs;

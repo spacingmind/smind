@@ -1,5 +1,7 @@
 # A reference desktop workbench visual parity, second pass (tokens → audit → component ports)
 
+Open: Stage 4 mobile tokens not found on develop; Stage 3 timeline items (audit 13-15, 18) only partly landed; Progress checkboxes stale
+
 Size: L — scope 3 (web tokens, web components, desktop chrome), PRs ~10, risk 2
 (visual regressions only; no behaviour), decisions 0, verification 3 (light+dark
 frames at 1280 and 390 per UI PR).

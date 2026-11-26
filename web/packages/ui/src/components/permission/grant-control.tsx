@@ -9,7 +9,7 @@ import type { GrantOffer } from "@/lib/types";
 
 /**
  * The scoped "always allow in this project" control of a permission card (saved grants,
- * docs/plans/active/saved-grants.md): it shows the EXACT scope before the human chooses it
+ * docs/plans/completed/saved-grants.md): it shows the EXACT scope before the human chooses it
  * (this command, this project and folder, how long, which class) and saves nothing wider.
  *
  * A command that runs project-defined code (a "runner": make, npm run, go test, ...) needs an

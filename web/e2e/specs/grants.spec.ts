@@ -4,7 +4,7 @@ import { type Page, type TestInfo } from '@playwright/test'
 import { openTaskByLink } from '../fixtures/open-task'
 import { type App, expect, test } from '../fixtures/test'
 
-// Saved grants (docs/plans/active/saved-grants.md, PR4b): the daemon's permission events and the grant RPCs are injected into the
+// Saved grants (docs/plans/completed/saved-grants.md, PR4b): the daemon's permission events and the grant RPCs are injected into the
 // app's own websocket (page.routeWebSocket proxies the real daemon socket) and answered locally, so no agent, provider or grant
 // store is involved. Frames are written only when GRANT_FRAMES_DIR is set.
 

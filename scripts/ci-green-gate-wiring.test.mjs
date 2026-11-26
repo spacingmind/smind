@@ -1,5 +1,5 @@
 // Pins how release-please.yml uses scripts/ci-green-gate.mjs
-// (docs/plans/active/desktop-release-hygiene.md, item 2, AC7). A static read
+// (docs/plans/completed/desktop-release-hygiene.md, item 2, AC7). A static read
 // of the workflow text: no YAML dependency, job blocks are split on their
 // two-space-indented key.
 import { test } from "node:test";

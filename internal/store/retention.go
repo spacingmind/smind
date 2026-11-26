@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Run events retention (docs/plans/active/run-events-retention.md). Pruning a
+// Run events retention (docs/plans/completed/run-events-retention.md). Pruning a
 // run is two-phase so a crash never leaves it half visible: MarkRunPruned
 // stores the run's final text and stamps history_pruned_at (from then on every
 // reader serves the summary and ignores leftover rows), then

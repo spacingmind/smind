@@ -1,5 +1,7 @@
 # Windows QA 2026-10-11: terminal keys, live runs, workspace context menu, CLI approve
 
+Open: Windows re-test by the user never evidenced; file kept in active/ for the Human to run it or accept closure
+
 **Status 2026-10-25 (plans hygiene): PARTIAL.** All ACs (K, L, W, C) shipped in #284 and are confirmed by tests plus a spoofed-`Win32` Chrome run. Open: the Windows re-test by the Human on a real Windows webview (the keys were only checked with a spoofed user agent on macOS); no evidence it happened as of this date.
 
 Source: a Windows QA pass of smind desktop 0.10.0 (2026-10-11). Each item was

@@ -1,5 +1,7 @@
 # Permission cards: elide heredoc bodies by default, reveal on demand
 
+Open: Validation has no per-AC entries and no AC8 frame evidence for steps 4 and 5 (steps 2 to 5 merged as #810, #814, #816, #817, #818); the peer-host reveal has no automated test
+
 Status: SPEC, awaiting Steward review. Size: L (security, wire shape, 3 clients). Owner: Lead (profile 7).
 
 ## Decision record

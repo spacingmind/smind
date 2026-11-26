@@ -1,5 +1,7 @@
 # Desktop native feel, round two (DT2): native context menus, validated menu state, window layout, window tabbing
 
+Open: PR (a) real-window frames wait for an unlocked screen; Windows/Linux unverified; Progress section records only spec + PR (a)
+
 Status: active (2026-11-15). Lead of DT2 on `wave/desktop`. Sequel to [`completed/desktop-native-feel.md`](../completed/desktop-native-feel.md) (chrome, de-webview, shortcuts and menu, scoped integrations) and `desktop-macos-app.md`. Size: L, four PRs one at a time, each from a fresh `origin/wave/desktop`, base `wave/desktop`, never stacked: (a) native context menus, (b) validated menu enable/disable state, later (c) layout saved and restored per window on Cmd+Q, (d) a SPIKE (write-up only) on "Open task in new window" and macOS window tabbing.
 
 ## Checked against origin/wave/desktop: already shipped (not gaps)

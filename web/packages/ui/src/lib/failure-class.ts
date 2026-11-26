@@ -2,7 +2,7 @@ import { failureSentence } from "@/lib/failure-text";
 import { selectProvider } from "@/stores/providers-view-store";
 
 /**
- * The run failure classes (docs/plans/active/run-failure-classes.md, ADR-0050)
+ * The run failure classes (docs/plans/completed/run-failure-classes.md, ADR-0050)
  * as the UI reads them: the daemon sends `failureKind` and a derived `action`.
  * Plan windows and the residual rate limit keep their existing rate-limit view
  * (lib/rate-limit.ts); this file owns the other classes and the next-action

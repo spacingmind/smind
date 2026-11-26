@@ -1,4 +1,4 @@
-// The pinned "Needs you" section (docs/plans/active/home-and-sidebar-ui.md PR 2,
+// The pinned "Needs you" section (docs/plans/completed/home-and-sidebar-ui.md PR 2,
 // AC9/AC10): the needs-attention bucket's tasks listed above the workspaces in
 // the default view, without leaving the tree.
 import { fireEvent, screen, within } from "@testing-library/react";

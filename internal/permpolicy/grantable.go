@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Saved grants (ADR-0055 section 8, docs/plans/active/saved-grants.md): a
+// Saved grants (ADR-0055 section 8, docs/plans/completed/saved-grants.md): a
 // human may save "allow this exact command in this project". Whether a
 // request may be OFFERED that choice, and whether a stored grant may be
 // APPLIED to it, is one predicate, decided here beside the rules it must never

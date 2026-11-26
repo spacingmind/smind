@@ -47,7 +47,7 @@ To prove a spec is load-bearing, reintroduce the bug in `web/packages/ui/src`, r
 
 ## Demo smoke (web demo mode)
 
-`specs-demo/` is a separate suite for the web demo build (ADR-0051, `docs/plans/active/web-demo-mode.md`): the real UI against the scripted in-browser daemon in `web/packages/ui/src/demo/`. It needs no daemon, no Go and no network, so none of the isolation rules above apply: its `webServer` builds `web/packages/ui/dist-demo` (`build:demo`, which also runs the forbidden-string and size check) and serves it with `vite preview` on `127.0.0.1:4173`.
+`specs-demo/` is a separate suite for the web demo build (ADR-0051, `docs/plans/completed/web-demo-mode.md`): the real UI against the scripted in-browser daemon in `web/packages/ui/src/demo/`. It needs no daemon, no Go and no network, so none of the isolation rules above apply: its `webServer` builds `web/packages/ui/dist-demo` (`build:demo`, which also runs the forbidden-string and size check) and serves it with `vite preview` on `127.0.0.1:4173`.
 
 ```sh
 cd web/e2e

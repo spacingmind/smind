@@ -7,7 +7,7 @@ import { type App, expect, test } from '../fixtures/test'
 // The daemon's browser permission cards (ADR-0061) in the real web UI: the open, close and read cards with the daemon's own
 // text (copied from internal/browsercard), plus a long-option fixture. The permission_request events are injected into the app's
 // own websocket (page.routeWebSocket proxies the real daemon socket, as the grants spec does): no agent, no browser, no model.
-// docs/plans/active/browser-for-agents-live-findings.md AC1 to AC3 and AC8. Frames are written only when BROWSER_CARD_FRAMES_DIR is set.
+// docs/plans/completed/browser-for-agents-live-findings.md AC1 to AC3 and AC8. Frames are written only when BROWSER_CARD_FRAMES_DIR is set.
 
 const OPEN_GRANT = 'Allow opening any page the browser policy allows (localhost and your added hosts) and closing tabs, for this run'
 const CLOSE_GRANT = 'Allow closing tabs, and opening any page the browser policy allows (localhost and your added hosts), for this run'

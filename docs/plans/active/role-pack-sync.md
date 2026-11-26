@@ -1,5 +1,7 @@
 # Role-pack sync for existing installs (ADR-0058)
 
+Open: PR 2 (web banner, review dialog, doctor line per ADR-0058 D4) not built
+
 Status: active (2026-11-09). ADR-0058 D1-D6 accepted as recommended (Supervisor, under the Human's delegation). Size: M, two PRs.
 
 ## PR 1: engine, history, `--check` / `--diff` / `--apply`, the human-only gates

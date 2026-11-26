@@ -1,5 +1,7 @@
 # Learning probe: probe before approve
 
+Open: AC33 probeCheck deferred (needs Human decision); AC42 idle-to-running and cancelled transition frames; Validation entries for AC3-AC11 and AC38-AC41 missing
+
 Size: XL (10) split into L/M items — scope 2, PRs 2, risk 2, decisions 2 (ADR-0037, accepted), verification 2 (live `claude` CLI).
 One Lead drives the sequence; each PR is non-stacked off `develop`. Security-sensitive: the sandbox/probe PRs get an independent
 `reviewer` pass on the exact commit before the Human is asked to merge.

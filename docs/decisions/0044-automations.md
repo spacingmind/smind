@@ -10,7 +10,7 @@ continues") are **not** part of this ADR: see [what we are NOT doing](#what-we-a
 Inputs: local-only research on Factory's Software Factory (`docs/research/local/factory-docs.md` sections 1, 2, 9: UTC cron, auto-pause after five
 consecutive failures, a per-automation memory directory, "one source, one narrow automation" rollout, and agents allowed to create automations, which
 we refuse); ADR-0017/0018/0019/0021 (orchestration, permissions, queue), ADR-0024 (`whenBusy`, worktrees), ADR-0039 (forge rules and call budget),
-ADR-0040 (push), ADR-0041 (seats, tree guard, budget A5), ADR-0042 (plugins: the human-only pattern, `plugin.*`), `docs/plans/active/tree-budget.md`,
+ADR-0040 (push), ADR-0041 (seats, tree guard, budget A5), ADR-0042 (plugins: the human-only pattern, `plugin.*`), `docs/plans/completed/tree-budget.md`,
 `docs/plans/active/stalled-tree-alert.md` and the stall ticker in `cmd/smind/stall.go`.
 
 ## Context

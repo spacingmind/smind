@@ -1,5 +1,7 @@
 # Provider login for remote daemons + Providers tab redesign
 
+Open: real-account remote login on a homelab daemon and in the macOS app never verified; AC-A11 light/dark screenshots of every state have no recorded evidence
+
 Decision: [ADR-0033](../../decisions/0033-provider-login-remote-daemons-and-account-identity.md) (login contract, device
 code, paste-the-redirect, remote detection, stable account identity), accepted 2026-10-18. UI shape per the 2026-10-18
 Providers study (local-only research notes). Builds on ADR-0032 (shared query/zustand stores) and ADR-0028 (usage rate limits).

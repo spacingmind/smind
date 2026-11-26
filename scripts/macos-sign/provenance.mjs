@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Proves that the macOS app a signing job is about to sign came out of OUR release process, before
-// any secret is in the environment (docs/plans/active/desktop-notarization-prep.md, ADR-0060).
+// any secret is in the environment (docs/plans/completed/desktop-notarization-prep.md, ADR-0060).
 //
 // Anyone with write access can create a release with an asset of the right name; signing "whatever the
 // tag has" would put the Developer ID on it. This script instead requires:

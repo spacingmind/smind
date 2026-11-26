@@ -1,5 +1,7 @@
 # Steward two-axis review: Standards and Spec in two fresh contexts (ADR-0054)
 
+Open: AC22 one real claude-haiku-5-5 run and the Human pilot on a real workspace not recorded; steward.twoAxis stays false by default
+
 Status: active (2026-11-08), **ADR-0054 accepted 2026-11-08 (decisions D1–D11, accepted as recommended by the Supervisor under the Human's delegation; the Human may veto)**; `steward.twoAxis` stays false by default and the Haiku pilot (AC22) is the Human's. Binding text:
 [`docs/decisions/0054-steward-two-axis-review.md`](../../decisions/0054-steward-two-axis-review.md) (Accepted; amends ADR-0047 §1, §3, §4, §8, §9).
 

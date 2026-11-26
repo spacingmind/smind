@@ -1,5 +1,7 @@
 # Desktop chat surface: running status, composer chips, model picker, diff toolbar, density
 
+Open: AC5 partial (task header meta not moved to 13 px); real-window desktop unverified
+
 Status: decided (2026-11-15). **Human decision 2026-11-15: all 11 decisions as recommended.** Docs only: no code starts until the cards, shell and sidebar lanes have landed (they share the web package and its stores). Size: L (7): scope 2 (several web components, one shared composer), PRs 3, risk 1 (UI, no wire change), decisions 2 (eleven design choices below), verification 2 (light and dark frames, real window).
 
 ## Why

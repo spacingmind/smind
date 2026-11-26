@@ -2,7 +2,7 @@ package providers
 
 import "fmt"
 
-// Browser reach (ADR-0061 section 9, docs/plans/active/browser-for-agents-pr5.md):
+// Browser reach (ADR-0061 section 9, docs/plans/completed/browser-for-agents-pr5.md):
 // which providers get the `smind-browser` MCP row. ONE table decides it, with a
 // row for every registered provider and every compatible recipe; a drift test
 // fails when a provider has none. An unknown provider never gets the browser.

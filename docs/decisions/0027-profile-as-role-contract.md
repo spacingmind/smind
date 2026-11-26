@@ -172,7 +172,7 @@ is `cli_exited`, or `rate_limited` with a known reset time that has passed
 error, a rate limit before or without a reset time, no stored session) keeps
 no disposition. The wire is unchanged (the same additive `disposition` field);
 the status stays `error`. Web, mobile and CLI read the field and never derive
-resumability themselves. See `docs/plans/active/continue-on-resumable-failed.md`.
+resumability themselves. See `docs/plans/completed/continue-on-resumable-failed.md`.
 
 ### 5. Sizing
 

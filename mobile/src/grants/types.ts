@@ -1,4 +1,4 @@
-// Wire shapes of the saved-grant surface (docs/plans/active/saved-grants.md): the offer a permission request
+// Wire shapes of the saved-grant surface (docs/plans/completed/saved-grants.md): the offer a permission request
 // carries (internal/taskrunner GrantOffer) and a row of permission.grants.list. Every string is daemon-provided
 // (the command is agent-authored text) and only ever drawn as plain <Text>.
 

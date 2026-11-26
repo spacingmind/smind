@@ -457,7 +457,7 @@ func TestCapText(t *testing.T) {
 }
 
 // TestMeasureRetention prints the retention numbers on a synthetic database
-// (docs/plans/active/run-events-retention.md): SMIND_MEASURE_DB=<dir with
+// (docs/plans/completed/run-events-retention.md): SMIND_MEASURE_DB=<dir with
 // smind.db> go test ./internal/runs -run MeasureRetention -v. Skipped otherwise;
 // the database is modified, so point it at a copy.
 func TestMeasureRetention(t *testing.T) {

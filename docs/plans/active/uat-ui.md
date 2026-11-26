@@ -1,5 +1,7 @@
 # UAT UI — user-journey sweep of the web and desktop apps
 
+Open: J44/J55/J56 and S-01/S-02 verification on merged builds unticked; P3 leftovers B-09, A-14, A-15 unfixed; Progress checkboxes stale (phase 3 is its own plan)
+
 Epic (Human, via Supervisor, 2026-10-31): find the bugs a user really hits by running full user journeys, fix them, and lock them with a Playwright regression suite.
 Size: L (7) — scope 2 (web, desktop, harness), PRs 2 (three phases), risk 0 (phase 1 changes no product code), decisions 1 (CI suite placement), verification 2 (screenshots in two themes and two widths, real daemon).
 

@@ -64,7 +64,7 @@ jobs:
           manifest-file: .release-please-manifest.json
 
   # The release commit's own CI must be green before anything is uploaded
-  # (docs/plans/active/desktop-release-hygiene.md, item 2). `release-please`
+  # (docs/plans/completed/desktop-release-hygiene.md, item 2). `release-please`
   # and ci.yml both start on the same push, independently, so without this
   # a release could publish from a red, still-running or never-run commit.
   # The gate only blocks `publish` (builds run in parallel with it, so a red
@@ -423,7 +423,7 @@ jobs:
             scripts/sign-checksums.sh dist "$VERSION"
           rm -f "$key" "$key.pub"
 
-      # One consistent set or nothing is uploaded (docs/plans/active/desktop-release-hygiene.md,
+      # One consistent set or nothing is uploaded (docs/plans/completed/desktop-release-hygiene.md,
       # item 1): versions in the source, the daemon archives, the desktop assets,
       # checksums.txt and its signature, and the sidecar binaries must all agree.
       # latest.json does not exist yet; it is verified below, before it is uploaded.

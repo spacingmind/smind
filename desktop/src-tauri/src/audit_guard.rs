@@ -1,4 +1,4 @@
-//! The audit build's launch guard (docs/plans/active/desktop-audit-app-guard.md).
+//! The audit build's launch guard (docs/plans/completed/desktop-audit-app-guard.md).
 //!
 //! `scripts/desktop-audit-build.sh` builds the app with the `audit-guard` cargo
 //! feature. Such an app must never reach the real daemon: it starts only when
