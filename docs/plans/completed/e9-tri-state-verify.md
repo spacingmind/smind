@@ -71,12 +71,19 @@ Known limit (row 2): "has a signal" is the union over everything `task test` run
 
 ## Progress
 
-- [ ] spec (this file)
-- [ ] classifier + fixtures + test
-- [ ] runner + test
-- [ ] skill text, AGENTS.md, Taskfile and lint wiring
-- [ ] review, mutations
+- [x] spec (this file)
+- [x] classifier + fixtures + test (GLM peer, second attempt; Lead review and mutations)
+- [x] runner + test (GLM peer)
+- [x] skill text, AGENTS.md rule (b), Taskfile and shellcheck wiring (Lead)
+- [x] fresh review, mutations, a real run
 
 ## Validation
 
-(filled in when the work is done)
+- AC1/AC2: `sh scripts/verify-classify_test.sh` (31 cases: one or more per table row, `flaky-fails-stay-fail`, `exit0-with-network-text-passes`, `usage-errors`, node, sh and TAP failures with environment text in their log). Mutations on committed code, each failing its named case: row 11 returning INCONCLUSIVE (`row11-unrecognised`), exit 124 rule removed (`row6-timeout`), environment rows checked before the FAIL row (`flaky-fails-stay-fail`), exit 0 allowed to become INCONCLUSIVE on network text (`exit0-with-network-text-passes`), the new FAIL markers removed (`row5-sh-test-fail-with-env-text`), the shellcheck-skip pattern unanchored (`row1-echoed-command-is-not-a-skip`).
+- AC3: `sh scripts/verify_test.sh` (fake `task`): all pass, test FAIL stops lint, INCONCLUSIVE lets lint run, FAIL beats INCONCLUSIVE, timeout (124), TMPDIR under the daemon home, shellcheck skip, unrecognised, tail lines. Mutations (committed code): INCONCLUSIVE exit mapped to 0 (`test-inconclusive`, `timeout`), TMPDIR precheck removed (`tmpdir-in-daemon-home`), FAIL not stopping later steps (`test-fails`), INCONCLUSIVE stopping later steps (`test-inconclusive`).
+- AC4: `.claude/skills/verify/SKILL.md` and AGENTS.md rule (b) rewritten.
+- AC5: both tests are in `task test`; the four scripts are in the `task lint` shellcheck list (shellcheck 0 findings).
+- AC6: no product code; the real run's `bin/` and output directory were removed.
+- A real run: `sh scripts/verify.sh` on this branch (macOS, TMPDIR outside the daemon home) printed `build: PASS`, `test: PASS`, `lint: PASS` and `VERIFY: PASS`, exit 0.
+- One fresh review (attack): found that failing node, sh and TAP tests had no FAIL marker, so one with `Cannot find module` or `connection refused` in its log was INCONCLUSIVE (breaking the flaky rule): fixed with the markers above plus three fixtures and cases. Also fixed: the Taskfile-echoed command text no longer counts as a shellcheck skip. Accepted and documented: row 2's signal is a union over everything `task test` runs; `timeout` may leave orphaned children on some systems; the precheck covers `TMPDIR` only.
+- Not verified: INCONCLUSIVE on a real machine without `bun` or without network (only fixtures and fake `task`); `gtimeout` path; Linux (shell scripts use POSIX tools only, run on macOS).
