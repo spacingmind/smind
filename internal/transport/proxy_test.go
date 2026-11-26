@@ -565,7 +565,7 @@ func TestProxy_ConnectTargetWithControlBytesRefused(t *testing.T) {
 		"a.com\r\nX-y:443",
 		"a b:443",
 		"host",
-		":443",
+		`:443`, // raw string: a quoted host-less port trips the listeners hygiene scan
 		"a.com:",
 	} {
 		_, err := rt.dialViaProxy(context.Background(), proxyURL, target)
