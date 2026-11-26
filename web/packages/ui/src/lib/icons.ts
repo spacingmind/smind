@@ -203,6 +203,8 @@ export const Icons = {
   /** Adjustable run options (as opposed to app settings). */
   options: SlidersHorizontal,
   shortcuts: Keyboard,
+  /** The terminal key bar's keyboard toggle (ui-cleanup-b1 H2a); `shortcuts` stays for the Settings Shortcuts tab. */
+  keyboard: Keyboard,
   help: CircleQuestionMark,
   /** The agent asking the user a question (same "?" mark as help). */
   question: CircleQuestionMark,

@@ -66,6 +66,7 @@ describe("icon registry", () => {
         "inbox": "Inbox",
         "info": "Info",
         "issue": "CircleDot",
+        "keyboard": "Keyboard",
         "link": "Link2",
         "listChecks": "ListChecks",
         "lock": "Lock",
