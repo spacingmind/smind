@@ -67,7 +67,7 @@ describe("role-pack banner", () => {
       if (n === 1) throw new RpcError("profile.rolePack.check: boom", "internal");
       return staleLeadCheck();
     });
-    expect(await screen.findByTestId("role-pack-error")).toHaveTextContent("boom");
+    expect(await screen.findByTestId("role-pack-error")).toHaveTextContent("Boom.");
     fireEvent.click(screen.getByTestId("role-pack-retry"));
     expect(await screen.findByTestId("role-pack-banner")).toBeInTheDocument();
     expect(count(d, "profile.rolePack.check")).toBe(2);
@@ -208,10 +208,10 @@ describe("role-pack review dialog", () => {
     fireEvent.click(screen.getByTestId("role-pack-apply"));
     const res = await screen.findByTestId("role-pack-result");
     expect(res).toHaveTextContent("lead changed since the check; the list was refreshed, review it again");
-    expect(res).toHaveTextContent("Failed: disk full");
+    expect(res).toHaveTextContent("Failed: Disk full.");
     fail = true;
     fireEvent.click(screen.getByTestId("role-pack-apply"));
-    expect(await screen.findByTestId("role-pack-apply-error")).toHaveTextContent("local only");
+    expect(await screen.findByTestId("role-pack-apply-error")).toHaveTextContent("Local only.");
     expect(screen.getByTestId("role-pack-review")).toBeInTheDocument();
     expect(applies(d)).toHaveLength(2);
   });
@@ -244,5 +244,34 @@ describe("role-pack review dialog", () => {
     expect(await screen.findByTestId("role-pack-result")).toBeInTheDocument();
     expect(screen.queryByTestId("role-pack-apply")).toBeNull();
     expect(screen.queryByTestId("role-pack-nothing-by-default")).toBeNull();
+  });
+
+  it("rolepack_errors_drop_the_method_label", async () => {
+    renderSection(() => {
+      throw new RpcError("profile.rolePack.check: database is locked", "internal");
+    });
+    const bannerError = await screen.findByTestId("role-pack-error");
+    expect(bannerError).toHaveTextContent("Database is locked.");
+    expect(bannerError.textContent).not.toContain("profile.rolePack.check");
+    cleanup();
+
+    let n = 0;
+    await openReview((method) => {
+      if (method === "profile.rolePack.check") return staleLeadCheck();
+      n += 1;
+      if (n === 1)
+        return {
+          backupDir: "",
+          dryRun: false,
+          results: [{ seat: "lead", id: 12, fields: ["instructions"], outcome: "failed", error: "profile.rolePack.apply: skill nope not found" }],
+        };
+      throw new RpcError("profile.rolePack.apply: backup directory /root/x: permission denied", "internal");
+    });
+    fireEvent.click(screen.getByTestId("role-pack-apply"));
+    expect(await screen.findByTestId("role-pack-result")).toHaveTextContent("Failed: Skill nope not found.");
+    fireEvent.click(screen.getByTestId("role-pack-apply"));
+    const applyError = await screen.findByTestId("role-pack-apply-error");
+    expect(applyError).toHaveTextContent("Backup directory /root/x: permission denied.");
+    expect(applyError.textContent).not.toContain("profile.rolePack.apply");
   });
 });

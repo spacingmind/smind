@@ -1,4 +1,5 @@
 import type { RolePackApplyResult, RolePackField } from "@/lib/role-pack-types";
+import { daemonSentence } from "@/lib/daemon-sentence";
 
 /**
  * Every user-facing sentence of role-pack sync (PR 2), pure so a test can pin
@@ -47,7 +48,7 @@ export function outcomeText(r: RolePackApplyResult): string {
     case "changed_meanwhile":
       return `${r.seat} changed since the check; the list was refreshed, review it again`;
     case "failed":
-      return `Failed: ${r.error ?? ""}`;
+      return `Failed: ${daemonSentence(r.error ?? "")}`;
     case "dry_run":
       return `Would update ${r.seat}: ${fields}`;
   }

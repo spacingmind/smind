@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { FormError } from "@/components/ui/form-error";
 import { useApplyRolePack } from "@/hooks/use-role-pack";
 import { fieldLabel, outcomeText, stateLabel } from "@/lib/role-pack-text";
+import { daemonSentence } from "@/lib/daemon-sentence";
 import type { RolePackCheck, RolePackField, RolePackSeat } from "@/lib/role-pack-types";
 import { cn } from "@/lib/utils";
 
@@ -135,7 +136,7 @@ export function RolePackReviewDialog({
                 )}
               </div>
             )}
-            <FormError message={apply.error ? apply.error.message : null} testId="role-pack-apply-error" />
+            <FormError message={apply.error ? daemonSentence(apply.error.message) : null} testId="role-pack-apply-error" />
           </div>
           <DialogFooter className="items-center">
             <Button type="button" variant="outline" disabled={pending} data-testid="role-pack-close" onClick={() => onOpenChange(false)}>

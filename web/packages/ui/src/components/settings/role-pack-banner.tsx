@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { NoticeAction, NoticeBanner } from "@/components/ui/notice-banner";
 import { useRolePackCheck } from "@/hooks/use-role-pack";
 import { RolePackReviewDialog } from "@/components/settings/role-pack-review";
+import { daemonSentence } from "@/lib/daemon-sentence";
 import { bannerText, currentLine } from "@/lib/role-pack-text";
 
 /**
@@ -19,7 +20,7 @@ export function RolePackBanner() {
     const message = check.error instanceof Error ? check.error.message : String(check.error);
     return (
       <div data-testid="role-pack-error" role="alert" className="flex flex-col gap-1 text-ui-sm text-foreground-muted">
-        <span>Could not check role prompts: {message}</span>
+        <span>Could not check role prompts: {daemonSentence(message)}</span>
         <Button type="button" size="sm" variant="outline" data-testid="role-pack-retry" onClick={() => void check.refetch()}>
           Retry
         </Button>
