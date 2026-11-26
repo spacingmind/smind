@@ -13,13 +13,13 @@ import {
 
 /**
  * The ambient quota notice for the composer's provider (ADR-0059 F, D5).
- * Reads only the shared cached usage reports -- `useUsageReports()` with its
- * default `touch: false`, so mounting this never adds a touch, a refresh or
- * any other `account.usage` request beyond the one cached read every usage
- * reader shares (ADR-0028 call budget).
+ * Reads only the shared usage cache that a usage surface or a live `account.usage`
+ * event fills (`useUsageReports({ enabled: false })`): it sends no request of any
+ * mode, not even the `cached` read, so the app never calls `account.usage` before a
+ * usage surface opens (ADR-0028 call budget; `App.test.tsx` pins it).
  */
 export function useQuotaNotice(provider: string): { notice: QuotaNotice | null; dismiss: () => void } {
-  const { snapshot } = useUsageReports();
+  const { snapshot } = useUsageReports({ enabled: false });
   const now = useNow();
   const { providers } = useProviderCatalog();
   const keys = useSyncExternalStore(subscribeDismissedQuotaNotices, readDismissedQuotaNotices, readDismissedQuotaNotices);
