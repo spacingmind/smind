@@ -5,7 +5,7 @@
 **Proposed — 2026-11-01** (implemented, unmerged, in PR #797). The *direction* is the Human's (2026-11-01): the landing page gets a **hybrid demo** — the hero stays a light
 coded mock (landing PR #34, another Lead), plus a "Try it live" entry that opens the **real** smind web UI (`web/packages/ui`) in **demo
 mode**, hosted at `app.spacingmind.com`, **demo only for now**. This ADR is the design the Human reviews; the demo is built as
-*Proposed* in parallel (`docs/plans/active/web-demo-mode.md`), so a change requested in review is a change to unmerged code.
+*Proposed* in parallel (`docs/plans/completed/web-demo-mode.md`), so a change requested in review is a change to unmerged code.
 
 Open for the Human in this ADR: the **hosting option** ([section 8](#8-hosting)) and the **infra steps** ([section 9](#9-the-humans-infra-steps)).
 Everything else is a Lead default, listed so it can be vetoed.

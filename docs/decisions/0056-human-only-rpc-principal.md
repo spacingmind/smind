@@ -4,7 +4,7 @@
 
 **Proposed — 2026-11-09. Not accepted: the Human decides D1-D4 (a default must not be assumed).** Narrows [ADR-0017](0017-mcp-server.md) (an orchestrating agent can never answer) and
 [ADR-0019](0019-provider-native-permission-modes.md) (smind never decides a request is safe) at the one place they depend on an assumption this record questions. Builds on the floor rule
-and CLI refusal of `docs/plans/active/agent-self-approve-hardening.md`, which narrow the hole without closing it. The first draft recommended a default; a review found that default
+and CLI refusal of `docs/plans/completed/agent-self-approve-hardening.md`, which narrow the hole without closing it. The first draft recommended a default; a review found that default
 breaks the unattended workflow of external orchestrators (see [Automation principals](#automation-principals-and-why-they-are-not-told-apart-from-an-agent)), so this revision
 presents the analysis and leaves the decisions open. Nothing is built for this record.
 

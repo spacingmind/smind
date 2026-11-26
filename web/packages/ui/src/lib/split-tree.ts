@@ -30,7 +30,7 @@ export interface SplitGroup {
 export type SplitNode = { kind: "pane"; pane: SplitPane } | { kind: "group"; group: SplitGroup };
 
 /**
- * A remembered starting ratio per split direction (D3 of docs/plans/active/desktop-tabs.md): the fraction the FIRST child (the left
+ * A remembered starting ratio per split direction (D3 of docs/plans/completed/desktop-tabs.md): the fraction the FIRST child (the left
  * pane of a horizontal split, the top pane of a vertical one) takes when a NEW two-pane group is created. Absent = the 50/50 default.
  */
 export interface SplitRatios {

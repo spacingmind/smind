@@ -17,7 +17,7 @@
 #
 # It refuses an AUDIT_ID that could collide with the real identifier or escape a path, and an
 # out-dir that is, or lies under, the real app-data, WebKit, cache or log directory, /Applications
-# or the real ~/.smind. See docs/plans/active/desktop-audit-build.md.
+# or the real ~/.smind. See docs/plans/completed/desktop-audit-build.md.
 set -euo pipefail
 
 die() { echo "desktop-audit-build: $*" >&2; exit 1; }
@@ -77,7 +77,7 @@ echo "identifier: $identifier"
 
 # The build target and the one tauri command line, fixed before the dry-run exit so a test can assert
 # on exactly what the real build runs. `audit-guard` compiles the launch guard in (see
-# docs/plans/active/desktop-audit-app-guard.md); only this script ever passes it.
+# docs/plans/completed/desktop-audit-app-guard.md); only this script ever passes it.
 case $(uname -m) in
   arm64 | aarch64) target=aarch64-apple-darwin goarch=arm64 ;;
   x86_64) target=x86_64-apple-darwin goarch=amd64 ;;

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Bounds of PRDetails (docs/plans/active/pr-panel.md, decision 8): third-party
+// Bounds of PRDetails (docs/plans/completed/pr-panel.md, decision 8): third-party
 // text is cut to these sizes and the matching Truncated flag is set.
 const (
 	DetailsBodyMax     = 32 << 10

@@ -1,5 +1,5 @@
 // Pins how release-please.yml runs scripts/verify-release-artifacts.mjs
-// (docs/plans/active/desktop-release-hygiene.md items 1 and 4): the verifier runs in `publish`
+// (docs/plans/completed/desktop-release-hygiene.md items 1 and 4): the verifier runs in `publish`
 // BEFORE anything is uploaded, on dry runs too, with every check on (only the manifest check is
 // skipped the first time, because latest.json does not exist yet), and runs again on latest.json
 // before that file is uploaded. A static read of the workflow text, like ci-green-gate-wiring.

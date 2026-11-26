@@ -1,5 +1,7 @@
 # Agent questions reach the human (ADR-0055)
 
+Open: AC9 Codex half waits on probe; PR4 grants (AC11) unbuilt; ADR-0055 still Proposed
+
 Status: **PR1 and PR2 (ACP half) merged; PR3 (mobile card + push) in review** (decisions D1-D10 accepted as recommended on 2026-11-09; ADR-0055 stays Proposed until the first implementation PRs land).
 See [ADR-0055](../../decisions/0055-agent-questions-reach-the-human.md). Size: L (wsapi, inbox, events, UI on three surfaces, a table): each PR below with a
 validation contract (ADR-0045).

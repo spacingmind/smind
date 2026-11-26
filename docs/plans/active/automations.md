@@ -1,5 +1,7 @@
 # Automations (signal to task) — implementation plan for ADR-0044
 
+Open: push on automation.paused (AC21) not implemented; follow-up PR
+
 Binding text: [ADR-0044](../../decisions/0044-automations.md) (Accepted 2026-10-27, all twelve answers as recommended). This file is the spec for the code; the ADR owns the *why*.
 Size: L (8) — scope 2 (daemon + web + mobile read-only), PRs 2 (four, with ordering), risk 2 (unattended agent launch, security rails), decisions 0 (ADR accepted), verification 2 (scripted-`gh` live daemon run, UI screenshots).
 

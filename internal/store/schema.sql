@@ -913,7 +913,7 @@ CREATE TABLE IF NOT EXISTS steward_review_passes (
 );
 
 -- permission_grants: saved "allow always in this project" decisions (ADR-0055
--- section 8, docs/plans/active/saved-grants.md). One row per project and exact
+-- section 8, docs/plans/completed/saved-grants.md). One row per project and exact
 -- RAW command (command_sha = SHA-256 of the command the policy engine judged;
 -- the command_display is the redacted, heredoc-elided text a human saw).
 -- Written only by a human answer; never edited, only revoked or expired.

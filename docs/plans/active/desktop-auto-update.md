@@ -1,5 +1,7 @@
 # Desktop auto-update (Tauri 2 updater)
 
+Open: PARTIAL: real-window update e2e, Windows NSIS path, first real release-to-release update (needs the Human / a second release)
+
 Goal (user, 2026-10-11): the desktop app updates itself from GitHub
 Releases, with signed updates, a prompt before anything is downloaded, and
 no silent installs. Decisions and rationale: ADR-0023
@@ -301,7 +303,7 @@ workflow's `publish` job end to end.
   - U7 daemon interplay: no code change, never verified live (`daemon-survives-app-update`).
   - Local end-to-end in a real window (`local-update-end-to-end`, `local-menu-check`, `local-bad-signature-rejected`, `local-later-dismiss`, `local-endpoint-down-launch-silent`).
   - The Windows NSIS updater path on a real Windows machine; the first real in-app update from one published release to the next (two releases with updater artifacts now exist, but no evidence it was done).
-  - ~~Follow-up from `desktop-update-e2e`: `requireSignedVersion` is not enabled in `tauri.conf.json`.~~ Done: `docs/plans/active/desktop-require-signed-version.md` (flag on, release scripts check the signed version).
+  - ~~Follow-up from `desktop-update-e2e`: `requireSignedVersion` is not enabled in `tauri.conf.json`.~~ Done: `docs/plans/completed/desktop-require-signed-version.md` (flag on, release scripts check the signed version).
 
 - [x] U1 config, keys, plugin (`ecaaccf`)
 - [x] U2 Rust check/install (`05bd511`, review fixes `4cf553e`)

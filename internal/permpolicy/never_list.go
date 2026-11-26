@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// The never-list (docs/plans/active/never-list-floor.md): deny-only floor rule
+// The never-list (docs/plans/completed/never-list-floor.md): deny-only floor rule
 // `no-catastrophic` for commands that wipe the filesystem root or the home,
 // format or zero a device, fork-bomb the machine or power it off. It is
 // compiled in like every floor rule. It only adds what `no-destructive-outside`

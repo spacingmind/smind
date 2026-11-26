@@ -16,7 +16,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
-// The browser settings RPCs (ADR-0061, docs/plans/active/browser-for-agents-pr3.md).
+// The browser settings RPCs (ADR-0061, docs/plans/completed/browser-for-agents-pr3.md).
 // ALL THREE ARE HUMAN-ONLY: none is on RunScopedMethods or in a plugin
 // capability, each refuses a nil or run-scoped caller (refuseAgent), and all
 // three names are on permpolicy.HumanOnlyRPCs so the policy floor denies a shell

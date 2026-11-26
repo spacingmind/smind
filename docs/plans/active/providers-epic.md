@@ -1,5 +1,7 @@
 # Provider layer v2 (ADR-0046)
 
+Open: Progress checkboxes stale ([ ] PR4/PR5/PR6); ADR-0046 still Proposed (Human veto window); built-in glm provider swap deferred awaiting the Human
+
 Status: active (2026-10-30). Binding text: [`docs/decisions/0046-provider-spec-harness-overlay.md`](../../decisions/0046-provider-spec-harness-overlay.md) (Proposed; the ten
 decisions are the Supervisor default 2026-10-30 under the Human's "làm tất", Human may veto). Research input: a local-only note (`docs/research/local/providers-epic-research.md`,
 gitignored); it is cited here as the "local research note" and its section numbers are used.

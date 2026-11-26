@@ -1,5 +1,7 @@
 # DT2 (d) spike: "Open task in new window" and macOS window tabbing
 
+Open: Part 2 (macOS tabbing) probe pending an unlocked screen; recommendation awaits a Supervisor decision
+
 Status: write-up only. No product code. Written 2026-11-15 against `origin/wave/desktop`. Nothing here was tried in a real window (the screen was locked), so every "works" below is a reading of the code and the Tauri 2.11.6 / tao APIs, and the risks list says what only a real window can settle.
 
 ## Question

@@ -1,6 +1,6 @@
 package hygiene
 
-// Public-text gates (E9 P0, docs/plans/active/e9-p0-ci-guards.md part B). Three checks over the text people outside the
+// Public-text gates (E9 P0, docs/plans/completed/e9-p0-ci-guards.md part B). Three checks over the text people outside the
 // team read:
 //
 //   - no other product's name (the list is committed only as SHA-256 hashes, see testdata/foreign-products.sha256);

@@ -27,7 +27,7 @@ function messageOf(error: unknown): string {
 }
 
 /**
- * Settings -> Browser (ADR-0061, docs/plans/active/browser-for-agents-settings-ui.md): the per-workspace switch
+ * Settings -> Browser (ADR-0061, docs/plans/completed/browser-for-agents-settings-ui.md): the per-workspace switch
  * that lets agents open and read pages on this machine, its allowlist, the residual limits stated next to the
  * switch, which agents get the browser, and whether a run is using it now. Everything shown comes from the one
  * `browser.settings.get` view; the only changes are `browser.settings.set` and `browser.data.clear`, both

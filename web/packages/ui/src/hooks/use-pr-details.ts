@@ -8,7 +8,7 @@ import { queryKeys } from "@/lib/query-keys";
 import type { CheckLogTail, PRDetails } from "@/lib/types";
 
 /**
- * The PR panel's data (G9, docs/plans/active/pr-panel.md): a pull, never a push. The query is enabled only while the
+ * The PR panel's data (G9, docs/plans/completed/pr-panel.md): a pull, never a push. The query is enabled only while the
  * PR tab is focused and the task has a PR, after the daemon has been told the tab is open (`task.prDetailsFocus`:
  * without it a read never fetches). While checks are pending it refetches every 20 s; the daemon enforces the rule
  * below the RPC, so this is a request, not a budget.

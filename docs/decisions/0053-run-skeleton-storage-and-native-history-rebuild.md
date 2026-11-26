@@ -8,8 +8,8 @@ tool output forever. The Human accepted H1–H8 as recommended (recorded under [
 proceeds one PR at a time, each reviewed by the Human. The spec and the PR split are in
 [`docs/plans/active/run-skeleton-storage.md`](../plans/active/run-skeleton-storage.md).
 
-Builds on the lazy history and byte budget of `docs/plans/active/daemon-memory.md` (#823) and **amends** the 30-day retention spec
-`docs/plans/active/run-events-retention.md` (#827, being implemented in parallel; see [Retention](#retention-827)). Touches
+Builds on the lazy history and byte budget of `docs/plans/completed/daemon-memory.md` (#823) and **amends** the 30-day retention spec
+`docs/plans/completed/run-events-retention.md` (#827, being implemented in parallel; see [Retention](#retention-827)). Touches
 [ADR-0008](0008-structured-run-events.md) (event shape; `EventType` stays append-only), ADR-0010 (unknown ACP kinds), ADR-0016 (one
 provider session per chat), ADR-0041 (orchestration readers), ADR-0048 (fleet reads).
 
@@ -401,7 +401,7 @@ the read contract that calls it (`historySource`, `detail`, "Load full history")
 ## Implemented: ACP `session/load` (explicit request only)
 
 `internal/history/native/acp.go`, `taskrunner.Runner.ReplayACPSession`, `acp.Client.LoadSessionReplay`. Spec and tests:
-[`docs/plans/active/acp-session-load.md`](../plans/active/acp-session-load.md).
+[`docs/plans/completed/acp-session-load.md`](../plans/completed/acp-session-load.md).
 
 - **What the protocol guarantees, and what it does not.** `session/load` is allowed only when the agent advertised `loadSession`; the agent
   must replay the whole conversation as `session/update` notifications and answer after the last one. The protocol says nothing about the

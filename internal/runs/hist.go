@@ -14,7 +14,7 @@ import (
 // Go's live-heap target is ~2x live with GOGC=100, so 64 MB of history costs
 // ~130 MB worst case on top of the runtime baseline. A running run's history is
 // never counted or evicted; a finished run's history that is not resident is
-// served complete from the store (docs/plans/active/daemon-memory.md).
+// served complete from the store (docs/plans/completed/daemon-memory.md).
 const DefaultHistoryBudget int64 = 64 << 20
 
 // histState tracks which finished runs have their history resident. Guarded by

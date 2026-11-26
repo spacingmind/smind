@@ -1482,7 +1482,7 @@ func (d runPermissionDecider) decide(ctx context.Context, summary string, detail
 	}
 	policyOn := detail != nil && detail.Policy != nil
 
-	// A saved grant (docs/plans/active/saved-grants.md) only ever turns the
+	// A saved grant (docs/plans/completed/saved-grants.md) only ever turns the
 	// engine's plain, grantable `ask` into allow_once, after the floor and every
 	// rule; a request that qualifies and has no usable grant is offered one.
 	var grant *grantOffer

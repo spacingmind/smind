@@ -4,7 +4,7 @@ import { type Page, type TestInfo } from '@playwright/test'
 import { openRpc } from '../fixtures/rpc'
 import { type App, expect, test, waitForRpc } from '../fixtures/test'
 
-// Settings -> Browser (docs/plans/active/browser-for-agents-settings-ui.md). BS-01..BS-04 drive the REAL daemon's human-only
+// Settings -> Browser (docs/plans/completed/browser-for-agents-settings-ui.md). BS-01..BS-04 drive the REAL daemon's human-only
 // browser.settings RPCs. BS-F* put the section in states a spec cannot reach without a model call or another daemon
 // environment (kill switch, no browser installed, a live session) by answering the browser.* RPCs locally through
 // page.routeWebSocket (the same proxying the grants spec uses). Frames are written only when BROWSER_FRAMES_DIR is set;

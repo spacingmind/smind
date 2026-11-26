@@ -138,8 +138,8 @@ These are the checks the Steward made by hand, hard-coded:
 | `no-curl-sh` | a pipe from a network fetch into an interpreter (`curl … \| sh`, `wget -O- … \| bash`) |
 | `no-real-home-tests` | a command that sets `HOME` or `SMIND_HOME` to `$HOME`, `~`, or unsets them for a test/mutation run (tests must use `HOME=$(mktemp -d)`) |
 | `no-add-all` | `git add -A`, `git add .`, `git add -u` (files are added by name; binaries and churn are checked before every commit) |
-| `no-self-approve` | an agent answering its own requests: `smind task approve\|deny\|answer` and `smind permission ...` however wrapped, quoted or called by path, and any command whose raw text (heredoc bodies included) names a human-only daemon method (`run.respondPermission`, `run.answerQuestion`, `inbox.resolve`, the heredoc reveals). Defence in depth: see `docs/plans/active/agent-self-approve-hardening.md` for what it cannot see |
-| `no-catastrophic` | a catastrophic command (E1.1, `docs/plans/active/never-list-floor.md`): `rm -rf` of the root, the home or a system directory, formatting or zeroing a device, a fork bomb, a power-off, also inside `su -c`, `ssh`, `eval` or a shell fed text. Deny-only |
+| `no-self-approve` | an agent answering its own requests: `smind task approve\|deny\|answer` and `smind permission ...` however wrapped, quoted or called by path, and any command whose raw text (heredoc bodies included) names a human-only daemon method (`run.respondPermission`, `run.answerQuestion`, `inbox.resolve`, the heredoc reveals). Defence in depth: see `docs/plans/completed/agent-self-approve-hardening.md` for what it cannot see |
+| `no-catastrophic` | a catastrophic command (E1.1, `docs/plans/completed/never-list-floor.md`): `rm -rf` of the root, the home or a system directory, formatting or zeroing a device, a fork bomb, a power-off, also inside `su -c`, `ssh`, `eval` or a shell fed text. Deny-only |
 
 The floor is the **only** place `deny` is non-negotiable; `deny` rules a human adds are in the same bucket for precedence but removable by editing the file. A floor `deny`
 resolves the request to a deny option immediately and the agent sees an ordinary "denied" with the floor id in the message, so it can adapt (use `git add <file>`).
@@ -149,7 +149,7 @@ resolves the request to a deny option immediately and the agent sees an ordinary
 The engine runs on every OS (follow-up of release 0.17). The path flavour is chosen per request (`platform`), not by the daemon's build: a Windows request uses
 drive/UNC, case-insensitive and junction-aware path handling. The command splitter treats backslashes as Windows-literal path separators; a `\` before a shell
 metacharacter (`"`, `\`, `$`, a backtick) keeps the POSIX escape meaning. Paths the engine cannot place (`C:foo`, device paths, alternate streams, trailing dots) escalate or
-deny, never allow. A literal `powershell|pwsh -Command` / `cmd /c` payload is parsed in its own dialect and its inner commands are judged by the floor and the rules like any other; the wrapper itself never becomes an allow, and a payload the splitter cannot be sure of (encoded command, script block, escapes, expansions) still escalates. See `docs/plans/active/permpolicy-windows.md`.
+deny, never allow. A literal `powershell|pwsh -Command` / `cmd /c` payload is parsed in its own dialect and its inner commands are judged by the floor and the rules like any other; the wrapper itself never becomes an allow, and a payload the splitter cannot be sure of (encoded command, script block, escapes, expansions) still escalates. See `docs/plans/completed/permpolicy-windows.md`.
 
 #### 2.2 What it auto-approves and what it escalates
 

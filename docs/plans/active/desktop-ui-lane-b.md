@@ -1,5 +1,7 @@
 # DT-UI Lane B: desktop shell chrome (window size, full-page views keep the sidebar, native pass)
 
+Open: only PR 2a is validated in this file; PR 2b and PR 10 (AC4-AC12) unrecorded; Dock menu open decision
+
 Source: the desktop design review (ranks 2 and 10; local-only research note, not committed). Branch flow: every PR targets `wave/desktop`, each from a fresh `origin/wave/desktop`, never stacked.
 
 ## Checked against origin/wave/desktop (already shipped, not gaps)

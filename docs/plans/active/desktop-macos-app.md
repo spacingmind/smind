@@ -1,5 +1,7 @@
 # macOS desktop app (packaging, bundled daemon, Dock lifecycle)
 
+Open: PARTIAL: M3 manual interactions (dock reopen, badge, quarantine, Settings Daemon banner) never recorded as done
+
 Goal (user, 2026-10-10): "đang xài mac — làm app macOS luôn, refs từ
 a reference desktop workbench, a reference workbench". Today there is no macOS desktop build:
 

@@ -1,5 +1,7 @@
 # Office mode: interface mode, binary-safe file read, PDF preview, deliverable cards (ADR-0049)
 
+Open: O1 interface-mode toggle UI (sidebar/palette gating, Mod+Shift+U) not started; Tauri desktop shells and macOS/Linux real-app runs not verified
+
 Status: active (2026-10-31). Binding text: [`docs/decisions/0049-office-mode.md`](../../decisions/0049-office-mode.md) (Accepted; H1–H6 are the
 Human's answers, S1–S18 are Supervisor defaults 2026-10-31, Human may veto; a veto changes the PR named in the ADR's table).
 

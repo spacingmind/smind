@@ -2,7 +2,7 @@ import type { CheckItem, CheckLogTail, PRDetails, ReviewThread } from "@/lib/typ
 import { CHECK_LOG_LABEL, PR_REVIEW_LABEL, quoteUntrusted } from "@/lib/untrusted-quote";
 
 /**
- * The prompt text "Send to chat" puts in the composer for a PR thread or check (docs/plans/active/pr-panel.md,
+ * The prompt text "Send to chat" puts in the composer for a PR thread or check (docs/plans/completed/pr-panel.md,
  * decision 8). Pure: everything GitHub-authored (comment text, author, the check's name and log) goes inside the
  * quoted block; the lines built here outside the fence carry only the PR number, the repo, the thread's path and
  * line, our own status words and the daemon-validated URL. The PR title is third-party text too, so it is not

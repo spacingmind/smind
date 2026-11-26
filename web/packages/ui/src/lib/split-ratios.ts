@@ -2,7 +2,7 @@ import { MIN_SPLIT_SIZE, type SplitRatios } from "@/lib/split-tree";
 import { readStored, STORAGE_KEYS, writeStored } from "@/lib/storage";
 
 /**
- * D3 of docs/plans/active/desktop-tabs.md: the last ratio a person set for a two-pane split in a workspace becomes the starting ratio
+ * D3 of docs/plans/completed/desktop-tabs.md: the last ratio a person set for a two-pane split in a workspace becomes the starting ratio
  * of the next split created in that workspace (the per-task layout stays authoritative once it exists). One small map in
  * localStorage keyed by `w<workspaceId>` (a non-numeric key keeps insertion order, which the oldest-first cap relies on), `{ w1: { horizontal?, vertical? } }`, each value the FIRST child's fraction.
  * Read and write follow lib/storage.ts: a bad value never throws and reads as "no remembered ratio"; a failed write is dropped.

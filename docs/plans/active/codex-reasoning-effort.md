@@ -1,5 +1,7 @@
 # Codex reasoning effort (per-run, discovered per model)
 
+Open: frames await Supervisor review
+
 Status: spec (docs-only PR), 2026-11-04. Owner: Lead of task `codex-reasoning-effort`.
 
 ## Problem
