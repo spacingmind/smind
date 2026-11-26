@@ -54,4 +54,22 @@ func TestOutboundProxyFinding(t *testing.T) {
 	if !strings.Contains(fs[0].Message, "...") || len(fs[0].Message) >= 400 {
 		t.Fatalf("NO_PROXY not truncated: %q", fs[0].Message)
 	}
+
+	// (e) a value that does not parse says so instead of blaming the scheme.
+	fs = OutboundProxy(proxyEnv(map[string]string{"HTTPS_PROXY": "http://"}))
+	if len(fs) != 1 || fs[0].Level != LevelWarn {
+		t.Fatalf("want one warn finding, got %+v", fs)
+	}
+	if !strings.Contains(fs[0].Message, "could not be parsed") {
+		t.Errorf("message: %q", fs[0].Message)
+	}
+	if strings.Contains(fs[0].Message, "non-http") {
+		t.Errorf("message blames the scheme for an unparsable value: %q", fs[0].Message)
+	}
+	if fs[0].Fix != "fix the proxy URL (scheme://host:port), or unset the variable" {
+		t.Errorf("fix: %q", fs[0].Fix)
+	}
+	if !strings.Contains(fs[0].Message, "HTTPS_PROXY=(unparsable)") {
+		t.Errorf("message does not show the redacted value: %q", fs[0].Message)
+	}
 }
