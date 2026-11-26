@@ -1,8 +1,6 @@
 # TypeScript to Go live relay interop in CI (E12): it already exists; close its trigger gap
 
-Open: the implementation (the workflow and its tests) is the next E9 item; this plan stays active until it ships.
-
-Status: active (spec, 2026-11-15). Size: S (2): scope 1 (one workflow), PR 1, risk 1, decisions 1, verification 0. Code starts from a fresh `develop`.
+Status: completed (2026-11-26; spec 2026-11-15). Size: S (2): scope 1 (one workflow), PR 1, risk 1, decisions 1, verification 0. Code starts from a fresh `develop`.
 
 ## What already exists on `develop`
 
@@ -44,5 +42,7 @@ So a new interop suite would duplicate coverage. The gap is when it runs.
 
 ## Validation
 
-- AC1: the filter is `^(mobile/|internal/relay/|internal/wsapi/|internal/push/|\.github/workflows/mobile-check\.yml$)`, with the reason in the workflow's header comment. AC2: `mobile-check-filter` checks 6 paths that must run and 9 that must not (including `internal/inbox/`, `internal/store/`, look-alike prefixes `internal/wsapiextra/` and `mobilex/`); dropping `internal/wsapi/` from the workflow makes it fail. The docs-only path still reports success at once (the job's other steps are gated on `relevant`, unchanged). AC3: one filter, in this workflow only; `desktop-check` has its own paths for its own client and is left alone. AC4: the integration job's duration on the last two runs where it executed was 87 s and 107 s on a hosted runner, so a wsapi-only PR adds under two minutes; no narrowing needed. AC5: no product code.
-- Not verified: the workflow itself running on a wsapi-only PR (the next such PR is the evidence); the filter is exercised as a regular expression, not by Actions.
+- AC1: the filter is `^(mobile/|internal/relay/|internal/wsapi/|internal/push/|\.github/workflows/mobile-check\.yml$)`, with the reason in the workflow's header comment. AC2: `mobile-check-filter` checks 6 paths that must run and 9 that must not (including `internal/inbox/`, `internal/store/`, look-alike prefixes `internal/wsapiextra/` and `mobilex/`); dropping `internal/wsapi/` from the workflow makes it fail. The docs-only path still reports success at once (the job's other steps are gated on `relevant`, unchanged). AC3: one filter, in this workflow only; `desktop-check` has its own paths for its own client and is left alone. AC4: the integration job's duration on the two runs where it executed when the plan was written was 87 s and 107 s on a hosted runner (the later wsapi-only runs below took 83 s and 96 s for the whole job), so a wsapi-only PR adds under two minutes; no narrowing needed. AC5: no product code.
+- Evidence from Actions (2026-11-26, nothing re-run for it): PR #976 changed only `internal/wsapi/plugin_session_test.go` and a plan file. Its `mobile-check` runs 45632454740 and 45635494723 executed `npm ci`, Typecheck, Unit tests, the Go devharness warm-up and "Integration tests (live Go devharness)" (28 s and 29 s for that step), all `success`; whole job 1 min 23 s and 1 min 36 s on a hosted runner. A docs-only PR (run 45640568611, `docs/aaop-tagline`) ran only "Detect mobile or relay changes", the other steps `skipped`, whole job 11 s: the required check still reports success at once. This closes AC2 on the real workflow and confirms the AC4 cost (under two minutes added, no narrowing needed).
+- AC3 re-checked on develop: the regular expression appears once, in `.github/workflows/mobile-check.yml`; `desktop-check.yml` has its own path list for the Rust client and stays as it is (it already runs the same harness through `tests/relay_harness_interop.rs`).
+- Nothing is left unverified, so nothing was added to `docs/plans/active/human-verification-backlog.md`.
