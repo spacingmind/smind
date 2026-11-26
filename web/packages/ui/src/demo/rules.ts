@@ -405,6 +405,8 @@ export const RULES: Record<string, DemoRule> = {
   "provider.recipes": read({ recipes: [] }),
   "provider.dirSuggestions": read({ suggestions: [] }),
   "profile.list": read((c) => c.session.scenario.profiles),
+  // role-pack sync (ADR-0058): the demo ships no drifted seats, so the check answers nothing (no banner)
+  "profile.rolePack.check": read(null),
   "skill.list": read([]),
   "mcp.list": read([]),
   "plugin.list": read({ globalEnabled: false, plugins: [] }),
@@ -471,6 +473,8 @@ export const REFUSED_METHODS = [
   "permission.revealHeredoc",
   "plugin.disable", "plugin.enable", "plugin.install", "plugin.reload", "plugin.remove", "plugin.update",
   "profile.create", "profile.delete", "profile.update",
+  // writes role prompts: never in the demo
+  "profile.rolePack.apply",
   "provider.addFromRecipe", "provider.addInstance", "provider.clearCooldown", "provider.clearSecret", "provider.reload",
   "provider.setDefaultModel", "provider.setEnv", "provider.setSecret", "provider.updateInstance",
   "scratch.clean",
