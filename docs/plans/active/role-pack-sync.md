@@ -1,6 +1,6 @@
 # Role-pack sync for existing installs (ADR-0058)
 
-Open: PR 2 (daemon RPCs, web banner and review dialog, doctor line per ADR-0058 D4) is specified below and being built; nothing of it is validated yet.
+Open: PR 3 (the optional `--restore <backup>`, ADR-0058 section 8) is not built; PR 1 and PR 2 are validated.
 
 Status: active (2026-11-09). ADR-0058 D1-D6 accepted as recommended (Supervisor, under the Human's delegation). Size: M, two PRs.
 
@@ -90,3 +90,15 @@ Mutation checks on committed code killed every engine, guard and CLI mutation ex
 the `updated_at` clause of the store's conditional UPDATE (the pre-check already rejects every reproducible stale write, so the clause only covers the race between check and UPDATE),
 and the CLI's `expectedUpdatedAt` param (no test can interleave a write between the CLI's list and update).
 Known decision: an empty stored `peer-sonnet.instructions` is the first release's value, so it classifies as stale; a Human who deliberately clears it is overwritten by `--apply` (after a backup, and `--check` shows it first).
+
+## PR 2: progress and validation
+
+Built: the daemon RPCs (`profiles.LineDiff`, `profile.rolePack.check` and `.apply`, the human-only and plugin gates, the method golden), the `smind doctor` line, the demo-daemon rules, the web banner, review dialog, hooks and test client, and `web/e2e/specs/rolepack.spec.ts`. Code written by GLM peers and by peer-sonnet after the GLM 5-hour window ran out, reviewed and integrated by the Lead (staffing in the PR body).
+
+- Validator (ADR-0045): validation 30 on commit `71dd13056`, contract 37, verdict `pass`, `mergeReady`: all 26 named tests, all 8 mutations (M1 to M8 each fail their named test and were restored), commands C1 to C4. One P3 finding: `profile.rolePack.check` is also on the plugin sessions' refused list (extra, intended, untested).
+- AC8 to AC11 and AC17: the Go tests named above, `go test ./internal/profiles ./internal/wsapi ./internal/permpolicy ./cmd/smind`, `sh scripts/verify.sh` PASS (build, `task test`, `task lint`). The demo coverage test (`src/demo/demo-coverage.test.ts`) needed two rules (check: nothing; apply: refused) found by `verify.sh`.
+- AC12 to AC16: the 13 vitest cases in `role-pack-review.test.tsx`, the e2e spec (4 projects, 28 cases), and the full e2e matrix (`E2E_FULL=1 --grep-invert @flaky`, 325 passed, 43 skipped).
+- Frames: light and dark at 1280 and 390 for every state (banner, dialog with diff, after apply with the backup path, conflict and a refused apply, all current, check error, capability confirm) from the e2e harness, plus real-daemon frames from a dogfood daemon with a really stale seeded `lead` (an older released text) and an edited `validator`; every pair opened by the Lead. Findings from the frames, fixed: the apply result named no seat, long diff lines broke mid-word, and the apply error and result sat inside the scrolling body (clipped at 390).
+- Mutations run by the Lead on committed code (before the validator): run-scoped apply, apply missing from the human-only table, apply without backup, a capability field written without a take, the banner applying on its own, a refetch interval on the check, a capability take without its confirmation, the doctor line printing after a failed call.
+- Integration fixes by the Lead (not peers): the apply handler reports a profile list error, the result line names the seat and diff lines wrap at words, the result and error sit above the dialog footer, the demo rules, the e2e assertion for the seat-named result line.
+- Not verified: the native desktop shell and a real phone (mobile has no surface by decision); the review dialog against a daemon with a stale CAPABILITY field (only stubbed: no released capability value differs from the current one, so a real daemon cannot show one).
