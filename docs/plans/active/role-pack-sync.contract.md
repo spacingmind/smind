@@ -18,19 +18,19 @@ acs:
     covers: { tests: [TestDoctorShowsRolePack], frames: [] }
   - id: AC12
     text: "The Profiles section shows the banner with the count and a Review button when updates exist, none when every seat is current (a quiet line instead), and an inline error with Retry when the check fails."
-    covers: { tests: [rolepack_banner_hidden_when_every_seat_is_current, rolepack_banner_shows_the_count_and_a_review_button, rolepack_check_error_offers_retry], frames: [01-banner, 05-all-current, 06-check-error] }
+    covers: { tests: [rolepack_banner_hidden_when_every_seat_is_current, rolepack_banner_shows_the_count_and_a_review_button, rolepack_check_error_offers_retry], frames: [] }
   - id: AC13
     text: "The check runs when the section opens and nowhere else: no timer, no polling, no refetch on focus."
     covers: { tests: [rolepack_check_runs_once_when_the_section_opens_and_never_polls], frames: [] }
   - id: AC14
     text: "The review dialog lists stale and customised fields per seat with a unified diff marked by + and - characters, capability fields marked with stored and pack values, and changes nothing by itself."
-    covers: { tests: [rolepack_review_lists_stale_and_customised_fields_with_their_diff, rolepack_capability_fields_are_marked, rolepack_nothing_is_applied_without_a_click], frames: [02-dialog-diff] }
+    covers: { tests: [rolepack_review_lists_stale_and_customised_fields_with_their_diff, rolepack_capability_fields_are_marked, rolepack_nothing_is_applied_without_a_click], frames: [] }
   - id: AC15
     text: "Apply N updates sends apply with no take; each other field has a Take that sends take seat.field; a capability take asks for confirmation naming old and new values; after an apply the outcomes and the backup directory are shown and the banner refreshes."
-    covers: { tests: [rolepack_apply_sends_no_take, rolepack_take_sends_the_field, rolepack_capability_take_asks_first, rolepack_backup_path_and_outcomes_are_shown], frames: [03-after-apply, 07-capability-confirm] }
+    covers: { tests: [rolepack_apply_sends_no_take, rolepack_take_sends_the_field, rolepack_capability_take_asks_first, rolepack_backup_path_and_outcomes_are_shown], frames: [] }
   - id: AC16
     text: "A daemon refusal or failed seat is shown as received; changed_meanwhile is explained and refreshes the check; the dialog stays open on error."
-    covers: { tests: [rolepack_changed_meanwhile_is_explained], frames: [04-conflict] }
+    covers: { tests: [rolepack_changed_meanwhile_is_explained], frames: [] }
   - id: AC17
     text: "No change under mobile/; public text says sMind and your workspace and names no other product (hygiene tests pass)."
     covers: { tests: [hygiene_and_mobile_untouched], frames: [] }
@@ -71,6 +71,7 @@ mutations:
   - { id: M6, file: web/packages/ui/src/hooks/use-role-pack.ts, change: "the check gets a refetch interval", expectFail: [rolepack_check_runs_once_when_the_section_opens_and_never_polls] }
   - { id: M7, file: web/packages/ui/src/components/settings/role-pack-review.tsx, change: "a capability Take applies without the confirmation", expectFail: [rolepack_capability_take_asks_first] }
   - { id: M8, file: cmd/smind/doctor.go, change: "the role pack line prints a count when the daemon call failed", expectFail: [TestDoctorShowsRolePack] }
+frames: []
 commands:
   - { id: C1, run: "go build ./... && go vet ./...", timeoutSec: 900 }
   - { id: C2, run: "cd web/packages/ui && bunx tsc -b", timeoutSec: 900 }
@@ -81,4 +82,4 @@ limits: { budgetUsd: 2, maxMinutes: 60 }
 
 # Role-pack sync PR 2 validation contract
 
-Spec: `docs/plans/active/role-pack-sync.md`, section PR 2 (wire, ACs, named tests, frames). The engine and the CLI are PR 1 (merged) and unchanged except `LineDiff` moving into `internal/profiles`. UI states are captured by the Lead (frames `01-banner` to `07-capability-confirm`, light and dark at 1280 and 390) under the dogfood root; the validator checks the tests, the mutations and the commands.
+Spec: `docs/plans/active/role-pack-sync.md`, section PR 2 (wire, ACs, named tests, frames). The engine and the CLI are PR 1 (merged) and unchanged except `LineDiff` moving into `internal/profiles`. Frames are not validator frames: the UI states are captured by the Lead (frames `01-banner` to `07-capability-confirm`, light and dark at 1280 and 390) under the dogfood root; the validator checks the tests, the mutations and the commands.
