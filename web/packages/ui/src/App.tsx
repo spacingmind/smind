@@ -97,8 +97,9 @@ import { useCardFocusStore } from "@/stores/card-focus-store";
 import { useTheme } from "@/hooks/use-theme";
 import type { ActionId } from "@/keyboard/actions";
 import { KeyboardProvider, useActionHandler, useActionRestriction, useKeyboard } from "@/keyboard/keyboard-provider";
-import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
+import { useDesktopCommands } from "@/palette/desktop-commands";
 import type { Command } from "@/palette/commands";
+import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { useAttentionReport } from "@/hooks/use-attention-report";
 import { focusSettingsTarget } from "@/lib/failure-class";
@@ -2088,6 +2089,10 @@ function ShellCommands({
     [preference, setPreference],
   );
   useCommands("shell:actions", 4, actionCommands);
+  // The application menu's items as palette rows (ui-cleanup-b1 H1); inside
+  // the KeyboardProvider `App` wraps around the shell, so the renderer
+  // entries can dispatch their actions.
+  useDesktopCommands();
 
   return null;
 }
