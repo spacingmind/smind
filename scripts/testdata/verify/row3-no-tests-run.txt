@@ -1,0 +1,2 @@
+ok  	github.com/spacingmind/smind/internal/config	0.008s [no tests to run]
+ok  	github.com/spacingmind/smind/internal/store	0.011s [no tests to run]
