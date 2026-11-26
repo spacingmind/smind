@@ -102,22 +102,16 @@ interface HeaderProps {
   statusText?: string;
   showSidebarToggle?: boolean;
   onOpenTerminal?: () => void;
-  onHelp?: () => void;
 }
 
 async function mountHeader(props: HeaderProps = {}) {
   const { SidebarProvider } = await import("@/components/ui/sidebar");
   const { AppHeader } = await import("@/components/app-header");
-  const { KeyboardProvider, useActionHandler } = await import("@/keyboard/keyboard-provider");
+  const { KeyboardProvider } = await import("@/keyboard/keyboard-provider");
   // Imported after `vi.resetModules()` with the components, so both share one daemon-connection context.
   const { renderWithClientProp: render } = await import("@/test/render-with-daemon");
-  function Claims() {
-    useActionHandler("shortcuts.help", () => props.onHelp?.());
-    return null;
-  }
   const result = render(
     <KeyboardProvider>
-      <Claims />
       <SidebarProvider>
         <AppHeader
           statusText={props.statusText ?? "Connected to daemon"}
@@ -243,11 +237,12 @@ describe("AppHeader right cluster", () => {
       mockPlatform(opts);
       await mountHeader({ onOpenTerminal: () => {} });
       expect(screen.queryByTestId("app-menu-trigger"), name).not.toBeInTheDocument();
+      expect(screen.queryByTestId("app-header-help"), name).not.toBeInTheDocument();
       cleanup();
     }
   });
 
-  it("AH-AC5 right cluster order", async () => {
+  it("ui_cleanup_header_right_cluster_order", async () => {
     for (const os of ["windows", "linux"] as const) {
       vi.resetModules();
       vi.doUnmock("@/lib/platform");
@@ -256,7 +251,6 @@ describe("AppHeader right cluster", () => {
       await waitFor(() => expect(screen.getByTestId("open-in-editor")).toBeInTheDocument());
       const order = [
         screen.getByTestId("open-in-editor"),
-        screen.getByTestId("app-header-help"),
         screen.getByTestId("app-header-terminal"),
         screen.getByTestId("desktop-window-controls"),
       ];
@@ -312,14 +306,6 @@ describe("AppHeader right cluster", () => {
     expect(await screen.findByTestId("open-in-editor-main")).toHaveAttribute("aria-label", "Open in Zed");
   });
 
-  it("AH-AC7 help runs shortcuts.help", async () => {
-    mockPlatform({ desktop: false, os: null });
-    const onHelp = vi.fn();
-    await mountHeader({ onHelp });
-    fireEvent.click(screen.getByTestId("app-header-help"));
-    expect(onHelp).toHaveBeenCalledTimes(1);
-  });
-
   it("AH-AC7 terminal button calls onOpenTerminal and is absent without a task", async () => {
     mockPlatform({ desktop: false, os: null });
     const onOpenTerminal = vi.fn();
@@ -369,7 +355,7 @@ describe("AppHeader status and toggle", () => {
     expect(header.lastElementChild).toBe(controls);
     expect(controls.hasAttribute("data-tauri-drag-region")).toBe(false);
     for (const el of controls.querySelectorAll("*")) expect(el.hasAttribute("data-tauri-drag-region")).toBe(false);
-    for (const id of ["app-header-help", "app-header-terminal", "app-header-task-menu"]) {
+    for (const id of ["app-header-terminal", "app-header-task-menu"]) {
       expect(screen.getByTestId(id).hasAttribute("data-tauri-drag-region"), id).toBe(false);
     }
   });

@@ -13,7 +13,6 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { useLiveTask } from "@/hooks/use-live-task";
 import { useLocalPathActions } from "@/hooks/use-local-path-actions";
 import { useWindowState } from "@/hooks/use-window-state";
-import { useKeyboard } from "@/keyboard/keyboard-provider";
 import type { AppUpdateState } from "@/lib/app-update";
 import { desktopOS, isDesktop } from "@/lib/platform";
 import type { ConnectionStatus } from "@/lib/reconnect";
@@ -84,8 +83,9 @@ function HeaderTask({
  * inset content panel. Left: the sidebar toggle + update badge when the
  * sidebar has no room for them (collapsed rail / compact sheet; expanded,
  * the sidebar's own top strip hosts them), then the task identity. Right: an
- * open-in-editor pill, help, terminal and drawn caption buttons (the
- * application menu's items live in the command palette, ui-cleanup-b1 H1).
+ * open-in-editor pill, terminal and drawn caption buttons (the application
+ * menu's items live in the command palette and the `?` key still opens the
+ * shortcuts overlay, ui-cleanup-b1 H1/H2).
  *
  * In the desktop build it is also the window's title bar: its empty area
  * drags the window (and double-click maximizes) and it pads clear of the
@@ -132,7 +132,6 @@ export function AppHeader({
   onOpenUpdate?: () => void;
 }) {
   const { fullscreen } = useWindowState();
-  const { runAction } = useKeyboard();
   const localPathActions = useLocalPathActions();
   const leftInset = isDesktop ? headerLeftInsetPx(desktopOS, fullscreen, sidebarPx, windowToggle) : 0;
   const connected = connectionStatus === "connected";
@@ -196,14 +195,6 @@ export function AppHeader({
               <OpenInEditorButton path={task.WorktreePath} actions={localPathActions} />
             </span>
           )}
-          <HeaderIconButton
-            label="Keyboard shortcuts"
-            testId="app-header-help"
-            className="hidden @min-[40rem]/app-header:inline-flex"
-            onClick={() => runAction("shortcuts.help", null, { source: "menu" })}
-          >
-            <Icons.shortcuts aria-hidden />
-          </HeaderIconButton>
           {task && onOpenTerminal && (
             <HeaderIconButton label="Open terminal" testId="app-header-terminal" onClick={onOpenTerminal}>
               <Icons.terminal aria-hidden />
