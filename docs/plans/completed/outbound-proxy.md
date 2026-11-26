@@ -1,5 +1,7 @@
 # E4 R4: outbound HTTP(S)_PROXY / NO_PROXY for provider calls
 
+Status: completed (2026-11-26; spec 2026-11-26).
+
 Size M (6): scope 2 (`internal/transport`, doctor and a few call sites), PRs 1, risk 3 (a network boundary: a wrong rule sends credentials to a proxy or around it), decisions 1 (env only, below), verify 1. HIGH-RISK-lite: two fresh reviewers (standards, attack), then the Steward.
 
 ## What exists (read from the code, 2026-11-26)
@@ -77,11 +79,15 @@ A `config.yaml` setting, SOCKS or HTTPS proxies for provider calls, proxy auto-c
 
 ## Progress
 
-- [ ] spec (this file)
-- [ ] netenv, doctor, fleet, browser env test (peer 1)
-- [ ] transport (peer 2)
-- [ ] review, mutations, validation
+- [x] spec (this file)
+- [x] netenv, doctor, fleet, browser env test (GLM peer 1)
+- [x] transport (GLM peer 2), hardening and docs from the reviews (GLM peer 3)
+- [x] two fresh reviews, mutations, validation
 
 ## Validation
 
-(filled in when the work is done)
+- AC1 to AC7: `internal/transport/proxy_test.go` (`TestProxy_*`, 14 tests, `-race -count=20` clean): HTTPS through CONNECT keeps the uTLS state and verifies the target host, Basic auth reaches the proxy, plain HTTP goes as an absolute URI, `StreamClient` too, `NO_PROXY` host/suffix/CIDR bypass, loopback (127.0.0.1, localhost, a.localhost, [::1], zoned and numeric spellings) never proxied with a proxy set and `NO_PROXY` empty, `socks5://` and `https://` proxies fail closed with no direct connection, a 407 names the status only, credentials never in errors or the debug log, an empty config is unchanged, the environment is read at construction. The existing transport tests pass unchanged.
+- AC8: `TestDirectLoginIgnoresProxyEnv` (`directTransport` has no Proxy). AC9: `TestBrowserEnvDropsProxyVariables`. AC10: `TestOutboundProxyFinding` (info, warn for a non-http scheme, warn for an unparsable value, truncation, no credentials) and `TestDoctorShowsOutboundProxy` (text and `--json`, nothing when unset). AC11: `TestRedactProxy`, `TestProxyEnvOrderAndRedaction`. AC12: no config change; `GOOS=windows go vet` on the touched packages is clean.
+- Mutations on committed code, each failing its named test: loopback guard removed (`TestProxy_LoopbackNeverProxied`, after the dial hook was fixed to let the proxy address through: the first version of the test could not see a wrongly proxied plain-HTTP request), `NO_PROXY` ignored, a non-http scheme falling through to direct, no `Proxy-Authorization`, the proxy URL in the status error, the proxy host as `ServerName` (`TestProxy_HTTPSViaConnectKeepsUTLS`), target validation removed (`TestProxy_ConnectTargetWithControlBytesRefused`), `context.AfterFunc` removed (`TestProxy_ConnectHonoursContext`), the 16 KiB cap widened (`TestProxy_ConnectHeaderIsCapped`, rewritten after the first version passed without the cap), the numeric-host rule removed, plus peer-run mutations on doctor, fleet, browser env and netenv.
+- Reviews (two fresh, standards and attack): no leak found. Accepted and fixed: CONNECT target not validated (CR/LF), ctx not honoured during CONNECT and no cap on the reply, zoned and numeric loopback spellings, missing public docs (`public-docs/troubleshooting.md`, "Behind a proxy"), the doctor message for an unparsable value. Accepted and documented, not changed: the default-transport clients (Kimi, xAI and Antigravity refreshers, z.ai usage, plugin fetch, push) use Go's `ProxyFromEnvironment`, which also accepts `socks5://` and has only Go's own loopback rule; with `REQUEST_METHOD` set, Go ignores `HTTP_PROXY` for http targets (a CGI rule), so such a daemon goes direct for plain-HTTP targets.
+- Not verified: a real corporate proxy (only an in-test CONNECT proxy); Windows runtime; a real provider call through a proxy (no model call made).
