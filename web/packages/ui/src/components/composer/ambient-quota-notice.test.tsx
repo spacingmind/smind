@@ -96,9 +96,15 @@ describe("ambient quota notice", () => {
     // Only Date is faked: the shared flush is microtask-only, so faking timers would hang rendering.
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(FIXTURE_NOW);
+    // jsdom's window is never focused; a real viewer's is (the app window showing the composer).
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => "visible");
+    vi.spyOn(document, "hasFocus").mockImplementation(() => true);
   });
 
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it("ambient_quota_notice_shows_at_92_and_is_dismissible", async () => {
     const daemon = new FakeUsageDaemon([report({ fiveHourPct: 92 })]);
