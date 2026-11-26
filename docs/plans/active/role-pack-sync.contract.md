@@ -31,6 +31,15 @@ acs:
   - id: AC16
     text: "A daemon refusal or failed seat is shown as received; changed_meanwhile is explained and refreshes the check; the dialog stays open on error."
     covers: { tests: [rolepack_changed_meanwhile_is_explained], frames: [] }
+  - id: AC18
+    text: "When nothing is applied by default there is no Apply button (only Close); the hint sits above the footer and is gone after an apply."
+    covers: { tests: [rolepack_no_apply_button_when_nothing_is_applied_by_default, rolepack_hint_is_above_the_footer_and_gone_after_an_apply], frames: [] }
+  - id: AC19
+    text: "Check, apply and failed-result errors read as sentences: the daemon's method label is dropped, shared helper used by the Browser section too."
+    covers: { tests: [rolepack_errors_drop_the_method_label, daemon_sentence_drops_the_method_and_package_labels], frames: [] }
+  - id: AC20
+    text: "State badges never wrap inside themselves."
+    covers: { tests: [rolepack_state_badges_do_not_wrap], frames: [] }
   - id: AC17
     text: "No change under mobile/; public text says sMind and your workspace and names no other product (hygiene tests pass)."
     covers: { tests: [hygiene_and_mobile_untouched], frames: [] }
@@ -61,8 +70,14 @@ tests:
   - { name: rolepack_backup_path_and_outcomes_are_shown, run: "cd web/packages/ui && bunx vitest run src/components/settings/role-pack-review.test.tsx -t rolepack_backup_path_and_outcomes_are_shown", timeoutSec: 900 }
   - { name: rolepack_changed_meanwhile_is_explained, run: "cd web/packages/ui && bunx vitest run src/components/settings/role-pack-review.test.tsx -t rolepack_changed_meanwhile_is_explained", timeoutSec: 900 }
   - { name: rolepack_check_error_offers_retry, run: "cd web/packages/ui && bunx vitest run src/components/settings/role-pack-review.test.tsx -t rolepack_check_error_offers_retry", timeoutSec: 900 }
+  - { name: rolepack_no_apply_button_when_nothing_is_applied_by_default, run: "cd web/packages/ui && bunx vitest run src/components/settings/role-pack-review.test.tsx -t rolepack_no_apply_button_when_nothing_is_applied_by_default", timeoutSec: 900 }
+  - { name: rolepack_hint_is_above_the_footer_and_gone_after_an_apply, run: "cd web/packages/ui && bunx vitest run src/components/settings/role-pack-review.test.tsx -t rolepack_hint_is_above_the_footer_and_gone_after_an_apply", timeoutSec: 900 }
+  - { name: rolepack_errors_drop_the_method_label, run: "cd web/packages/ui && bunx vitest run src/components/settings/role-pack-review.test.tsx -t rolepack_errors_drop_the_method_label", timeoutSec: 900 }
+  - { name: rolepack_state_badges_do_not_wrap, run: "cd web/packages/ui && bunx vitest run src/components/settings/role-pack-review.test.tsx -t rolepack_state_badges_do_not_wrap", timeoutSec: 900 }
+  - { name: daemon_sentence_drops_the_method_and_package_labels, run: "cd web/packages/ui && bunx vitest run src/lib/daemon-sentence.test.ts -t daemon_sentence_drops_the_method_and_package_labels", timeoutSec: 900 }
   - { name: hygiene_and_mobile_untouched, run: "go test ./internal/hygiene/ -count=1 && test -z \"$(git diff origin/develop --name-only -- mobile)\"", timeoutSec: 900 }
 mutations:
+  - { id: M9, file: web/packages/ui/src/components/settings/role-pack-banner.tsx, change: "the check error shows the raw daemon message", expectFail: [rolepack_errors_drop_the_method_label] }
   - { id: M1, file: internal/wsapi/session.go, change: "profile.rolePack.apply added to RunScopedMethods", expectFail: [TestProfileRolePack_NotRunScoped, TestProfileRolePack_RPCHumanOnly] }
   - { id: M2, file: internal/permpolicy/humanonly.go, change: "profile.rolePack.apply removed from HumanOnlyRPCs", expectFail: [TestProfileRolePack_RPCHumanOnly] }
   - { id: M3, file: internal/wsapi/profile_rolepack.go, change: "the apply handler skips the backup (updates without ApplyRoles backup)", expectFail: [TestProfileRolePack_ApplyBackupWrittenBeforeTheUpdate] }
