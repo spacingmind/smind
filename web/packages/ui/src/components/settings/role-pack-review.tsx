@@ -116,6 +116,8 @@ export function RolePackReviewDialog({
                   ))}
               </div>
             ))}
+          </div>
+          <div className="flex shrink-0 flex-col gap-1">
             {apply.data && (
               <div data-testid="role-pack-result" className="flex flex-col gap-1 text-ui-sm">
                 {apply.data.results.map((r) => (
