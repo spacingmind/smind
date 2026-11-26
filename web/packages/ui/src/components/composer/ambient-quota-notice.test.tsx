@@ -4,11 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AmbientQuotaNotice } from "@/components/composer/ambient-quota-notice";
 import { Composer } from "@/components/composer/composer";
+import { usageDataFrom } from "@/lib/account-usage/query";
+import type { AccountUsage } from "@/lib/account-usage/types";
+import { queryKeys } from "@/lib/query-keys";
 import { __resetQuotaNoticeStoreForTests } from "@/lib/quota-notice-store";
 import { claudeAccount, FIXTURE_NOW } from "@/test/account-usage-fixtures";
-import { renderWithDaemon } from "@/test/render-with-daemon";
+import { renderWithDaemon, type DaemonRender } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
-import type { AccountUsage } from "@/lib/account-usage/types";
 
 const HOUR = 3_600_000;
 const DISMISSED_KEY = "smind:dismissed-quota-notices";
@@ -49,6 +51,21 @@ function report(over: { fiveHourPct?: number; resetsAtMs?: number; provider?: st
       fetchedAt: new Date(over.fetchedAtMs ?? FIXTURE_NOW - 60_000).toISOString(),
     },
   });
+}
+
+/**
+ * Puts the reports into the connection's shared usage cache the way a usage
+ * surface or a completed fetch left them: the notice never loads them itself
+ * (`useUsageReports({ enabled: false })`), so every test seeds the cache.
+ */
+async function seed(view: DaemonRender, usages: AccountUsage[]): Promise<void> {
+  act(() => {
+    view.queryClient().setQueryData(
+      queryKeys.accountUsage(),
+      usageDataFrom({ enabled: true, ttlSeconds: 300, reports: usages }, undefined),
+    );
+  });
+  await flush();
 }
 
 /** Serves `usage` as a live daemon event, the way a fetched report arrives. */
@@ -107,9 +124,9 @@ describe("ambient quota notice", () => {
   });
 
   it("ambient_quota_notice_shows_at_92_and_is_dismissible", async () => {
-    const daemon = new FakeUsageDaemon([report({ fiveHourPct: 92 })]);
-    mountNotice(daemon);
-    await flush();
+    const daemon = new FakeUsageDaemon([]);
+    const view = mountNotice(daemon);
+    await seed(view, [report({ fiveHourPct: 92 })]);
 
     const banner = screen.getByTestId("ambient-quota-notice");
     expect(screen.getByTestId("ambient-quota-text")).toHaveTextContent(/^5-hour window 92% used, resets \d\d:\d\d$/);
@@ -125,34 +142,34 @@ describe("ambient quota notice", () => {
   });
 
   it("ambient_quota_dismissal_persists_across_remounts", async () => {
-    const daemon = new FakeUsageDaemon([report({ fiveHourPct: 92 })]);
+    const daemon = new FakeUsageDaemon([]);
     const first = mountNotice(daemon);
-    await flush();
+    await seed(first, [report({ fiveHourPct: 92 })]);
     fireEvent.click(screen.getByTestId("ambient-quota-dismiss"));
     await flush();
     expect(screen.queryByTestId("ambient-quota-notice")).not.toBeInTheDocument();
     first.unmount();
 
-    // A fresh page load (the store re-reads storage): still dismissed.
+    // A fresh page load (the store re-reads storage, the cache starts empty): still dismissed.
     __resetQuotaNoticeStoreForTests();
     const second = mountNotice(daemon);
-    await flush();
+    await seed(second, [report({ fiveHourPct: 92 })]);
     expect(screen.queryByTestId("ambient-quota-notice")).not.toBeInTheDocument();
     second.unmount();
 
     // The memory is the stored key: without it the notice is back.
     window.localStorage.removeItem(DISMISSED_KEY);
     __resetQuotaNoticeStoreForTests();
-    mountNotice(daemon);
-    await flush();
+    const third = mountNotice(daemon);
+    await seed(third, [report({ fiveHourPct: 92 })]);
     expect(screen.getByTestId("ambient-quota-notice")).toBeInTheDocument();
   });
 
   it("ambient_quota_new_resets_at_is_a_new_window", async () => {
     const resetsAt = FIXTURE_NOW + 2 * HOUR;
-    const daemon = new FakeUsageDaemon([report({ resetsAtMs: resetsAt })]);
-    mountNotice(daemon);
-    await flush();
+    const daemon = new FakeUsageDaemon([]);
+    const view = mountNotice(daemon);
+    await seed(view, [report({ resetsAtMs: resetsAt })]);
     fireEvent.click(screen.getByTestId("ambient-quota-dismiss"));
     await flush();
     expect(screen.queryByTestId("ambient-quota-notice")).not.toBeInTheDocument();
@@ -168,9 +185,9 @@ describe("ambient quota notice", () => {
 
   it("ambient_quota_full_after_dismissed_warn_shows_once", async () => {
     const resetsAt = FIXTURE_NOW + 2 * HOUR;
-    const daemon = new FakeUsageDaemon([report({ fiveHourPct: 92, resetsAtMs: resetsAt })]);
-    mountNotice(daemon);
-    await flush();
+    const daemon = new FakeUsageDaemon([]);
+    const view = mountNotice(daemon);
+    await seed(view, [report({ fiveHourPct: 92, resetsAtMs: resetsAt })]);
     fireEvent.click(screen.getByTestId("ambient-quota-dismiss"));
     await flush();
     expect(screen.queryByTestId("ambient-quota-notice")).not.toBeInTheDocument();
@@ -187,35 +204,38 @@ describe("ambient quota notice", () => {
   });
 
   it("ambient_quota_no_notice_below_threshold", async () => {
-    const at89 = new FakeUsageDaemon([report({ fiveHourPct: 89 })]);
+    const at89 = new FakeUsageDaemon([]);
     const first = mountNotice(at89);
-    await flush();
+    await seed(first, [report({ fiveHourPct: 89 })]);
     expect(screen.queryByTestId("ambient-quota-notice")).not.toBeInTheDocument();
     first.unmount();
 
-    const at80 = new FakeUsageDaemon([report({ fiveHourPct: 80 })]);
-    mountNotice(at80);
-    await flush();
+    const at80 = new FakeUsageDaemon([]);
+    const second = mountNotice(at80);
+    await seed(second, [report({ fiveHourPct: 80 })]);
     expect(screen.queryByTestId("ambient-quota-notice")).not.toBeInTheDocument();
   });
 
   it("ambient_quota_no_notice_for_another_providers_account", async () => {
-    const daemon = new FakeUsageDaemon([report({ fiveHourPct: 95, provider: "openai" })]);
+    const daemon = new FakeUsageDaemon([]);
     const claude = mountNotice(daemon, "claude-native");
-    await flush();
+    await seed(claude, [report({ fiveHourPct: 95, provider: "openai" })]);
     expect(screen.queryByTestId("ambient-quota-notice")).not.toBeInTheDocument();
     claude.unmount();
 
     // The same account is the codex provider's own: it counts there.
-    mountNotice(daemon, "codex-native");
-    await flush();
+    const codex = mountNotice(daemon, "codex-native");
+    await seed(codex, [report({ fiveHourPct: 95, provider: "openai" })]);
     expect(screen.getByTestId("ambient-quota-notice")).toBeInTheDocument();
   });
 
   it("ambient_quota_adds_no_touch_or_refresh_calls", async () => {
-    const daemon = new FakeUsageDaemon([report({ fiveHourPct: 92 })]);
+    const daemon = new FakeUsageDaemon([]);
+
+    // A seeded cache: mounting, remounting and one live event send no request of any mode.
     const first = renderWithDaemon(<AmbientQuotaNotice provider="claude-native" />, daemon);
-    await flush();
+    await seed(first, [report({ fiveHourPct: 92 })]);
+    expect(screen.getByTestId("ambient-quota-notice")).toBeInTheDocument();
     first.unmount();
 
     // A remount on the same connection's QueryClient: the cached reports are already held.
@@ -224,28 +244,35 @@ describe("ambient quota notice", () => {
     await flush();
     remount.unmount();
 
+    // A completed fetch published while the notice is mounted: an event, never a request.
+    const live = renderWithDaemon(<AmbientQuotaNotice provider="claude-native" />, daemon, { queryClient });
+    await flush();
+    await pushReport(daemon, report({ fiveHourPct: 93, fetchedAtMs: FIXTURE_NOW - 30_000 }));
+    expect(screen.getByTestId("ambient-quota-text")).toHaveTextContent(/^5-hour window 93% used, resets \d\d:\d\d$/);
+    live.unmount();
+
+    expect(daemon.requests.length).toBe(0);
+    expect(daemon.countCalls("account.usage")).toBe(0);
     expect(daemon.count("touch")).toBe(0);
     expect(daemon.count("refresh")).toBe(0);
-    expect(daemon.requests.every((r) => r.mode === "cached")).toBe(true);
-    expect(daemon.requests.length).toBeLessThanOrEqual(1);
 
-    // Mounting again with the cache filled sends no new account.usage request.
-    const cachedReads = daemon.requests.length;
-    const again = renderWithDaemon(<AmbientQuotaNotice provider="claude-native" />, daemon, { queryClient });
+    // An empty cache (nothing seeded, a cold start): no notice, and still zero requests.
+    const empty = mountNotice(daemon);
     await flush();
-    again.unmount();
-    expect(daemon.requests).toHaveLength(cachedReads);
+    expect(screen.queryByTestId("ambient-quota-notice")).not.toBeInTheDocument();
+    empty.unmount();
+    expect(daemon.requests.length).toBe(0);
   });
 
   it("ambient_quota_notice_is_in_flow_not_overlaying_the_composer", async () => {
-    const daemon = new FakeUsageDaemon([report({ fiveHourPct: 92 })]);
+    const daemon = new FakeUsageDaemon([]);
     const view = mountNotice(daemon);
-    await flush();
+    await seed(view, [report({ fiveHourPct: 92 })]);
     assertInFlow(screen.getByTestId("ambient-quota-notice"));
     view.unmount();
 
-    const composer = mountComposer(new FakeUsageDaemon([report({ fiveHourPct: 92 })]));
-    await flush();
+    const composer = mountComposer(new FakeUsageDaemon([]));
+    await seed(composer, [report({ fiveHourPct: 92 })]);
     const form = screen.getByTestId("composer");
     const notice = screen.getByTestId("ambient-quota-notice");
     const card = screen.getByTestId("composer-card");
@@ -255,13 +282,13 @@ describe("ambient quota notice", () => {
   });
 
   it("ambient_quota_composer_mounts_the_notice", async () => {
-    const at92 = mountComposer(new FakeUsageDaemon([report({ fiveHourPct: 92 })]));
-    await flush();
+    const at92 = mountComposer(new FakeUsageDaemon([]));
+    await seed(at92, [report({ fiveHourPct: 92 })]);
     expect(at92.container.querySelector('[data-testid="ambient-quota-notice"]')).not.toBeNull();
     at92.unmount();
 
-    const at50 = mountComposer(new FakeUsageDaemon([report({ fiveHourPct: 50 })]));
-    await flush();
+    const at50 = mountComposer(new FakeUsageDaemon([]));
+    await seed(at50, [report({ fiveHourPct: 50 })]);
     expect(at50.container.querySelector('[data-testid="ambient-quota-notice"]')).toBeNull();
     at50.unmount();
   });
