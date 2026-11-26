@@ -1,12 +1,13 @@
 import { act } from "react";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/profiles-section";
 import { RpcError } from "@/lib/ws-client";
 import { renderWithDaemon } from "@/test/render-with-daemon";
-import { rolePackCheck, rolePackDaemon, staleLeadCheck } from "@/test/role-pack-test-client";
+import { rolePackCheck, rolePackDaemon, rolePackField, rolePackSeat, staleLeadCheck } from "@/test/role-pack-test-client";
+import type { RolePackCheck } from "@/lib/role-pack-types";
 
 function renderSection(handler: (method: string, params: unknown) => unknown) {
   const d = rolePackDaemon(handler);
@@ -83,6 +84,30 @@ async function openReview(handler: (method: string, params: unknown) => unknown)
 const applies = (d: { calls: { method: string; params?: unknown }[] }) => d.calls.filter((c) => c.method === "profile.rolePack.apply");
 const okApply = { backupDir: "", dryRun: false, results: [] };
 const stale = (method: string) => (method === "profile.rolePack.check" ? staleLeadCheck() : okApply);
+
+/** Nothing is applied by default: an untouched all-current lead and a validator with customised notes. */
+const noDefaultCheck = (): RolePackCheck =>
+  rolePackCheck({
+    seatsWithUpdates: 1,
+    seats: [
+      rolePackSeat(),
+      rolePackSeat({
+        name: "validator",
+        id: 13,
+        untouched: false,
+        fields: [
+          rolePackField("instructions"),
+          rolePackField("notes", { state: "customised", diff: "-mine\n+pack" }),
+          rolePackField("skills"),
+          rolePackField("model"),
+          rolePackField("permissionMode"),
+          rolePackField("orchestrationTools"),
+          rolePackField("childPolicy"),
+          rolePackField("onRateLimit"),
+        ],
+      }),
+    ],
+  });
 
 describe("role-pack review dialog", () => {
   it("rolepack_review_lists_stale_and_customised_fields_with_their_diff", async () => {
@@ -189,5 +214,35 @@ describe("role-pack review dialog", () => {
     expect(await screen.findByTestId("role-pack-apply-error")).toHaveTextContent("local only");
     expect(screen.getByTestId("role-pack-review")).toBeInTheDocument();
     expect(applies(d)).toHaveLength(2);
+  });
+
+  it("rolepack_no_apply_button_when_nothing_is_applied_by_default", async () => {
+    await openReview(noDefaultCheck);
+    expect(screen.queryByTestId("role-pack-apply")).toBeNull();
+    expect(screen.getByTestId("role-pack-close")).toBeInTheDocument();
+    expect(screen.getByTestId("role-pack-nothing-by-default")).toHaveTextContent(
+      "Nothing to apply by default. Use Take on a field to change it.",
+    );
+  });
+
+  it("rolepack_hint_is_above_the_footer_and_gone_after_an_apply", async () => {
+    await openReview(noDefaultCheck);
+    const hint = screen.getByTestId("role-pack-nothing-by-default");
+    const close = screen.getByTestId("role-pack-close");
+    expect(hint.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    cleanup();
+
+    let checks = 0;
+    await openReview((method) => {
+      if (method === "profile.rolePack.check") {
+        checks += 1;
+        return checks === 1 ? staleLeadCheck() : rolePackCheck();
+      }
+      return okApply;
+    });
+    fireEvent.click(screen.getByTestId("role-pack-apply"));
+    expect(await screen.findByTestId("role-pack-result")).toBeInTheDocument();
+    expect(screen.queryByTestId("role-pack-apply")).toBeNull();
+    expect(screen.queryByTestId("role-pack-nothing-by-default")).toBeNull();
   });
 });

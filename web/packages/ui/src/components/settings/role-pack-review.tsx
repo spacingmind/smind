@@ -118,6 +118,11 @@ export function RolePackReviewDialog({
             ))}
           </div>
           <div className="flex shrink-0 flex-col gap-1">
+            {defaultCount === 0 && !apply.data && (
+              <p data-testid="role-pack-nothing-by-default" className="text-ui-sm text-foreground-muted">
+                Nothing to apply by default. Use Take on a field to change it.
+              </p>
+            )}
             {apply.data && (
               <div data-testid="role-pack-result" className="flex flex-col gap-1 text-ui-sm">
                 {apply.data.results.map((r) => (
@@ -133,15 +138,14 @@ export function RolePackReviewDialog({
             <FormError message={apply.error ? apply.error.message : null} testId="role-pack-apply-error" />
           </div>
           <DialogFooter className="items-center">
-            {defaultCount === 0 && (
-              <span className="mr-auto text-ui-sm text-foreground-muted">Nothing to apply by default; take fields one by one below.</span>
-            )}
             <Button type="button" variant="outline" disabled={pending} data-testid="role-pack-close" onClick={() => onOpenChange(false)}>
               Close
             </Button>
-            <Button type="button" disabled={pending || defaultCount === 0} data-testid="role-pack-apply" onClick={() => send([])}>
-              {pending ? "Applying..." : `Apply ${defaultCount} ${defaultCount === 1 ? "update" : "updates"}`}
-            </Button>
+            {defaultCount > 0 && (
+              <Button type="button" disabled={pending} data-testid="role-pack-apply" onClick={() => send([])}>
+                {pending ? "Applying..." : `Apply ${defaultCount} ${defaultCount === 1 ? "update" : "updates"}`}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
