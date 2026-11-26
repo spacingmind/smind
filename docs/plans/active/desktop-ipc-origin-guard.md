@@ -1,5 +1,7 @@
 # Desktop IPC: only the proxy origin may call the shell's commands
 
+Open: Supervisor second read + merge unchecked (PR #922 is on develop); follow-ups: on_navigation scheme check, on_new_window deny
+
 Status: active (2026-11-15). HIGH-RISK (a security boundary between the webview and the OS). Size: M (5): scope 1 (one Rust crate), PRs 1, risk 2, decisions 1 (below), verification 1 (unit and mock-runtime tests, a real-launch check).
 
 ## Problem

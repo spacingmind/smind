@@ -1,5 +1,7 @@
 # Browser for agents: design drafts for the proxy and PRs 2-5
 
+Closed 2026-11-26: the browser lane shipped (PRs 1 to 6 as #957 #969 #970 and earlier, Settings UI #971, live run #972, findings #973, pre-allow #974); the open boxes below were never ticked in this file. Remaining ideas live in `desktop-browser-for-agents.md`.
+
 Governing ADR: `docs/decisions/0061-browser-for-agents.md` (Accepted). Acceptance criteria for the whole feature: `docs/plans/active/desktop-browser-for-agents.md`. The headless lane spec (PR 1: CDP client, session, URL policy; its known gaps and decisions) is `docs/plans/active/browser-for-agents-headless.md` (lands with PR 1). This file holds only design drafts and the decisions they wait on. **The Human decided D-A..D-E on 2026-11-15 (next section). PR 1b (the proxy) is built (see its Progress and Validation below); nothing else here is built, and no tool PR starts until 1b lands.**
 
 ## Decisions (all five accepted by the Human, 2026-11-15)

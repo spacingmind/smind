@@ -1,5 +1,7 @@
 # Desktop auto-update (Tauri 2 updater)
 
+Open: PARTIAL: real-window update e2e, Windows NSIS path, first real release-to-release update (needs the Human / a second release)
+
 Goal (user, 2026-10-11): the desktop app updates itself from GitHub
 Releases, with signed updates, a prompt before anything is downloaded, and
 no silent installs. Decisions and rationale: ADR-0023

@@ -1,5 +1,7 @@
 # Per-task scratch dir and cleanup on close
 
+Closed 2026-11-26: AC8 (the Settings > General scratch space card) shipped as #781; the pending note below is stale.
+
 Size: L (7) — scope 2, PRs 1, risk 2 (deletes files), decisions 0, verify 2 (UI frames + validator).
 Human 2026-10-31: "tu clean phan cache do khi close task". A full disk killed runs the same day: every
 `HOME=$(mktemp -d)` hermetic run leaked ~1 GB (fresh GOMODCACHE + GOCACHE) under `/var/folders/.../T/tmp.*`.

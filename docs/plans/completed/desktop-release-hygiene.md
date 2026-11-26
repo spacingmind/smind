@@ -1,5 +1,7 @@
 # Desktop release hygiene without money (DT1)
 
+Closed 2026-11-26: items 3 to 5 shipped through the child plans (crash capture #895 and #905, `requireSignedVersion` #913, notarization prep #919); the boxes below were not ticked here.
+
 Status: active (2026-11-15). Size: L (5 items, one PR each, no new paid service). Integration branch: `wave/desktop`.
 
 ## Why

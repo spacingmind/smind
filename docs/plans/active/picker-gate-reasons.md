@@ -1,5 +1,7 @@
 # Gate reasons per provider and model in the picker
 
+Open: gate notice on a real device/simulator (backlog group E) not done; F4/F5 window edge and switch_profile fallback not built
+
 Size: L (11) — scope 3 (daemon derivation + wire, MCP/Lead errors, web + mobile pickers), PRs 4, risk 2 (a new field on `provider.list`, a new refusal on non-human sends), decisions 3, verify 3 (UI frames, both themes, two widths).
 
 The provider/model picker lets a user choose a provider or model that cannot run,

@@ -1,5 +1,7 @@
 # TypeScript to Go live relay interop in CI (E12): it already exists; close its trigger gap
 
+Open: the implementation (the workflow and its tests) is the next E9 item; this plan stays active until it ships.
+
 Status: active (spec, 2026-11-15). Size: S (2): scope 1 (one workflow), PR 1, risk 1, decisions 1, verification 0. Code starts from a fresh `develop`.
 
 ## What already exists on `develop`

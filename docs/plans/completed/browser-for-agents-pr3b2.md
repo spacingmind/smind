@@ -1,5 +1,7 @@
 # Browser for agents, PR 3b-2: a per-run socket with a peer-credential check
 
+Closed 2026-11-26: PR 3b-2 shipped inside the browser lane PRs (#957 and the gate PR); Progress below was never ticked and Validation was never filled in this file.
+
 Governing: ADR-0061 amendment item 7 (Human decision 2026-11-16) and "PR 3b spec" in `browser-for-agents-designs.md`. 3b-1 (proxy authentication, #958) is done; this is the second hard prerequisite of opening the gate. It flips `browser.PrereqRunSocket` and nothing else: `GateReady` stays false until PR 4.
 
 Size: L (7) — scope 2, PRs 1, risk 3, decisions 0, verification 1. High-risk: foreground two-sub-agent review (standards, attack), then the Steward's own.

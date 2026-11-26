@@ -1,5 +1,7 @@
 # Browser for agents, PR 4: the daemon-side permission gate that flips `GateReady`
 
+Closed 2026-11-26: PR 4 merged; the card frames and the real-provider run it lists as open were done in `browser-for-agents-live-run.md` (#972) and `browser-for-agents-live-findings.md` (#973).
+
 Governing: ADR-0061 section 10 and amendments (decisions D-B and D-D of 2026-11-15, the two prerequisites of 2026-11-16). PR 1 to 3b are merged: the CDP client and URL policy, the enforcing authenticated proxy, the read tools behind the broker, the human-only enable flag and allowlist, the per-run socket with peer credentials. Both prerequisites (`PrereqProxyAuth`, `PrereqRunSocket`) are true. **This PR is the one that makes the browser reachable by an agent**: it flips `browser.GateReady` to true, and it is the only PR that may.
 
 **Human decisions 2026-11-16 (recorded in ADR-0061 amendment 10):** (1) Claude-native browser: option (a), an upstream `Client.PID()` in `claude-agent-sdk-go` (separate PR in that repo, tagged v0.4.3 for this change only by the Supervisor), then smind pins v0.4.3 and the claude path binds an unbound socket to the CLI's pid; (2) Windows: option (a), not offered in the first release, the hub keeps refusing, the Job Object membership check goes on the later list. After PR 4 the browser lane stops: no PR 5 and no new work; a state note lists what is left.

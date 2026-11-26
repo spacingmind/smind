@@ -1,5 +1,7 @@
 # The audit app refuses to start against the real daemon
 
+Closed 2026-11-26: AC6 was delivered by the guard-wiring PR #897 and the work is on develop; the PR-to-wave box below was never ticked.
+
 Status: active (2026-11-15). Follows `desktop-audit-build.md`. Size: S (4): scope 1 (one Rust module, one cargo feature, the build script), PRs 1, risk 2 (a guard that must fail closed, and a release build that must not change), decisions 0, verification 1.
 
 ## Why

@@ -1,5 +1,7 @@
 # E9 P0: test-determinism guard and public-docs gates
 
+Closed 2026-11-26: PR 1 (sleep guard) merged as #952 and PR 2 (docs gates) as #967; `go test ./internal/hygiene/` runs both guards and the baselines ratchet.
+
 Size: S+ (5) — scope 1 (two Go hygiene tests plus data files), PRs 2, risk 1 (a guard that is too strict blocks every PR), decisions 2 (both answered below as recommendations), verify 1.
 
 Status 2026-11-15: **spec only.** Code starts from a fresh `origin/develop` after the `wave/desktop` landing PR merges; until then this file is the only change. Branch for this spec: `smind/e9-p0-spec`.

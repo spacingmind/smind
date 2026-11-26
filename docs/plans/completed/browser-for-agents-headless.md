@@ -1,5 +1,7 @@
 # Browser for agents, headless first: implementation spec for the lane
 
+Closed 2026-11-26: PRs 1 to 5 of the headless lane are merged (reach table #969 is PR 5); the boxes below were not ticked in this file.
+
 Governing ADR: `docs/decisions/0061-browser-for-agents.md` (Accepted, all 12 decisions as recommended). Acceptance criteria for the whole feature live in `docs/plans/active/desktop-browser-for-agents.md` (AC1-AC20); this file orders the work for the headless-first lane and holds the detail, tests, decisions, progress and validation of each PR.
 
 Size: L (7) — scope 2, PRs 2, risk 2, decisions 0, verification 1. Every PR is high-risk (SSRF, human-only surface, permissions): two fresh-context review sub-agents (standards, attack) on each, findings in the PR body.

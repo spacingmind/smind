@@ -1,5 +1,7 @@
 # Chat fork, edit-and-retry and per-turn file undo (ADR-0057)
 
+Open: PR 3/4 per-turn file undo + refs/smind/turns not built; Codex native fork deferred (probe)
+
 Status: active (2026-11-09). ADR-0057 decisions D1-D6 accepted as recommended (Supervisor, under the Human's delegation). Size: L, four sequential PRs (not stacked). This file is the spec of PR 1; later PRs extend it.
 
 ## PR 1: data model, fork on Claude, labelled context-seeded fallback

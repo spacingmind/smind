@@ -1,5 +1,7 @@
 # Saved grants: "allow always in this project" (ADR-0055 section 8, decision D6; agent-questions PR4)
 
+Closed 2026-11-26: PR4a is validated below and PR4b shipped as #890 (`saved-grants-pr4b.md`).
+
 Status: active (2026-11-15). **Human decision 2026-11-15: STRICT, runners opt-in** (supersedes the first allow-list that put runners and read-only commands in one class). D6 is accepted (a daemon-owned `permission_grants` table, 30-day default expiry, revocable, never for floor, destructive, network, unparsed commands or questions).
 Size: L (permissions, a human-only table, storage, wire), so split into two PRs, one at a time, each with a validation contract (ADR-0045) and a foreground two-axis review:
 

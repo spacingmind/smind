@@ -1,5 +1,7 @@
 # UX audit small fixes
 
+Closed 2026-11-26: PR A is validated below and PR B (AC5 to AC7) shipped as #872.
+
 Nine small UX fixes from a flow audit of the web, desktop and mobile apps,
 shipped as three PRs. This file tracks PR A; B and C add their sections.
 

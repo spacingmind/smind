@@ -1,5 +1,7 @@
 # Homelab distribution: update, service, install scripts, Docker, direct + relay connections, desktop first-run
 
+Open: P14 hosted-relay deploy, P15 open enrolment, P16 relay connect blocked on the Human; live checks unverified (signed-release update, reboot, mobile device, Docker hosts, real relay)
+
 Implements [ADR-0031](../../decisions/0031-homelab-cli-distribution.md)
 (**Accepted 2026-10-14**, except decisions 12, 27–32 and 36, which remain **Open**; the PRs they gate stay BLOCKED
 below. **Decision 9 (direct connections with a password) was Accepted 2026-10-15**: P4 and what depends on it are unblocked. Revised after a study of a reference workbench and the Human's answers: hosted-relay hosting is pending, multi-device is designed on

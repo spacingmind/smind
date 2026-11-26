@@ -1,5 +1,7 @@
 # More failure classes, Claude effort, and an auto-mode gate for compatible endpoints
 
+Open: R3b (Claude effort) and R3c (auto-mode gate) PRs not implemented; Validation pending
+
 Status: **spec, not started** (2026-11-09). Nothing is implemented until the Human answers the decisions below. Extends
 [`run-failure-classes.md`](run-failure-classes.md) (ADR-0050) and [`codex-reasoning-effort.md`](codex-reasoning-effort.md); touches
 [ADR-0019](../../decisions/0019-provider-native-permission-modes.md) (permission modes) and ADR-0046 (provider specs). Three items, each its own PR chain:

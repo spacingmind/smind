@@ -1,5 +1,7 @@
 # Browser for agents, PR 3: the human-only enable flag and the allowlist (spec)
 
+Closed 2026-11-26: PR 3 merged as #957; its deny-list items shipped with the gate (PR 4) and #970, and `browser.GateReady` is true; the boxes below were not ticked in this file.
+
 Governing ADR: `docs/decisions/0061-browser-for-agents.md` (Accepted; amendments of 2026-11-15 and 2026-11-16). Order of the lane: PR 1, 1b, 2 (merged or in review), **PR 3 (this spec)**, PR 3b (proxy authentication and the per-run socket, spec in `browser-for-agents-designs.md`), PR 4 (the daemon-side permission gate, which flips `browser.GateReady`), PR 5 (provider table). One PR at a time from a fresh `origin/wave/desktop`. High-risk (a new human-only surface, a store table, permissions): foreground two-sub-agent review, the Steward's own review, mutations.
 
 ## What PR 3 is, and what it is not
