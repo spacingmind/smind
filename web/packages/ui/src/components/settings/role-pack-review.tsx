@@ -39,7 +39,7 @@ function Badge({ children, tone }: { children: string; tone?: "success" | "warni
   return (
     <span
       className={cn(
-        "rounded-full border px-2 py-0.5 text-ui-xs",
+        "whitespace-nowrap rounded-full border px-2 py-0.5 text-ui-xs",
         tone === "success" ? "border-success/40 text-success" : tone === "warning" ? "border-warning/40 text-warning" : "border-border text-foreground-muted",
       )}
     >
@@ -88,10 +88,12 @@ export function RolePackReviewDialog({
                   .filter((f) => f.state !== "current")
                   .map((f) => (
                     <div key={f.name} className="flex flex-col gap-1.5" data-testid={`role-pack-field-${seat.name}-${f.name}`}>
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <span className="text-ui-sm font-medium">{fieldLabel(f.name)}</span>
-                        <Badge tone={f.state === "stale" ? "success" : "warning"}>{stateLabel(f.state)}</Badge>
-                        {f.kind === "capability" && <Badge>capability</Badge>}
+                        <span data-testid={`role-pack-badges-${seat.name}-${f.name}`} className="flex flex-wrap items-center gap-1.5">
+                          <Badge tone={f.state === "stale" ? "success" : "warning"}>{stateLabel(f.state)}</Badge>
+                          {f.kind === "capability" && <Badge>capability</Badge>}
+                        </span>
                         {!writtenByDefault(seat, f) && (
                           <Button
                             type="button"

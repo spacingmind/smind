@@ -132,6 +132,16 @@ describe("role-pack review dialog", () => {
     expect(f).toHaveTextContent("Stored: default -> Pack: plan");
   });
 
+  it("rolepack_state_badges_do_not_wrap", async () => {
+    await openReview(stale);
+    const f = screen.getByTestId("role-pack-field-lead-permissionMode");
+    const state = within(f).getByText("Update available");
+    const capability = within(f).getByText("capability");
+    expect(state.className).toContain("whitespace-nowrap");
+    expect(capability.className).toContain("whitespace-nowrap");
+    expect(screen.getByTestId("role-pack-badges-lead-permissionMode").className).toContain("flex-wrap");
+  });
+
   it("rolepack_apply_sends_no_take", async () => {
     const d = await openReview(stale);
     const btn = screen.getByTestId("role-pack-apply");
