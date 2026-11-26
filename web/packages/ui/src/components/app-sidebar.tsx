@@ -929,22 +929,11 @@ export function AppSidebar({
                     size="icon-sm"
                     aria-label="Search tasks"
                     data-testid="sidebar-search-toggle"
+                    className="mr-1"
                     onClick={() => setSearchOpen(true)}
                   >
                     <Icons.search />
                   </Button>
-                  {!empty && (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label="New workspace"
-                      data-testid="sidebar-new-workspace-button"
-                      onClick={() => setCrud({ kind: "workspace" })}
-                      className="mr-1"
-                    >
-                      <Icons.add />
-                    </Button>
-                  )}
                 </span>
               </>
             )}

@@ -1,14 +1,19 @@
 // UI cleanup B1 (docs/plans/active/ui-cleanup-b1.md H2): the redundant visual
 // shortcut surfaces are gone while the shortcuts behind them keep working.
 // The composer is mounted the way composer.test.tsx's renderComposer does
-// (a WsClient prop under the daemon query provider), so no new harness here.
+// (a WsClient prop under the daemon query provider) and the sidebar the way
+// app-sidebar-memo.test.tsx mounts it, so no new harness here.
+import { act } from "react";
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { AppSidebar } from "@/components/app-sidebar";
 import { Composer } from "@/components/composer/composer";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { KeyboardProvider } from "@/keyboard/keyboard-provider";
+import type { Task, Workspace } from "@/lib/types";
 
 function composerProps(): React.ComponentProps<typeof Composer> {
   return {
@@ -28,6 +33,51 @@ function composerProps(): React.ComponentProps<typeof Composer> {
 
 function textarea(): HTMLTextAreaElement {
   return screen.getByLabelText("Prompt") as HTMLTextAreaElement;
+}
+
+const WORKSPACE: Workspace = {
+  ID: 1,
+  Path: "/tmp/ws",
+  Title: "W",
+  RoutingPolicy: "",
+  CreatedAt: "2024-01-01T00:00:00Z",
+  UpdatedAt: "2024-01-01T00:00:00Z",
+};
+
+const TASK: Task = {
+  ID: 1,
+  WorkspaceID: 1,
+  SpaceID: null,
+  Title: "Task A",
+  Status: "active",
+  WorktreePath: null,
+  Branch: null,
+  CreatedAt: "2024-01-01T00:00:00Z",
+  UpdatedAt: "2024-01-01T00:00:00Z",
+  ArchivedAt: null,
+};
+
+async function flush(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
+async function mountSidebar(): Promise<FakeWsClient> {
+  const client = new FakeWsClient();
+  render(
+    <SidebarProvider>
+      <AppSidebar client={client as never} />
+    </SidebarProvider>,
+  );
+  client.nth("workspace.list", 0).resolve([WORKSPACE]);
+  await flush();
+  client.nth("space.list", 0).resolve([]);
+  client.nth("task.list", 0).resolve([TASK]);
+  await flush();
+  await screen.findAllByTestId("sidebar-task-row");
+  return client;
 }
 
 describe("UI cleanup B1", () => {
@@ -53,5 +103,20 @@ describe("UI cleanup B1", () => {
     // Ctrl+L: jsdom is not a mac, so Mod resolves to Ctrl.
     fireEvent.keyDown(document, { key: "l", code: "KeyL", ctrlKey: true });
     expect(textarea()).toHaveFocus();
+  });
+
+  it("ui_cleanup_sidebar_plus_removed_footer_add_workspace_kept", async () => {
+    await mountSidebar();
+    expect(screen.queryByTestId("sidebar-new-workspace-button")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("sidebar-footer-add-workspace"));
+    expect(await screen.findByLabelText("Path")).toBeInTheDocument();
+  });
+
+  it("ui_cleanup_sidebar_search_toggle_and_automation_filter_kept", async () => {
+    await mountSidebar();
+    expect(screen.getByTestId("sidebar-search-toggle")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-automation-filter")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    expect(screen.getByTestId("sidebar-search-input")).toBeInTheDocument();
   });
 });
