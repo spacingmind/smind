@@ -1140,9 +1140,11 @@ export function AppSidebar({
             workspaces={workspaces ?? []}
             onProjectReady={(ws) => {
               // Land on the new workspace expanded, even if a deleted
-              // workspace's id is still persisted as collapsed.
+              // workspace's id is still persisted as collapsed, and bring
+              // its row into view (C1 D6).
               nodes.open(`ws:${ws.ID}`);
               refresh();
+              scrollWorkspaceIntoView(ws.ID);
             }}
             onStartTask={(ws) =>
               // A freshly created workspace has no tree yet; the New task
@@ -1740,6 +1742,26 @@ function RowActions({ children }: { children: ReactNode }) {
       {children}
     </span>
   );
+}
+
+/**
+ * Scrolls the workspace's row into view after the Add-project dialog lands on
+ * it (C1 D6): the row only exists once the tree's refresh has rendered, so
+ * retry on animation frames -- at most ~20 -- and then give up silently:
+ * scrolling is a courtesy to the person, never an error.
+ */
+function scrollWorkspaceIntoView(workspaceId: number): void {
+  const selector = `[data-testid="sidebar-workspace-row"][data-workspace-id="${workspaceId}"]`;
+  let frames = 0;
+  const find = () => {
+    const row = document.querySelector<HTMLElement>(selector);
+    if (row) {
+      row.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    if (frames++ < 20) requestAnimationFrame(find);
+  };
+  requestAnimationFrame(find);
 }
 
 function WorkspaceItem({

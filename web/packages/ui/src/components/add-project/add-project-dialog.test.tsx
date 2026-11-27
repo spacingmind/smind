@@ -62,7 +62,12 @@ function resetPlatform() {
 }
 
 /** The dialog as the sidebar mounts it, on a fake client whose calls the test resolves by hand. */
-function renderDialog(onProjectReady = vi.fn(), onOpenChange = vi.fn(), workspaces: Workspace[] = []) {
+function renderDialog(
+  onProjectReady = vi.fn(),
+  onOpenChange = vi.fn(),
+  workspaces: Workspace[] = [],
+  onStartTask = vi.fn(),
+) {
   const client = new FakeWsClient();
   const view = renderWithClientProp(
     <AddProjectDialog
@@ -71,10 +76,10 @@ function renderDialog(onProjectReady = vi.fn(), onOpenChange = vi.fn(), workspac
       onOpenChange={onOpenChange}
       workspaces={workspaces}
       onProjectReady={onProjectReady}
-      onStartTask={vi.fn()}
+      onStartTask={onStartTask}
     />,
   );
-  return { view, client, onProjectReady, onOpenChange };
+  return { view, client, onProjectReady, onOpenChange, onStartTask };
 }
 
 /** One current workspace, as workspace.list answers it. */
@@ -380,12 +385,77 @@ describe("Add project open a folder", () => {
     });
     await flush();
 
-    // Find-or-switch: the existing project is opened, and nothing is created.
+    // Find-or-switch: the existing project is opened, the dialog switches to
+    // the done state naming it (D6) instead of closing, and nothing is created.
     expect(onProjectReady).toHaveBeenCalledWith(alpha, "existing");
-    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(screen.getByTestId("add-project-done")).toHaveTextContent("Alpha is already a project.");
+    expect(screen.getByTestId("add-project-dialog")).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
     expect(client.calls.filter((call) => call.method === "workspace.create")).toHaveLength(0);
     // The duplicate was decided without any fs call.
     expect(client.calls.filter((call) => call.method === "fs.listDir")).toHaveLength(0);
+  });
+
+  it("add_project_after_create_selects_and_offers_start_a_task", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("done");
+    const { view, client, onProjectReady, onOpenChange, onStartTask } = renderDialog();
+    await flush();
+
+    await typeAndBlur("/w/new2");
+    const parent = client.nth("fs.listDir", 0);
+    await act(async () => {
+      parent.resolve({
+        path: "/w",
+        parent: "/",
+        entries: [{ name: "new2", path: "/w/new2", isGitRepo: true }],
+      });
+    });
+    await flush();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-submit"));
+    });
+    const create = await waitFor(() => client.nth("workspace.create", 0));
+    expect(create.params).toEqual({ path: "/w/new2" });
+    const created: Workspace = { ...workspaceFixture("/w/new2", "New2"), ID: 9 };
+    await act(async () => {
+      create.resolve(created);
+    });
+    await flush();
+
+    // The sidebar is told at once (it expands the project and scrolls it into
+    // view), and the dialog switches to the done view instead of closing (D6):
+    // the form's Add/Cancel footer is gone with the form.
+    expect(onProjectReady).toHaveBeenCalledTimes(1);
+    expect(onProjectReady).toHaveBeenCalledWith(created, "created");
+    expect(screen.getByTestId("add-project-done")).toHaveTextContent("New2 is ready.");
+    expect(screen.queryByTestId("add-project-cancel")).toBeNull();
+    expect(screen.queryByTestId("add-project-submit")).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-start-task"));
+    });
+    await flush();
+    // Start a task hands the workspace over and closes the dialog.
+    expect(onStartTask).toHaveBeenCalledWith(created);
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    view.unmount();
+
+    // A duplicate path reaches the same done state by opening the existing
+    // project: "is already a project.", and no create was ever sent.
+    const alpha = workspaceFixture("/w/alpha", "Alpha");
+    const dup = renderDialog(vi.fn(), vi.fn(), [alpha]);
+    await flush();
+    await typeAndBlur("/w/alpha/");
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-submit"));
+    });
+    await flush();
+    expect(screen.getByTestId("add-project-done")).toHaveTextContent("Alpha is already a project.");
+    expect(dup.onProjectReady).toHaveBeenCalledWith(alpha, "existing");
+    expect(dup.client.calls.filter((call) => call.method === "workspace.create")).toHaveLength(0);
+    dup.view.unmount();
   });
 
   it("add_project_tilde_is_expanded_when_submitting_with_enter", async () => {
@@ -499,7 +569,7 @@ describe("Add project open a folder", () => {
     platformState.desktop = true;
     const host = ownHost("created");
     platformState.current = host;
-    const { client, onProjectReady } = renderDialog();
+    const { view, client, onProjectReady } = renderDialog();
     await flush();
 
     await typeAndBlur("/w/new");
@@ -524,6 +594,23 @@ describe("Add project open a folder", () => {
     });
     await flush();
     expect(onProjectReady).toHaveBeenCalledWith(created, "created");
+    // The create landed on the done state (D6), so the recent row only shows
+    // on the next open: closing resets the form, reopening lists it.
+    expect(screen.getByTestId("add-project-done")).toHaveTextContent("New is ready.");
+    const reopen = (open: boolean) => (
+      <AddProjectDialog
+        client={client as unknown as WsClient}
+        open={open}
+        onOpenChange={vi.fn()}
+        workspaces={[]}
+        onProjectReady={vi.fn()}
+        onStartTask={vi.fn()}
+      />
+    );
+    view.rerender(reopen(false));
+    await flush();
+    view.rerender(reopen(true));
+    await flush();
 
     // The project created here is recorded as a recent, persisted for this host (D4).
     expect(screen.getByTestId("add-project-recent-0")).toHaveTextContent("New");
