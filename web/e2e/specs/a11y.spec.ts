@@ -160,5 +160,7 @@ test('B-05 axe color-contrast: Settings -> General', async ({ app }) => {
   await app.openApp()
   await page.evaluate(() => window.dispatchEvent(new CustomEvent('smind:open-settings', { detail: { sectionId: 'general' } })))
   await expect(page.getByTestId('settings-screen').first()).toBeVisible()
+  // the dialog opens with a fade and zoom: axe must judge the settled colours, not half-transparent text
+  await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))))
   await contrast(page, 'settings general')
 })

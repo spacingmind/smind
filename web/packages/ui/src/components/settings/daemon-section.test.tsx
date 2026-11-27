@@ -80,6 +80,34 @@ describe("daemon-section (desktop build)", () => {
     expect(screen.queryByTestId("daemon-install")).not.toBeInTheDocument();
   });
 
+  it("ui_cleanup_b2_daemon_gap_is_six", async () => {
+    await renderSection({ daemonStatus: () => Promise.resolve(baseStatus()) });
+    const root = screen.getByTestId("settings-section-daemon");
+    expect(root.className).toContain("gap-6");
+    expect(root.className).not.toContain("gap-3");
+  });
+
+  it("ui_cleanup_b2_long_value_rows_wrap", async () => {
+    // The Log file row's path is the one unbounded value in this section: it
+    // must sit under the label and break, never in a shrink-0 control box.
+    const rows = [
+      { name: "long log path", status: baseStatus({ logPath: "/var/folders/zw/smind/very/long/log/path".repeat(4) }) },
+      { name: "missing log path", status: baseStatus({ logPath: null }) },
+    ];
+    for (const { name, status } of rows) {
+      cleanup();
+      vi.resetModules();
+      await renderSection({ daemonStatus: vi.fn(() => Promise.resolve(status)) });
+
+      const path = screen.getByTestId("daemon-log-path");
+      expect(path.className, name).toContain("break-all");
+      expect(path.className, name).toContain("min-w-0");
+      expect(path.className, name).toContain("font-mono");
+      expect(path.closest(".shrink-0"), name).toBeNull();
+      expect(path, name).toHaveTextContent(String(status.logPath ?? "—"));
+    }
+  });
+
   it("offers Update & restart when managed and older", async () => {
     await renderSection({ daemonStatus: () => Promise.resolve(baseStatus({ comparison: "older", daemonVersion: "0.6.0" })) });
     expect(screen.getByTestId("daemon-update")).toBeInTheDocument();

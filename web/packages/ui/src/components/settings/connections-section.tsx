@@ -5,12 +5,13 @@ import { SetupSection } from "@/components/first-run/setup-section";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FormError } from "@/components/ui/form-error";
+import { Switch } from "@/components/ui/switch";
 
 import { RelayConnectionStatus, useRelayStatus } from "@/components/settings/relay-connection-status";
 import { desktop, isDesktop, type AppSettings, type Connection, type UnsupportedConnection } from "@/lib/platform";
 import { Icons } from "@/lib/icons";
-import { cn } from "@/lib/utils";
 
 /**
  * ADR-0013 AC6's host picker, as Settings -> Connections: list every
@@ -334,40 +335,31 @@ function ManageLocalDaemon() {
               : "The app never installs, starts, updates or takes over a daemon here. Switching to This computer still works if one is running."
           }
           control={
-            <button
-              type="button"
-              role="switch"
-              aria-checked={on}
+            <Switch
               aria-label="Manage this computer's daemon"
               data-testid="connection-manage-toggle"
+              checked={on}
               disabled={busy}
-              onClick={() => void toggle()}
-              className={cn(
-                "h-5 w-9 shrink-0 rounded-full border border-input-border transition-colors disabled:opacity-50",
-                on ? "bg-primary" : "bg-transparent",
-              )}
-            >
-              <span className={cn("block size-3.5 rounded-full bg-background shadow transition-transform", on ? "translate-x-4" : "translate-x-0.5")} />
-            </button>
+              onCheckedChange={() => void toggle()}
+            />
           }
         />
       </SettingsGroup>
-      {confirming && (
-        <div role="alertdialog" aria-label="Stop managing the daemon" data-testid="connection-manage-confirm" className="flex flex-col gap-2 rounded-xl border bg-card p-3">
-          <p className="text-ui-base text-muted-foreground">
-            The app manages a running daemon on this computer. Turning this off stops the app from updating, restarting or taking it over. The
-            daemon itself keeps running.
-          </p>
-          <div className="flex gap-2">
-            <Button size="sm" data-testid="connection-manage-confirm-yes" disabled={busy} onClick={() => void persist(false)}>
-              Stop managing
-            </Button>
-            <Button variant="ghost" size="sm" data-testid="connection-manage-confirm-cancel" disabled={busy} onClick={() => setConfirming(false)}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(false);
+        }}
+        title="Stop managing the daemon"
+        description="The app manages a running daemon on this computer. Turning this off stops the app from updating, restarting or taking it over. The daemon itself keeps running."
+        confirmLabel="Stop managing"
+        pending={busy}
+        destructive={false}
+        testId="connection-manage-confirm"
+        confirmTestId="connection-manage-confirm-yes"
+        cancelTestId="connection-manage-confirm-cancel"
+        onConfirm={() => void persist(false)}
+      />
       {error && (
         <FormError message={error} testId="connection-manage-error" />
       )}

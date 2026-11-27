@@ -995,7 +995,7 @@ describe("App keyboard shortcuts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Customize in Settings" }));
     await flush();
     expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("settings-back-button"));
+    fireEvent.click(screen.getByTestId("settings-close-button"));
     await flush();
 
     await act(async () => {
@@ -2235,7 +2235,7 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
     fireEvent.click(screen.getByLabelText("Change shortcut for Focus pane left"));
     fireEvent.keyDown(window, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
-    fireEvent.click(screen.getByTestId("settings-back-button"));
+    fireEvent.click(screen.getByTestId("settings-close-button"));
     await flush();
 
     const composer = screen.getByLabelText("Prompt");
@@ -2850,7 +2850,7 @@ describe("App drag-to-split (Item 8)", { timeout: 20_000 }, () => {
 });
 
 describe("App settings view (dogfood Item 4)", () => {
-  it("opening settings keeps the sidebar usable and hides only the content region (inert, aria-hidden); the task pane stays mounted", async () => {
+  it("opening settings is a modal over the workspace: the shell and content region stay visible and live, the task pane stays mounted", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -2874,22 +2874,20 @@ describe("App settings view (dogfood Item 4)", () => {
     expect(settings).toBeInTheDocument();
     // Same DOM node: the task pane (and any live chat stream in it) was not unmounted, only hidden and made unreachable.
     expect(paneBefore.isConnected).toBe(true);
-    expect(region).toHaveAttribute("inert");
-    expect(region).toHaveAttribute("aria-hidden", "true");
-    expect(region).toHaveClass("invisible");
-    // The page sits INSIDE the shell, beside the sidebar: the shell and the sidebar stay live.
+    // Settings is a modal dialog on top: the workspace is neither hidden nor inert underneath.
+    expect(region).not.toHaveAttribute("inert");
+    expect(region).not.toHaveClass("invisible");
     expect(shell).not.toHaveAttribute("inert");
     expect(shell).not.toHaveClass("invisible");
-    expect(shell.contains(settings)).toBe(true);
+    expect(screen.getByTestId("settings-dialog").contains(settings)).toBe(true);
+    expect(shell.contains(settings)).toBe(false);
     expect(region.contains(settings)).toBe(false);
-    expect(screen.getByTestId("sidebar-content")).not.toHaveAttribute("inert");
 
-    fireEvent.click(screen.getByTestId("settings-back-button"));
+    fireEvent.click(screen.getByTestId("settings-close-button"));
     await flush();
     expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
     expect(screen.getByTestId("primary-pane")).toBe(paneBefore);
     expect(region).not.toHaveAttribute("inert");
-    expect(region).not.toHaveAttribute("aria-hidden");
     expect(region).not.toHaveClass("invisible");
   });
 
@@ -2907,7 +2905,7 @@ describe("App settings view (dogfood Item 4)", () => {
     expect(screen.getByTestId("content-region")).not.toHaveAttribute("inert");
   });
 
-  it("below the mobile breakpoint the page still covers the whole shell (hidden, inert)", async () => {
+  it("below the mobile breakpoint Settings is still a modal over the shell (shell not hidden or inert)", async () => {
     const realWidth = window.innerWidth;
     const realMatchMedia = window.matchMedia;
     window.innerWidth = 500;
@@ -2922,8 +2920,10 @@ describe("App settings view (dogfood Item 4)", () => {
       fireEvent.keyDown(document.body, { key: ",", ctrlKey: true });
       await flush();
       expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
-      expect(shell).toHaveAttribute("inert");
-      expect(shell).toHaveClass("invisible");
+      // Settings is a modal at every size (a full-bleed sheet here): it never hides or inerts the shell.
+      expect(screen.getByTestId("settings-dialog")).toBeInTheDocument();
+      expect(shell).not.toHaveAttribute("inert");
+      expect(shell).not.toHaveClass("invisible");
       expect(shell.contains(screen.getByTestId("settings-screen"))).toBe(false);
     } finally {
       window.innerWidth = realWidth;
@@ -2960,7 +2960,7 @@ describe("App settings view (dogfood Item 4)", () => {
     await flush();
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
 
-    fireEvent.click(screen.getByTestId("settings-back-button"));
+    fireEvent.click(screen.getByTestId("settings-close-button"));
     await flush();
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
     expect(screen.getByRole("tab", { name: "Files", selected: true })).toBeInTheDocument();
@@ -2993,7 +2993,7 @@ describe("App settings view (dogfood Item 4)", () => {
     expect(keyEvent.defaultPrevented).toBe(false);
     expect(socket.sent.filter((e) => e.method === "chat.list").length).toBe(chatListsBefore);
 
-    fireEvent.click(screen.getByTestId("settings-back-button"));
+    fireEvent.click(screen.getByTestId("settings-close-button"));
     await flush();
     expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
     expect(screen.getByTestId("app-header-title")).not.toHaveTextContent(TASK_B.Title);

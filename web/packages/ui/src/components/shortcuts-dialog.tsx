@@ -88,18 +88,53 @@ function ShortcutRow({
     <tr
       data-testid="shortcut-row"
       data-binding-id={row.id}
-      className="border-t border-border max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-2"
+      className={cn(
+        "border-t border-border",
+        readOnly
+          ? "max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto] max-sm:gap-x-2"
+          : "@max-[44rem]:grid @max-[44rem]:grid-cols-[minmax(0,1fr)_auto] @max-[44rem]:gap-x-2",
+      )}
     >
-      <td className="max-sm:col-start-1 max-sm:row-start-1 max-sm:pb-0 px-3 py-1.5">
-        <div className="max-sm:whitespace-normal sm:truncate text-ui-base">{row.label}</div>
-        {row.note && <div className="max-sm:whitespace-normal sm:truncate text-ui-sm text-foreground-muted">{row.note}</div>}
+      <td
+        className={cn(
+          readOnly
+            ? "max-sm:col-start-1 max-sm:row-start-1 max-sm:pb-0 px-3 py-1.5"
+            : "@max-[44rem]:col-start-1 @max-[44rem]:row-start-1 @max-[44rem]:pb-0 px-3 py-1.5",
+        )}
+      >
+        <div
+          className={cn(
+            readOnly
+              ? "max-sm:whitespace-normal sm:truncate text-ui-base"
+              : "@max-[44rem]:whitespace-normal @min-[44rem]:truncate text-ui-base",
+          )}
+        >
+          {row.label}
+        </div>
+        {row.note && (
+          <div
+            className={cn(
+              readOnly
+                ? "max-sm:whitespace-normal sm:truncate text-ui-sm text-foreground-muted"
+                : "@max-[44rem]:whitespace-normal @min-[44rem]:truncate text-ui-sm text-foreground-muted",
+            )}
+          >
+            {row.note}
+          </div>
+        )}
         {conflictLabel && (
           <div className="text-ui-sm text-warning-text" data-testid="shortcut-conflict">
             Also used by {conflictLabel}
           </div>
         )}
       </td>
-      <td className="max-sm:col-start-1 max-sm:row-start-2 max-sm:pt-1 whitespace-nowrap px-3 py-1.5">
+      <td
+        className={cn(
+          readOnly
+            ? "max-sm:col-start-1 max-sm:row-start-2 max-sm:pt-1 whitespace-nowrap px-3 py-1.5"
+            : "@max-[44rem]:col-start-1 @max-[44rem]:row-start-2 @max-[44rem]:pt-1 whitespace-nowrap px-3 py-1.5",
+        )}
+      >
         {capturing === "chord" ? (
           <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-capturing">
             Recording a chord… (Enter to save, Esc to cancel)
@@ -117,10 +152,10 @@ function ShortcutRow({
         )}
       </td>
       {!readOnly && (
-        <td className="hidden whitespace-nowrap px-3 py-1.5 text-ui-sm text-foreground-muted sm:table-cell">Global</td>
+        <td className="hidden whitespace-nowrap px-3 py-1.5 text-ui-sm text-foreground-muted @min-[44rem]:table-cell">Global</td>
       )}
       {!readOnly && (
-        <td className="max-sm:col-start-2 max-sm:row-start-1 max-sm:row-span-2 max-sm:self-center px-3 py-1.5">
+        <td className="@max-[44rem]:col-start-2 @max-[44rem]:row-start-1 @max-[44rem]:row-span-2 @max-[44rem]:self-center px-3 py-1.5">
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button
               variant="ghost"
@@ -192,9 +227,14 @@ export function ShortcutRows({ query = "", readOnly = false }: { query?: string;
           className="overflow-hidden rounded-xl border border-border bg-card"
           data-testid="shortcut-sections"
         >
-          <div className="overflow-x-auto">
-            <table className={cn("max-sm:block w-full border-collapse text-left text-ui-base", readOnly && "sm:table-fixed")}>
-              <thead className="max-sm:sr-only">
+          <div className={cn("overflow-x-auto", !readOnly && "@container")}>
+            <table
+              className={cn(
+                "w-full border-collapse text-left text-ui-base",
+                readOnly ? "max-sm:block sm:table-fixed" : "@max-[44rem]:block",
+              )}
+            >
+              <thead className={readOnly ? "max-sm:sr-only" : "@max-[44rem]:sr-only"}>
                 <tr className="border-b border-border">
                   <th scope="col" className="px-3 py-2 text-ui-sm font-medium text-foreground-muted">
                     Command
@@ -205,7 +245,7 @@ export function ShortcutRows({ query = "", readOnly = false }: { query?: string;
                   {!readOnly && (
                     <th
                       scope="col"
-                      className="hidden whitespace-nowrap px-3 py-2 text-ui-sm font-medium text-foreground-muted sm:table-cell"
+                      className="hidden whitespace-nowrap px-3 py-2 text-ui-sm font-medium text-foreground-muted @min-[44rem]:table-cell"
                     >
                       Scope
                     </th>
@@ -218,12 +258,17 @@ export function ShortcutRows({ query = "", readOnly = false }: { query?: string;
                 </tr>
               </thead>
               {sections.map((section) => (
-                <tbody key={section.id} data-testid={`shortcut-section-${section.id}`} className="max-sm:block">
-                  <tr className="max-sm:block">
+                <tbody key={section.id} data-testid={`shortcut-section-${section.id}`}
+                  className={readOnly ? "max-sm:block" : "@max-[44rem]:block"}
+                >
+                  <tr className={readOnly ? "max-sm:block" : "@max-[44rem]:block"}>
                     <th
                       colSpan={readOnly ? 2 : 4}
                       scope="colgroup"
-                      className="max-sm:block bg-muted/40 px-4 py-1.5 text-ui-sm font-medium uppercase tracking-wide text-foreground-muted"
+                      className={cn(
+                        "bg-muted/40 px-4 py-1.5 text-ui-sm font-medium uppercase tracking-wide text-foreground-muted",
+                        readOnly ? "max-sm:block" : "@max-[44rem]:block",
+                      )}
                     >
                       {section.title}
                     </th>

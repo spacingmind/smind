@@ -40,6 +40,42 @@ function allText(): string {
 }
 
 describe("settings-hosts section", () => {
+  it("ui_cleanup_b2_hosts_row_is_responsive", async () => {
+    const d = new FleetDaemon();
+    d.hosts = [fleetHost()];
+    await renderSection(d);
+
+    const rows = document.querySelectorAll('[data-slot="settings-row"]');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of Array.from(rows)) {
+      const tokens = (row.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
+      // a bare flex-row forces the row wide at every size; sm:flex-row is the responsive default
+      expect(tokens, row.getAttribute("data-testid") ?? "").not.toContain("flex-row");
+    }
+  });
+
+  it("ui_cleanup_b2_long_value_rows_wrap", async () => {
+    const longValue = "a".repeat(64);
+    const d = new FleetDaemon();
+    d.hosts = [fleetHost({ labels: { zone: "eu", note: longValue } })];
+    await renderSection(d);
+
+    // The labels row's mono chips sit in the description block: each chip
+    // must break inside itself instead of overflowing the row.
+    const rows = [{ testId: "host-labels-mac" }];
+    for (const { testId } of rows) {
+      const chips = Array.from(screen.getByTestId(testId).children) as HTMLElement[];
+      expect(chips.length).toBeGreaterThan(0);
+      for (const chip of chips) {
+        expect(chip.className).toContain("min-w-0");
+        expect(chip.className).toContain("break-all");
+        expect(chip.className).toContain("font-mono");
+        expect(chip.className).not.toContain("whitespace-nowrap");
+      }
+    }
+    expect(screen.getByTestId("host-labels-mac")).toHaveTextContent(`note:${longValue}`);
+  });
+
   it("TestHostsPage_RendersStates", async () => {
     const d = new FleetDaemon();
     d.hosts = [

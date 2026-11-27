@@ -67,8 +67,9 @@ describe("settings-plugins section", () => {
     expect(off).toHaveTextContent("Plugins are off");
     expect(off).toHaveTextContent("plugins.enabled");
     expect(off).toHaveTextContent("config.yaml");
-    // The page has NO control that flips the global switch: no switch/checkbox, and nothing to "turn on".
-    expect(screen.queryByRole("switch")).toBeNull();
+    // The page has NO control that flips the global switch: no checkbox, nothing to "turn on", and the row's
+    // own enable switch (the only switch on the page) is locked.
+    expect(screen.getAllByRole("switch")).toHaveLength(1);
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
     expect(screen.queryByRole("button", { name: /turn on|enable plugins|plugins on/i })).toBeNull();
     // Everything else is read-only: install and the row's actions are disabled.
@@ -180,6 +181,35 @@ describe("settings-plugins section", () => {
     await flush();
     expect(d.calls.find((c) => c.method === "plugin.disable")?.params).toEqual({ id: "acme" });
     expect(screen.getByTestId("plugin-status-acme")).toHaveTextContent("Disabled");
+  });
+
+  it("ui_cleanup_b2_plugins_enabled_is_a_switch", async () => {
+    const d = daemonWith([DIR, LINK]);
+    await renderSection(d);
+
+    // One Switch per row, and no Enable/Disable buttons anywhere.
+    for (const [id, name] of [
+      ["acme", "Acme"],
+      ["linked", "Linked"],
+    ] as const) {
+      const row = screen.getByTestId(`plugin-row-${id}`);
+      const control = within(row).getByRole("switch", { name: `Enable ${name}` });
+      expect(control).toHaveAttribute("data-slot", "switch");
+      expect(within(row).queryByRole("button", { name: "Enable" })).toBeNull();
+      expect(within(row).queryByRole("button", { name: "Disable" })).toBeNull();
+    }
+
+    // Turning a disabled plugin on opens the same consent step the Enable button did -- nothing is sent yet.
+    await click(screen.getByTestId("plugin-enable-linked"));
+    expect(await screen.findByTestId("plugin-enable-dialog")).toBeInTheDocument();
+    expect(d.countCalls("plugin.enable")).toBe(0);
+    await click(screen.getByTestId("plugin-enable-dialog-cancel"));
+    await waitFor(() => expect(screen.queryByTestId("plugin-enable-dialog")).toBeNull());
+
+    // Turning an enabled plugin off makes the same disable call the Disable button did.
+    await click(screen.getByTestId("plugin-disable-acme"));
+    await flush();
+    expect(d.calls.find((c) => c.method === "plugin.disable")?.params).toEqual({ id: "acme" });
   });
 
   it("remove sends keepData false by default and true when checked", async () => {

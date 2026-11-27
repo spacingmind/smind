@@ -53,10 +53,10 @@ const ACTIVE = [
 ];
 
 describe("registration", () => {
-  it("registers Skills (learned) in Agents & providers with a deep-linkable id and a nav badge", () => {
+  it("registers Skills (learned) in Agents with a deep-linkable id and a nav badge", () => {
     const section = listSettingsSections().find((s) => s.id === "learned-skills");
     expect(section?.label).toBe("Skills (learned)");
-    expect(section?.groupLabel).toBe("Profiles & providers");
+    expect(section?.groupLabel).toBe("Agents");
     expect(section?.badge).toBeTruthy();
   });
 });

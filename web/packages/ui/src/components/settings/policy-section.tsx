@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 
-import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
+import { SettingsEmptyCard, SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Alert } from "@/components/ui/alert";
-import { FormError } from "@/components/ui/form-error";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { StatusBadge, type StatusBadgeStatus } from "@/components/ui/status-badge";
 import { usePolicyAudit, usePolicyStatus } from "@/hooks/use-policy";
@@ -71,15 +70,15 @@ function PolicySection(_ctx: SettingsSectionContext) {
       {status.isPending ? (
         <LoadingRows />
       ) : status.isError ? (
-        <FormError message="Could not load the policy." testId="policy-error" />
+        <Alert variant="error" testId="policy-error" description="Could not load the policy." />
       ) : (
         <>
           <ValidityAlert status={status.data} />
           <SettingsGroup title="Policy file">
             <SettingsRow
               label="File"
-              control={
-                <span data-testid="policy-path" className="font-mono text-ui-sm text-foreground-muted">
+              description={
+                <span data-testid="policy-path" className="block min-w-0 font-mono text-ui-sm break-all text-foreground-muted">
                   {status.data?.path || EM_DASH}
                 </span>
               }
@@ -87,16 +86,13 @@ function PolicySection(_ctx: SettingsSectionContext) {
             <SettingsRow label="Edit it on disk; this page never writes it." />
           </SettingsGroup>
 
-          <div className="flex min-w-0 flex-col gap-3">
-            <h3 className="text-ui-base font-medium text-foreground">Rules</h3>
-            {(status.data?.rules ?? []).length === 0 ? (
-              <p className="text-ui-sm text-foreground-muted" data-testid="policy-rules">
-                No rules.
-              </p>
-            ) : narrow ? (
-              <div className="flex min-w-0 flex-col rounded-xl border bg-card [&>*+*]:border-t" data-testid="policy-rules">
-                {(status.data?.rules ?? []).map((rule) => (
-                  <div key={rule.id} data-testid={`policy-rule-${rule.id}`} className="flex min-w-0 flex-col gap-1 px-3 py-2">
+          {(status.data?.rules ?? []).length === 0 ? (
+            <SettingsEmptyCard title="No rules." testId="policy-rules" />
+          ) : (
+            <SettingsGroup title="Rules" testId="policy-rules">
+              {narrow ? (
+                (status.data?.rules ?? []).map((rule) => (
+                  <div key={rule.id} data-testid={`policy-rule-${rule.id}`} className="flex min-w-0 flex-col gap-1 px-4 py-3">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="font-mono whitespace-nowrap break-normal text-foreground">{rule.id}</span>
                       <ActionBadge value={rule.action} />
@@ -104,55 +100,52 @@ function PolicySection(_ctx: SettingsSectionContext) {
                     <div className="min-w-0 text-foreground-muted">{rule.why}</div>
                     <div className="min-w-0 text-foreground-muted">Scope: {ruleScope(rule)}</div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="overflow-x-auto rounded-xl border bg-card" data-testid="policy-rules">
-                <table className="w-full text-ui-sm">
-                  <caption className="sr-only">Policy rules</caption>
-                  <thead>
-                    <tr className="text-left text-muted-foreground">
-                      <th className="px-3 py-2 font-normal">Rule</th>
-                      <th className="px-3 py-2 font-normal">Action</th>
-                      <th className="px-3 py-2 font-normal">Why</th>
-                      <th className="px-3 py-2 font-normal">Scope</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(status.data?.rules ?? []).map((rule) => (
-                      <tr key={rule.id} data-testid={`policy-rule-${rule.id}`} className="border-t">
-                        <td className="px-3 py-2 font-mono whitespace-nowrap text-foreground">{rule.id}</td>
-                        <td className="px-3 py-2">
-                          <ActionBadge value={rule.action} />
-                        </td>
-                        <td className="px-3 py-2 text-foreground-muted">{rule.why}</td>
-                        <td className="px-3 py-2 text-foreground-muted">{ruleScope(rule)}</td>
+                ))
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-ui-sm">
+                    <caption className="sr-only">Policy rules</caption>
+                    <thead>
+                      <tr className="text-left text-muted-foreground">
+                        <th className="px-4 py-3 font-normal">Rule</th>
+                        <th className="px-4 py-3 font-normal">Action</th>
+                        <th className="px-4 py-3 font-normal">Why</th>
+                        <th className="px-4 py-3 font-normal">Scope</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+                    </thead>
+                    <tbody>
+                      {(status.data?.rules ?? []).map((rule) => (
+                        <tr key={rule.id} data-testid={`policy-rule-${rule.id}`} className="border-t">
+                          <td className="px-4 py-3 font-mono whitespace-nowrap text-foreground">{rule.id}</td>
+                          <td className="px-4 py-3">
+                            <ActionBadge value={rule.action} />
+                          </td>
+                          <td className="px-4 py-3 text-foreground-muted">{rule.why}</td>
+                          <td className="px-4 py-3 text-foreground-muted">{ruleScope(rule)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </SettingsGroup>
+          )}
         </>
       )}
 
-      <div className="flex min-w-0 flex-col gap-3">
-        <h3 className="text-ui-base font-medium text-foreground">Recent decisions</h3>
-        {audit.isPending ? (
-          <LoadingRows />
-        ) : audit.isError ? (
-          <FormError message="Could not load the audit." testId="policy-audit-error" />
-        ) : (audit.data?.rows ?? []).length === 0 ? (
-          <p className="text-ui-sm text-foreground-muted" data-testid="policy-audit-empty">
-            No decisions recorded yet.
-          </p>
-        ) : narrow ? (
-          <div className="flex min-w-0 flex-col rounded-xl border bg-card [&>*+*]:border-t" data-testid="policy-audit">
-            {(audit.data?.rows ?? []).map((row) => {
+      {audit.isPending ? (
+        <LoadingRows />
+      ) : audit.isError ? (
+        <Alert variant="error" testId="policy-audit-error" description="Could not load the audit." />
+      ) : (audit.data?.rows ?? []).length === 0 ? (
+        <SettingsEmptyCard title="No decisions recorded yet." testId="policy-audit-empty" />
+      ) : (
+        <SettingsGroup title="Recent decisions" testId="policy-audit">
+          {narrow ? (
+            (audit.data?.rows ?? []).map((row) => {
               const target = auditTarget(row);
               return (
-                <div key={row.id} data-testid={`policy-decision-${row.id}`} className="flex min-w-0 flex-col gap-1 px-3 py-2">
+                <div key={row.id} data-testid={`policy-decision-${row.id}`} className="flex min-w-0 flex-col gap-1 px-4 py-3">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <ActionBadge value={row.decision} />
                     <span className="font-mono whitespace-nowrap break-normal text-foreground-muted">{row.ruleId || EM_DASH}</span>
@@ -162,47 +155,47 @@ function PolicySection(_ctx: SettingsSectionContext) {
                   <div className="min-w-0 text-foreground-muted">Seat: {row.seat}</div>
                 </div>
               );
-            })}
-          </div>
-        ) : (
-          <div className="overflow-x-auto rounded-xl border bg-card" data-testid="policy-audit">
-            <table className="w-full text-ui-sm">
-              <caption className="sr-only">Recent policy decisions</caption>
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="px-3 py-2 font-normal">When</th>
-                  <th className="px-3 py-2 font-normal">Decision</th>
-                  <th className="px-3 py-2 font-normal">Rule</th>
-                  <th className="px-3 py-2 font-normal">Target</th>
-                  <th className="px-3 py-2 font-normal">Seat</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(audit.data?.rows ?? []).map((row) => {
-                  const target = auditTarget(row);
-                  return (
-                    <tr key={row.id} data-testid={`policy-decision-${row.id}`} className="border-t">
-                      <td className="whitespace-nowrap px-3 py-2 text-foreground-muted">
-                        {formatRelativeTime(row.createdAt)}
-                      </td>
-                      <td className="px-3 py-2">
-                        <ActionBadge value={row.decision} />
-                      </td>
-                      <td className="px-3 py-2 font-mono whitespace-nowrap text-foreground-muted">{row.ruleId || EM_DASH}</td>
-                      <td className="px-3 py-2 text-foreground-muted">
-                        <span className="block max-w-xs truncate" title={target.full}>
-                          {target.text}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-foreground-muted">{row.seat}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+            })
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-ui-sm">
+                <caption className="sr-only">Recent policy decisions</caption>
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="px-4 py-3 font-normal">When</th>
+                    <th className="px-4 py-3 font-normal">Decision</th>
+                    <th className="px-4 py-3 font-normal">Rule</th>
+                    <th className="px-4 py-3 font-normal">Target</th>
+                    <th className="px-4 py-3 font-normal">Seat</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(audit.data?.rows ?? []).map((row) => {
+                    const target = auditTarget(row);
+                    return (
+                      <tr key={row.id} data-testid={`policy-decision-${row.id}`} className="border-t">
+                        <td className="whitespace-nowrap px-4 py-3 text-foreground-muted">
+                          {formatRelativeTime(row.createdAt)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <ActionBadge value={row.decision} />
+                        </td>
+                        <td className="px-4 py-3 font-mono whitespace-nowrap text-foreground-muted">{row.ruleId || EM_DASH}</td>
+                        <td className="px-4 py-3 text-foreground-muted">
+                          <span className="block max-w-xs truncate" title={target.full}>
+                            {target.text}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-foreground-muted">{row.seat}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </SettingsGroup>
+      )}
     </div>
   );
 }
@@ -231,9 +224,9 @@ function ValidityAlert({ status }: { status: PolicyStatus | undefined }) {
 registerSettingsSection({
   id: "permission-policy",
   label: "Permission policy",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Safety & usage",
   description: "Rules that auto-allow or deny agent permission requests. Read-only.",
-  order: 195,
+  order: 190,
   icon: <Icons.permission aria-hidden className="size-3.5" />,
   render: (ctx) => <PolicySection {...ctx} />,
 });

@@ -3,7 +3,7 @@ import { act } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { registerSettingsSection } from "@/components/settings/settings-registry";
+import { listSettingsSections, registerSettingsSection } from "@/components/settings/settings-registry";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { readStoredThemePreference } from "@/lib/theme";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe("SettingsScreen shell", () => {
-  it("lists Usage in the nav under Agents & providers", () => {
+  it("lists Usage in the nav under Safety & usage", () => {
     renderScreen();
 
     const usage = screen.getByTestId("settings-nav-usage");
@@ -54,11 +54,12 @@ describe("SettingsScreen shell", () => {
     expect(screen.queryByTestId("settings-section-appearance")).not.toBeInTheDocument();
   });
 
-  it("groups the nav per the run-config IA regroup: Profiles & providers, and Connection (desktop only)", () => {
+  it("groups the nav per the UI cleanup B2 groups: Agents, Safety & usage, and Connection (desktop only)", () => {
     renderScreen();
 
-    // Profiles & providers group: heading once, then its two members.
-    expect(screen.getAllByText("Profiles & providers").length).toBe(1);
+    // Each group heading renders once, above its first member.
+    expect(screen.getAllByText("Agents")).toHaveLength(1);
+    expect(screen.getAllByText("Safety & usage")).toHaveLength(1);
     expect(screen.getByTestId("settings-nav-agents")).toHaveTextContent("Profiles");
     expect(screen.getByTestId("settings-nav-providers")).toHaveTextContent("Providers");
 
@@ -68,8 +69,8 @@ describe("SettingsScreen shell", () => {
     expect(screen.queryByTestId("settings-nav-daemon")).not.toBeInTheDocument();
 
     // Order (Paseo-style): the ungrouped app sections first (General ·
-    // Appearance · Notifications · Shortcuts · GitHub · Hosts), then groups -- Connection
-    // (desktop only), then Profiles & providers.
+    // Appearance · Notifications · Shortcuts · GitHub · Hosts), then the groups -- Agents, then
+    // Safety & usage.
     const ids = screen
       .getAllByRole("listitem")
       .map((li) => li.querySelector("[data-testid^='settings-nav-']")?.getAttribute("data-testid"))
@@ -82,28 +83,28 @@ describe("SettingsScreen shell", () => {
       "settings-nav-github",
       "settings-nav-hosts",
       "settings-nav-agents",
+      "settings-nav-providers",
       "settings-nav-mcp-servers",
       "settings-nav-learned-skills",
       "settings-nav-plugins",
       "settings-nav-automations",
-      "settings-nav-providers",
-      "settings-nav-usage",
       "settings-nav-permission-policy",
       "settings-nav-saved-grants",
       "settings-nav-browser",
+      "settings-nav-usage",
     ]);
   });
 
-  it("keeps Notifications and Shortcuts out of the Profiles & providers group (they precede its heading)", () => {
+  it("keeps Notifications and Shortcuts out of the Agents group (they precede its heading)", () => {
     renderScreen();
 
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    const heading = within(nav).getByText("Profiles & providers");
+    const heading = within(nav).getByText("Agents");
     for (const id of ["notifications", "shortcuts"]) {
       const item = within(nav).getByTestId(`settings-nav-${id}`);
       expect(item.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
-    for (const id of ["agents", "mcp-servers", "providers", "usage"]) {
+    for (const id of ["agents", "mcp-servers", "learned-skills", "plugins", "automations", "providers"]) {
       const item = within(nav).getByTestId(`settings-nav-${id}`);
       expect(heading.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
@@ -606,6 +607,58 @@ describe("SettingsScreen layout", () => {
     expect(navItems.length).toBeGreaterThan(0);
     for (const item of navItems) {
       expect(item.querySelector("svg")).not.toBeNull();
+    }
+  });
+
+  it("ui_cleanup_b2_one_column_width_for_every_section", () => {
+    renderScreen();
+
+    // Sections that had each of the three old width classes: general was
+    // the narrow 510px reading column, usage the wide 3xl, shortcuts the
+    // extra-wide 5xl -- plus the rest of the tab set.
+    for (const id of ["general", "usage", "shortcuts", "saved-grants", "browser", "hosts"]) {
+      fireEvent.click(screen.getByTestId(`settings-nav-${id}`));
+      const column = within(screen.getByTestId("settings-content")).getByTestId("settings-page-title").parentElement;
+      expect(column).not.toBeNull();
+      expect(column?.className).toContain("max-w-3xl");
+      expect(column?.className).not.toContain("max-w-[510px]");
+      expect(column?.className).not.toContain("max-w-5xl");
+    }
+  });
+
+  it("ui_cleanup_b2_nav_groups", () => {
+    // The screen's own imports register every real section; the registry
+    // is the source of truth for group membership.
+    const sections = listSettingsSections();
+    const byId = new Map(sections.map((s) => [s.id, s] as const));
+    const expectIn = (id: string, group: string, order: number) => {
+      const section = byId.get(id);
+      expect(section, `${id} is registered`).toBeDefined();
+      expect(section?.groupLabel).toBe(group);
+      expect(section?.order).toBe(order);
+    };
+
+    // Agents: Profiles, Providers, MCP servers, Skills (learned), Plugins, Automations.
+    expectIn("agents", "Agents", 175);
+    expectIn("providers", "Agents", 176);
+    expectIn("mcp-servers", "Agents", 177);
+    expectIn("learned-skills", "Agents", 178);
+    expectIn("plugins", "Agents", 179);
+    expectIn("automations", "Agents", 180);
+    // Safety & usage: Permission policy, Saved grants, Browser, Usage.
+    expectIn("permission-policy", "Safety & usage", 190);
+    expectIn("saved-grants", "Safety & usage", 191);
+    expectIn("browser", "Safety & usage", 192);
+    expectIn("usage", "Safety & usage", 193);
+
+    // The old combined group is gone entirely.
+    expect(sections.some((s) => s.groupLabel === "Profiles & providers")).toBe(false);
+
+    // Contiguity: nothing outside a group sits inside its order span, so
+    // no other nav entry can read as a member of either group.
+    for (const s of sections) {
+      if (s.order >= 175 && s.order <= 180) expect(s.groupLabel).toBe("Agents");
+      if (s.order >= 190 && s.order <= 193) expect(s.groupLabel).toBe("Safety & usage");
     }
   });
 });

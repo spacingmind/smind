@@ -1,6 +1,7 @@
 import { useState, type JSX } from "react";
 
 import { ProviderIcon } from "@/components/provider-icon";
+import { SettingsGroup } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-error";
 import { Input } from "@/components/ui/input";
@@ -42,125 +43,126 @@ export function AddProviderInstance({ hasClient }: { hasClient: boolean }): JSX.
     setForm((f) => ({ ...f, ...patch }));
   };
   return (
-    <div data-testid="provider-add-instance" className="@container/add flex flex-col gap-3 rounded-xl border bg-card p-3">
-      <div className="flex flex-col gap-0.5">
-        <h3 className="text-ui-base font-medium">Add instance</h3>
-        <p className="text-ui-sm text-muted-foreground">
-          A second Claude Code or Codex login in its own config directory, usable side by side with the base provider.
-        </p>
-      </div>
-
-      <div className="flex flex-col gap-1.5">
-        <span className="text-ui-sm font-medium">Found in your home folder</span>
-        <div className="flex min-h-7 flex-wrap items-center gap-1.5" data-testid="provider-add-suggestions">
-          {shown.length === 0 ? (
-            <span className="text-ui-sm text-muted-foreground">No other ~/.claude* or ~/.codex* directories found.</span>
-          ) : (
-            shown.map((s) => {
-              const done = added.some((a) => a.dir === s.dir);
-              return (
-                <button
-                  key={s.dir}
-                  type="button"
-                  disabled={!hasClient || pending || done}
-                  aria-label={done ? `${s.suggestedLabel} added` : undefined}
-                  data-testid={`provider-suggestion-${s.suggestedId}`}
-                  title={s.dir}
-                  onClick={() => {
-                    setErrorFrom("chip");
-                    add({ extends: s.extends, id: s.suggestedId, label: s.suggestedLabel, dir: s.dir }, () => setAdded((prev) => [...prev, s]));
-                  }}
-                  className={cn(
-                    "inline-flex h-7 items-center gap-1.5 rounded-lg border border-input-border bg-input px-2 text-ui-sm outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
-                    done && "disabled:opacity-100",
-                  )}
-                >
-                  <ProviderIcon provider={s.extends} size={14} />
-                  <span className="font-mono">~/{s.name}</span>
-                  {done ? (
-                    <Icons.check aria-hidden className="size-3 text-success" />
-                  ) : (
-                    <Icons.arrowRight aria-hidden className="size-3 text-muted-foreground" />
-                  )}
-                  <span>{s.suggestedLabel}</span>
-                </button>
-              );
-            })
-          )}
+    <SettingsGroup
+      title="Add instance"
+      description="A second Claude Code or Codex login in its own config directory, usable side by side with the base provider."
+      testId="provider-add-instance"
+      className="@container/add"
+    >
+      <div className="flex flex-col gap-3 p-3">
+        <div className="flex flex-col gap-1.5">
+          <span className="text-ui-sm font-medium">Found in your home folder</span>
+          <div className="flex min-h-7 flex-wrap items-center gap-1.5" data-testid="provider-add-suggestions">
+            {shown.length === 0 ? (
+              <span className="text-ui-sm text-muted-foreground">No other ~/.claude* or ~/.codex* directories found.</span>
+            ) : (
+              shown.map((s) => {
+                const done = added.some((a) => a.dir === s.dir);
+                return (
+                  <button
+                    key={s.dir}
+                    type="button"
+                    disabled={!hasClient || pending || done}
+                    aria-label={done ? `${s.suggestedLabel} added` : undefined}
+                    data-testid={`provider-suggestion-${s.suggestedId}`}
+                    title={s.dir}
+                    onClick={() => {
+                      setErrorFrom("chip");
+                      add({ extends: s.extends, id: s.suggestedId, label: s.suggestedLabel, dir: s.dir }, () => setAdded((prev) => [...prev, s]));
+                    }}
+                    className={cn(
+                      "inline-flex h-7 items-center gap-1.5 rounded-lg border border-input-border bg-input px-2 text-ui-sm outline-none transition-colors hover:bg-hover focus-visible:ring-2 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50",
+                      done && "disabled:opacity-100",
+                    )}
+                  >
+                    <ProviderIcon provider={s.extends} size={14} />
+                    <span className="font-mono">~/{s.name}</span>
+                    {done ? (
+                      <Icons.check aria-hidden className="size-3 text-success" />
+                    ) : (
+                      <Icons.arrowRight aria-hidden className="size-3 text-muted-foreground" />
+                    )}
+                    <span>{s.suggestedLabel}</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+          {errorFrom === "chip" ? <FormError message={error} size="sm" testId="provider-add-error" /> : null}
         </div>
-        {errorFrom === "chip" ? <FormError message={error} size="sm" testId="provider-add-error" /> : null}
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <button
-          type="button"
-          aria-expanded={manual}
-          data-testid="provider-add-manual-toggle"
-          onClick={() => setManual((v) => !v)}
-          className="flex w-fit items-center gap-1 text-ui-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          {manual ? <Icons.chevronDown aria-hidden className="size-3" /> : <Icons.chevronRight aria-hidden className="size-3" />}
-          Another directory
-        </button>
-        {manual ? (
-          <form
-            data-testid="provider-add-form"
-            className="flex flex-col gap-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!hasClient || pending || !formReady) return;
-              setErrorFrom("form");
-              add({ extends: form.base, id: form.id.trim(), label: form.label.trim(), dir: form.dir.trim() }, () => setForm(EMPTY_FORM));
-            }}
+  
+        <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            aria-expanded={manual}
+            data-testid="provider-add-manual-toggle"
+            onClick={() => setManual((v) => !v)}
+            className="flex w-fit items-center gap-1 text-ui-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
           >
-            <SegmentedControl label="Extends" className="self-start" value={form.base} options={BASE_OPTIONS} onChange={(base) => edit({ base })} disabled={pending} />
-            <div className="grid gap-2 @md/add:grid-cols-2">
+            {manual ? <Icons.chevronDown aria-hidden className="size-3" /> : <Icons.chevronRight aria-hidden className="size-3" />}
+            Another directory
+          </button>
+          {manual ? (
+            <form
+              data-testid="provider-add-form"
+              className="flex flex-col gap-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (!hasClient || pending || !formReady) return;
+                setErrorFrom("form");
+                add({ extends: form.base, id: form.id.trim(), label: form.label.trim(), dir: form.dir.trim() }, () => setForm(EMPTY_FORM));
+              }}
+            >
+              <SegmentedControl label="Extends" className="self-start" value={form.base} options={BASE_OPTIONS} onChange={(base) => edit({ base })} disabled={pending} />
+              <div className="grid gap-2 @md/add:grid-cols-2">
+                <label className="flex flex-col gap-1 text-ui-sm font-medium">
+                  Id
+                  <Input
+                    value={form.id}
+                    placeholder="claude-work"
+                    data-testid="provider-add-id"
+                    spellCheck={false}
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    disabled={pending}
+                    onChange={(e) => edit({ id: e.target.value })}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-ui-sm font-medium">
+                  Label
+                  <Input
+                    value={form.label}
+                    placeholder="Claude work"
+                    data-testid="provider-add-label"
+                    disabled={pending}
+                    onChange={(e) => edit({ label: e.target.value })}
+                  />
+                </label>
+              </div>
               <label className="flex flex-col gap-1 text-ui-sm font-medium">
-                Id
+                Config directory
                 <Input
-                  value={form.id}
-                  placeholder="claude-work"
-                  data-testid="provider-add-id"
+                  value={form.dir}
+                  placeholder="~/.claude-work"
+                  data-testid="provider-add-dir"
                   spellCheck={false}
                   autoCapitalize="off"
                   autoCorrect="off"
                   disabled={pending}
-                  onChange={(e) => edit({ id: e.target.value })}
+                  onChange={(e) => edit({ dir: e.target.value })}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-ui-sm font-medium">
-                Label
-                <Input
-                  value={form.label}
-                  placeholder="Claude work"
-                  data-testid="provider-add-label"
-                  disabled={pending}
-                  onChange={(e) => edit({ label: e.target.value })}
-                />
-              </label>
-            </div>
-            <label className="flex flex-col gap-1 text-ui-sm font-medium">
-              Config directory
-              <Input
-                value={form.dir}
-                placeholder="~/.claude-work"
-                data-testid="provider-add-dir"
-                spellCheck={false}
-                autoCapitalize="off"
-                autoCorrect="off"
-                disabled={pending}
-                onChange={(e) => edit({ dir: e.target.value })}
-              />
-            </label>
-            <div className="flex items-center gap-2">
-              <Button type="submit" size="xs" disabled={!hasClient || pending || !formReady} data-testid="provider-add-submit">
-                {pending && errorFrom === "form" ? "Adding…" : "Add instance"}
-              </Button>
-            </div>
-            {errorFrom === "form" ? <FormError message={error} size="sm" testId="provider-add-error" /> : null}
-          </form>
-        ) : null}
+              <div className="flex items-center gap-2">
+                <Button type="submit" size="xs" disabled={!hasClient || pending || !formReady} data-testid="provider-add-submit">
+                  {pending && errorFrom === "form" ? "Adding…" : "Add instance"}
+                </Button>
+              </div>
+              {errorFrom === "form" ? <FormError message={error} size="sm" testId="provider-add-error" /> : null}
+            </form>
+          ) : null}
+        </div>
       </div>
-    </div>
+    </SettingsGroup>
   );
 }
+

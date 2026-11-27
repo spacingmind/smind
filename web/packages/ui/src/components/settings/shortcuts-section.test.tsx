@@ -41,6 +41,13 @@ describe("Settings Shortcuts section", () => {
     expect(rows[0]).toHaveAttribute("data-binding-id", "tab-close");
   });
 
+  it("ui_cleanup_b2_shortcuts_in_card_shell", () => {
+    openShortcuts();
+    const table = document.querySelector("table");
+    expect(table).not.toBeNull();
+    expect(table!.closest('[data-slot="settings-group"]')).not.toBeNull();
+  });
+
   it("renders Command, Keybinding, Scope and Actions column headers", () => {
     openShortcuts();
 

@@ -11,9 +11,9 @@ import { PendingProposalBadge } from "@/components/learning/pending-badge";
 import { LearnedSkillRow, ProposalRow } from "@/components/learning/skill-row";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { SettingsEmptyCard } from "@/components/settings/settings-layout";
+import { SettingsWorkspacePicker } from "@/components/settings/settings-workspace-picker";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useForgetLearning, useLearnedSkills, useLearningStatus, useProposals } from "@/hooks/use-learning";
 import { LEARNED_SKILLS_SECTION_ID } from "@/lib/learning-section";
@@ -163,25 +163,17 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-section-learned-skills">
-      <Select
-        value={String(workspace.id)}
-        onValueChange={(v) => {
-          setChosen(Number(v));
+      <SettingsWorkspacePicker
+        workspaces={workspaces}
+        value={workspace.id}
+        onChange={(id) => {
+          setChosen(id);
           setOpenSkill(null);
           setOpenProposal(null);
         }}
-      >
-        <SelectTrigger aria-label="Workspace" data-testid="learning-workspace-select" className="w-full max-w-xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {workspaces.map((w) => (
-            <SelectItem key={w.id} value={String(w.id)}>
-              {w.title}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        label="Workspace"
+        testId="learning-workspace-select"
+      />
 
       <LearningOptIn workspace={workspace} enabled={status.data.enabled} />
       {workspace.learningMode === "propose" && workspace.budget && <LearningBudgetRow budget={workspace.budget} />}
@@ -246,7 +238,7 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
 registerSettingsSection({
   id: LEARNED_SKILLS_SECTION_ID,
   label: "Skills (learned)",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Agents",
   description: "Skills learned from each workspace's runs.",
   order: 178,
   icon: <Icons.skills aria-hidden className="size-3.5" />,

@@ -2,6 +2,7 @@ import { useState } from "react";
 
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
+import { SettingsGroup } from "@/components/settings/settings-layout";
 import { ShortcutRows } from "@/components/shortcuts-dialog";
 import { Input } from "@/components/ui/input";
 import { Icons } from "@/lib/icons";
@@ -34,7 +35,9 @@ export function ShortcutsSection() {
           className="w-full pl-8"
         />
       </div>
-      <ShortcutRows query={query} />
+      <SettingsGroup>
+        <ShortcutRows query={query} />
+      </SettingsGroup>
     </div>
   );
 }

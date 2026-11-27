@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { SettingsGroup } from "@/components/settings/settings-layout";
+import { SettingsEmptyCard, SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
 import { Button } from "@/components/ui/button";
@@ -50,49 +50,57 @@ function SavedGrantsSection(_ctx: SettingsSectionContext) {
       ) : grants.isError ? (
         <FormError message="Could not load the saved grants." testId="grants-error" />
       ) : (grants.data ?? []).length === 0 ? (
-        <SettingsGroup title="Saved grants">
-          <p className="px-3 py-3 text-ui-sm text-foreground-muted" data-testid="grants-empty">
-            Nothing saved. When a permission card offers &quot;Always allow in this project&quot;, the commands you save appear here, and you can revoke them.
-          </p>
-        </SettingsGroup>
+        <SettingsEmptyCard
+          title="No saved grants"
+          description="Nothing saved. When a permission card offers &quot;Always allow in this project&quot;, the commands you save appear here, and you can revoke them."
+          testId="grants-empty"
+        />
       ) : (
-        <div className="flex min-w-0 flex-col gap-3" data-testid="grants-list">
+        <SettingsGroup testId="grants-list">
           {(grants.data ?? []).map((g) => (
-            <div key={g.id} data-testid={`grant-${g.id}`} data-grant-status={g.status} className="flex min-w-0 flex-col gap-2 rounded-xl border bg-card p-3">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <StatusBadge status={STATUS_TIER[g.status] ?? "neutral"} data-testid={`grant-${g.id}-status`}>
-                  {grantStatusLabel(g.status)}
-                </StatusBadge>
-                <StatusBadge status={g.class === "readonly" ? "neutral" : "warning"} data-testid={`grant-${g.id}-class`}>
-                  {grantClassLabel(g.class)}
-                </StatusBadge>
-                {g.status === "active" && (
-                  <span data-testid={`grant-${g.id}-expiry`} className="text-ui-sm text-foreground-muted">
-                    {expiryText(g)}
+            <SettingsRow
+              key={g.id}
+              testId={`grant-${g.id}`}
+              label={
+                <span data-testid={`grant-${g.id}-command`} className="min-w-0 font-mono text-ui-sm whitespace-pre-wrap break-all text-foreground">
+                  {g.command}
+                </span>
+              }
+              description={
+                <>
+                  <span className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={STATUS_TIER[g.status] ?? "neutral"} data-testid={`grant-${g.id}-status`}>
+                      {grantStatusLabel(g.status)}
+                    </StatusBadge>
+                    <StatusBadge status={g.class === "readonly" ? "neutral" : "warning"} data-testid={`grant-${g.id}-class`}>
+                      {grantClassLabel(g.class)}
+                    </StatusBadge>
+                    {g.status === "active" && (
+                      <span data-testid={`grant-${g.id}-expiry`} className="text-ui-sm text-foreground-muted">
+                        {expiryText(g)}
+                      </span>
+                    )}
                   </span>
-                )}
-              </div>
-              <div data-testid={`grant-${g.id}-command`} className="min-w-0 font-mono text-ui-sm whitespace-pre-wrap break-all text-foreground">
-                {g.command}
-              </div>
-              <div className="min-w-0 text-ui-sm text-foreground-muted whitespace-pre-wrap break-all">{`Project folder: ${g.folder || "unknown"}`}</div>
-              {g.class !== "readonly" && (
-                <div className="text-ui-sm text-foreground-muted">{g.runnerOptIn ? "You allowed this to run the project's code (the agent can change it)." : "No project-code opt-in: this is never applied."}</div>
-              )}
-              <div className="text-ui-sm text-foreground-muted">
-                {`Used ${g.useCount} ${g.useCount === 1 ? "time" : "times"}${g.lastUsedAt ? `, last ${formatRelativeTime(g.lastUsedAt)}` : ""}. Saved ${formatRelativeTime(g.createdAt)}.`}
-              </div>
-              {grantStatusHint(g) && <div className="text-ui-sm text-foreground-muted">{grantStatusHint(g)}</div>}
-              {g.status !== "revoked" && (
-                <div>
+                  <span className="block whitespace-pre-wrap break-all">{`Project folder: ${g.folder || "unknown"}`}</span>
+                  {g.class !== "readonly" && (
+                    <span className="block">{g.runnerOptIn ? "You allowed this to run the project's code (the agent can change it)." : "No project-code opt-in: this is never applied."}</span>
+                  )}
+                  <span className="block">
+                    {`Used ${g.useCount} ${g.useCount === 1 ? "time" : "times"}${g.lastUsedAt ? `, last ${formatRelativeTime(g.lastUsedAt)}` : ""}. Saved ${formatRelativeTime(g.createdAt)}.`}
+                  </span>
+                  {grantStatusHint(g) && <span className="block">{grantStatusHint(g)}</span>}
+                </>
+              }
+              control={
+                g.status !== "revoked" ? (
                   <Button type="button" variant="outline" size="sm" className={COMPACT_TOUCH_BUTTON_CLASS} data-testid={`grant-${g.id}-revoke`} onClick={() => setRevokeId(g.id)}>
                     Revoke
                   </Button>
-                </div>
-              )}
-            </div>
+                ) : undefined
+              }
+            />
           ))}
-        </div>
+        </SettingsGroup>
       )}
 
       <ConfirmDialog
@@ -123,9 +131,9 @@ function SavedGrantsSection(_ctx: SettingsSectionContext) {
 registerSettingsSection({
   id: "saved-grants",
   label: "Saved grants",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Safety & usage",
   description: "Commands you chose to always allow in a project. Revoke any of them.",
-  order: 196,
+  order: 191,
   icon: <Icons.permission aria-hidden className="size-3.5" />,
   render: (ctx) => <SavedGrantsSection {...ctx} />,
 });

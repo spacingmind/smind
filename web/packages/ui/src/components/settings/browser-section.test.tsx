@@ -56,12 +56,12 @@ const writes = (d: { calls: { method: string; params?: unknown }[] }) =>
   d.calls.filter((c) => c.method.startsWith("browser.") && c.method !== "browser.settings.get");
 
 describe("browser section", () => {
-  it("registers once under Profiles & providers at order 197", () => {
+  it("registers once under Safety & usage at order 192", () => {
     const all = listSettingsSections().filter((s) => s.id === "browser");
     expect(all).toHaveLength(1);
     expect(all[0].label).toBe("Browser");
-    expect(all[0].groupLabel).toBe("Profiles & providers");
-    expect(all[0].order).toBe(197);
+    expect(all[0].groupLabel).toBe("Safety & usage");
+    expect(all[0].order).toBe(192);
   });
 
   it("starts Off with an empty allowlist, no live indicator and makes only the get call (AC2, AC9)", async () => {
@@ -74,6 +74,14 @@ describe("browser section", () => {
     expect(screen.getByTestId("browser-idle")).toHaveTextContent("Not in use right now.");
     expect(screen.getByTestId("browser-allow-empty")).toBeInTheDocument();
     expect(d.calls.filter((c) => c.method.startsWith("browser.")).map((c) => c.method)).toEqual(["browser.settings.get"]);
+  });
+
+  it("ui_cleanup_b2_browser_gap_is_six", async () => {
+    renderSection(stateful().handler);
+    await ready();
+    const root = screen.getByTestId("settings-section-browser");
+    expect(root.className).toContain("gap-6");
+    expect(root.className).not.toContain("gap-5");
   });
 
   it("the switch sends exactly {workspaceId, enabled} and shows the answered state (AC3)", async () => {
