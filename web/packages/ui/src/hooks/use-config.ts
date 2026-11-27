@@ -24,13 +24,22 @@ export function useConfigGet() {
 }
 
 /** One key's row out of the shared `config.get` query. */
-export function useConfigKey(key: WritableConfigKey): { view: ConfigKeyView | undefined; isPending: boolean; error: Error | null } {
+export function useConfigKey(key: WritableConfigKey): {
+  view: ConfigKeyView | undefined;
+  isPending: boolean;
+  error: Error | null;
+} {
   const query = useConfigGet();
   return {
     view: query.data?.keys.find((k) => k.key === key),
     isPending: query.isPending,
     error: query.error,
   };
+}
+
+/** True once the daemon has said this connection may change the key (never true while loading, over relay, or env-locked). */
+export function useConfigWritable(key: WritableConfigKey): boolean {
+  return useConfigKey(key).view?.writable === true;
 }
 
 /** `config.set` {key, value}: value is exactly the string "true" or "false". Re-reads config.get and what the key governs. */

@@ -1,28 +1,32 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AutomationsOffCard } from "@/components/automations/automations-off-card";
-import { DaemonQueryProvider } from "@/lib/query/daemon-query-provider";
-import { createQueryClient } from "@/lib/query/query-client";
-import type { WsClient } from "@/lib/ws-client";
-import { FakeWsClient } from "@/test/fake-ws-client";
-import "@/test/query-scheduler";
+import { renderWithDaemon } from "@/test/render-with-daemon";
+import { FakeUsageDaemon } from "@/test/usage-test-client";
 
-const SERVICE = "smind service restart";
-const MANUAL = "smind stop && smind serve";
+const COMMAND = "smind config set automations.enabled true";
 
-function renderCard(client: FakeWsClient) {
-  return render(
-    <DaemonQueryProvider queryClient={createQueryClient()} client={client as unknown as WsClient} events={null}>
-      <AutomationsOffCard />
-    </DaemonQueryProvider>,
-  );
-}
-
-async function flush(): Promise<void> {
-  await act(async () => {
-    for (let i = 0; i < 12; i++) await Promise.resolve();
-  });
+/** A daemon answering config.get with automations.enabled off, writable or not. */
+function daemonWith(writable: boolean) {
+  const daemon = new FakeUsageDaemon([]);
+  const call = daemon.client.call.bind(daemon.client);
+  (daemon.client as { call: unknown }).call = async (method: string, params?: unknown) =>
+    method === "config.get"
+      ? {
+          keys: [
+            {
+              key: "automations.enabled",
+              value: "false",
+              default: "false",
+              source: "file",
+              restart: false,
+              writable,
+            },
+          ],
+        }
+      : call(method, params);
+  return daemon;
 }
 
 describe("AutomationsOffCard", () => {
@@ -35,53 +39,24 @@ describe("AutomationsOffCard", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows the exact command and copies it", async () => {
-    renderCard(new FakeWsClient());
-    expect(screen.getByTestId("automations-off-card")).toHaveTextContent("smind config set automations.enabled true");
+  it("read-only connection shows the exact command and copies it", async () => {
+    renderWithDaemon(<AutomationsOffCard />, daemonWith(false));
+    await waitFor(() => expect(screen.getByTestId("automations-off-copy")).toBeInTheDocument());
+    expect(screen.getByTestId("automations-off-card")).toHaveTextContent(COMMAND);
     await act(async () => {
       fireEvent.click(screen.getByTestId("automations-off-copy"));
     });
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("smind config set automations.enabled true");
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(COMMAND);
   });
 
-  it("shows the restart line and the rails", () => {
-    renderCard(new FakeWsClient());
+  it("shows the rails and no restart instructions or config.yaml sentence", async () => {
+    renderWithDaemon(<AutomationsOffCard />, daemonWith(false));
+    await waitFor(() => expect(screen.getByTestId("automations-off-copy")).toBeInTheDocument());
     const card = screen.getByTestId("automations-off-card");
-    expect(card).toHaveTextContent("smind stop && smind serve");
     expect(card).toHaveTextContent("never merge or release");
     expect(card).toHaveTextContent("Each run has a budget cap");
-    expect(card).toHaveTextContent("config.yaml on purpose");
-  });
-
-  it("names `smind service restart` only for a launchd-managed daemon", async () => {
-    const client = new FakeWsClient();
-    renderCard(client);
-    client.nth("daemon.info", 0).resolve({ version: "0.17.0", managedBy: "launchd" });
-    await flush();
-    const card = screen.getByTestId("automations-off-card");
-    expect(card).toHaveTextContent(SERVICE);
-    expect(card).not.toHaveTextContent(MANUAL);
-  });
-
-  it("names `smind stop && smind serve` only for an unmanaged daemon", async () => {
-    const client = new FakeWsClient();
-    renderCard(client);
-    client.nth("daemon.info", 0).resolve({ version: "0.17.0" });
-    await flush();
-    const card = screen.getByTestId("automations-off-card");
-    expect(card).toHaveTextContent(MANUAL);
-    expect(card).not.toHaveTextContent(SERVICE);
-  });
-
-  it("lists both restart lines while daemon.info is pending or failed", async () => {
-    const client = new FakeWsClient();
-    renderCard(client);
-    const card = screen.getByTestId("automations-off-card");
-    expect(card).toHaveTextContent(SERVICE);
-    expect(card).toHaveTextContent(MANUAL);
-    client.nth("daemon.info", 0).reject(new Error("offline"));
-    await flush();
-    expect(card).toHaveTextContent(SERVICE);
-    expect(card).toHaveTextContent(MANUAL);
+    expect(card).not.toHaveTextContent("config.yaml");
+    expect(card).not.toHaveTextContent("smind service restart");
+    expect(card).not.toHaveTextContent("smind stop && smind serve");
   });
 });
