@@ -179,9 +179,11 @@ Usage:
   smind stop                                              ask the running daemon to shut down gracefully
   smind status                                            which daemon (address, home, config) the CLI talks to
 
-  smind config get [path]                                 show server.port / listen / hostnames as stored
-  smind config set <path> <value>                         change one (comments kept; restart to apply)
-  smind config unset <path>                               restore its default
+  smind config get [path]                                 show the settable keys as stored (server.*, providers.<id>.defaultModel,
+                                                           fleet.enabled, plugins.enabled, learning.enabled, automations.enabled|paused)
+  smind config set <path> <value>                         change one (comments kept; fleet.enabled and learning.enabled
+                                                           need a restart). Refused inside an agent run; get is allowed
+  smind config unset <path>                               restore its default (also refused inside an agent run)
   smind set-password [--password-stdin]                   set the password remote clients log in with
                                                            (bcrypt hash in config.yaml; needed to listen beyond localhost)
   smind service install|uninstall|status|start|stop|restart [--system]
