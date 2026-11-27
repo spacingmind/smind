@@ -142,6 +142,49 @@ describe("AutomationsPage", () => {
     expect(callsOf(d, "automation.enable")).toHaveLength(1);
   });
 
+  it("automation_relay_client_can_disable_but_enable_and_resume_are_refused_with_a_sentence", async () => {
+    const refuse = forbidden("automation.enable: forbidden: not available over the relay");
+    const relayOnly = ["automation.enable", "automation.resume"];
+
+    // (a) Disable is the brake: it goes through where Enable and Resume are refused.
+    const a = daemonWith([automation()]);
+    a.refuse = refuse;
+    a.refuseOnly = relayOnly;
+    const viewA = await renderPage(a);
+    await click(screen.getByTestId("automation-switch-1"));
+    expect(callsOf(a, "automation.disable")).toHaveLength(1);
+    expect(callsOf(a, "automation.disable")[0].params).toEqual({ id: 1 });
+    expect(screen.getByTestId("automation-status-1")).toHaveTextContent("Disabled");
+    expect(screen.getByTestId("automation-switch-1")).toHaveAttribute("aria-checked", "false");
+    expect(screen.queryByTestId("automations-read-only")).toBeNull();
+    viewA.unmount();
+
+    // (b) Enable is refused: a sentence is shown, nothing flips, the page does not crash.
+    const b = daemonWith([ciAutomation({ enabled: false })]);
+    b.refuse = forbidden("automation.enable: forbidden: not available over the relay");
+    b.refuseOnly = relayOnly;
+    const viewB = await renderPage(b);
+    await click(screen.getByTestId("automation-switch-2"));
+    expect(callsOf(b, "automation.enable")).toHaveLength(1);
+    expect(screen.getByTestId("automation-row-error-2")).toHaveTextContent("not available over the relay");
+    expect(screen.getByTestId("automations-read-only")).toHaveTextContent("not available over the relay");
+    expect(screen.getByTestId("automation-switch-2")).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByTestId("automation-row-2")).toBeInTheDocument();
+    viewB.unmount();
+
+    // (c) Resume is refused the same way, and the automation stays paused.
+    const c = daemonWith([automation({ status: "paused", pausedReason: "paused after 3 failed runs in a row" })]);
+    c.refuse = forbidden("automation.resume: forbidden: not available over the relay");
+    c.refuseOnly = relayOnly;
+    const viewC = await renderPage(c);
+    await click(screen.getByTestId("automation-resume-1"));
+    expect(callsOf(c, "automation.resume")).toHaveLength(1);
+    expect(callsOf(c, "automation.resume")[0].params).toEqual({ id: 1 });
+    expect(screen.getByTestId("automation-row-error-1")).toHaveTextContent("not available over the relay");
+    expect(screen.getByTestId("automation-paused-1")).toBeInTheDocument();
+    viewC.unmount();
+  });
+
   it("CreateStartsDisabledNotice: creating sends the definition and says it was created disabled", async () => {
     const d = daemonWith([]);
     await renderPage(d);
