@@ -12,7 +12,7 @@ acs:
     covers: { tests: [ui_cleanup_b3_esc_closes, ui_cleanup_b3_backdrop_click_closes, ui_cleanup_b3_x_button_closes, ui_cleanup_b3_cmd_comma_toggles_closed, ui_cleanup_b3_narrow_esc_pops_to_the_list], frames: [] }
   - id: AC3
     text: "It is a labelled modal dialog that traps focus, starts on the requested section and returns focus."
-    covers: { tests: [ui_cleanup_b3_dialog_is_modal_and_traps_focus, ui_cleanup_b3_dialog_has_a_labelled_title, ui_cleanup_b3_focus_starts_on_the_requested_section, ui_cleanup_b3_focus_returns_to_the_opener], frames: [] }
+    covers: { tests: [ui_cleanup_b3_dialog_is_modal_and_traps_focus, ui_cleanup_b3_dialog_has_a_labelled_title, ui_cleanup_b3_requested_section_is_selected_on_open, ui_cleanup_b3_no_focus_ring_on_open, ui_cleanup_b3_tab_moves_focus_into_the_nav, ui_cleanup_b3_focus_returns_to_the_opener], frames: [] }
   - id: AC4
     text: "The workspace stays mounted and visible and a composer draft survives."
     covers: { tests: [ui_cleanup_b3_workspace_stays_mounted_and_draft_survives], frames: [] }
@@ -24,7 +24,7 @@ acs:
     covers: { tests: [ui_cleanup_b3_task_window_refuses_settings], frames: [] }
   - id: AC7
     text: "Small sizes are a full-bleed sheet, narrow keeps list to detail, the modal variant drops the page chrome."
-    covers: { tests: [ui_cleanup_b3_sheet_classes_at_small_sizes, ui_cleanup_b3_narrow_keeps_list_to_detail, ui_cleanup_b3_modal_variant_has_no_back_row_or_window_controls], frames: [] }
+    covers: { tests: [ui_cleanup_b3_sheet_classes_at_small_sizes, ui_cleanup_b3_sheet_clears_the_traffic_lights_inside_itself, ui_cleanup_b3_narrow_keeps_list_to_detail, ui_cleanup_b3_modal_variant_has_no_back_row_or_window_controls], frames: [] }
   - id: AC8
     text: "Settings is not a history entry and unmounting while open leaves no page lock."
     covers: { tests: [ui_cleanup_b3_settings_is_not_a_history_entry, ui_cleanup_b3_unmount_while_open_releases_the_page_lock], frames: [] }
@@ -37,10 +37,13 @@ tests:
   - { name: ui_cleanup_b3_esc_closes, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_esc_closes", timeoutSec: 900 }
   - { name: ui_cleanup_b3_backdrop_click_closes, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_backdrop_click_closes", timeoutSec: 900 }
   - { name: ui_cleanup_b3_x_button_closes, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_x_button_closes", timeoutSec: 900 }
-  - { name: ui_cleanup_b3_focus_starts_on_the_requested_section, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_focus_starts_on_the_requested_section", timeoutSec: 900 }
+  - { name: ui_cleanup_b3_requested_section_is_selected_on_open, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_requested_section_is_selected_on_open", timeoutSec: 900 }
+  - { name: ui_cleanup_b3_no_focus_ring_on_open, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_no_focus_ring_on_open", timeoutSec: 900 }
+  - { name: ui_cleanup_b3_tab_moves_focus_into_the_nav, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_tab_moves_focus_into_the_nav", timeoutSec: 900 }
   - { name: ui_cleanup_b3_focus_returns_to_the_opener, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_focus_returns_to_the_opener", timeoutSec: 900 }
   - { name: ui_cleanup_b3_modal_variant_has_no_back_row_or_window_controls, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_modal_variant_has_no_back_row_or_window_controls", timeoutSec: 900 }
   - { name: ui_cleanup_b3_sheet_classes_at_small_sizes, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_sheet_classes_at_small_sizes", timeoutSec: 900 }
+  - { name: ui_cleanup_b3_sheet_clears_the_traffic_lights_inside_itself, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_sheet_clears_the_traffic_lights_inside_itself", timeoutSec: 900 }
   - { name: ui_cleanup_b3_narrow_keeps_list_to_detail, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_narrow_keeps_list_to_detail", timeoutSec: 900 }
   - { name: ui_cleanup_b3_narrow_esc_pops_to_the_list, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-dialog.test.tsx -t ui_cleanup_b3_narrow_esc_pops_to_the_list", timeoutSec: 900 }
   - { name: ui_cleanup_b3_triggers_open_the_modal, run: "cd web/packages/ui && bunx vitest run src/App.settings-modal.test.tsx -t ui_cleanup_b3_triggers_open_the_modal", timeoutSec: 900 }
