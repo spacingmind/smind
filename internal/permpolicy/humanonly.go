@@ -11,9 +11,10 @@ import (
 // calling one decides for itself. The daemon refuses an identified run-scoped
 // connection for each (and a test keeps them off RunScopedMethods); a
 // connection that never identifies counts as the human's, which is why the
-// floor also refuses a command that names one next to a transport. The two
-// answer methods of the agent-questions work are named ahead of their
-// handlers (see PendingHumanOnlyRPCs; empty today). The saved-grant methods
+// floor also refuses a command that names one next to a transport. The
+// handler of a method may be named ahead of it (see PendingHumanOnlyRPCs).
+// config.set (ADR-0062) changes the daemon's own settings: an agent cannot
+// change what governs it. The saved-grant methods
 // (run.answerPermission creates a grant, permission.grants.* list and revoke
 // them) are here for the same reason: an agent that could save or revoke one
 // would be deciding for itself.
@@ -38,12 +39,18 @@ var HumanOnlyRPCs = []string{
 	"profile.create",
 	"profile.update",
 	"profile.rolePack.apply",
+	"config.set",
 }
 
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not
 // on this branch yet; the wsapi drift test lets them be absent and drops the
 // tolerance for each as soon as its handler exists.
-var PendingHumanOnlyRPCs = []string{}
+var PendingHumanOnlyRPCs = []string{
+	// The config.set wsapi handler arrives in another change of this branch
+	// (internal/wsapi/config_handlers.go); the drift test tolerates a pending
+	// name until its handler exists.
+	"config.set",
+}
 
 // humanOnlyCommand is one human-only smind command: the words that name it
 // and the verbs of it that are human-only (nil: every verb).
@@ -56,7 +63,18 @@ type humanOnlyCommand struct {
 	// bare marks a command no other tool spells: it is also matched without the
 	// binary's name (a renamed copy, `go run`, text handed to a shell).
 	bare bool
+	// keyFilter, when set: `<path> <verb> <key>` is human-only unless <key> is
+	// in agentSafeKeys (a missing, unknown or shell-computed key is
+	// human-only).
+	keyFilter bool
 }
+
+// agentSafeKeys maps a config key to the reason it is safe for an agent to
+// set or unset. ADR-0062 section 2b: "agentSafeKeys is empty today: no
+// `config set` or `config unset` of any key is agent-safe ... A future
+// agent-safe key is one explicit entry with a reason and a test, not a change
+// of the rule."
+var agentSafeKeys = map[string]string{}
 
 var humanOnlyCLI = []humanOnlyCommand{
 	{path: []string{"task"}, verbs: []string{"approve", "deny", "answer"}, bare: true},
@@ -69,6 +87,10 @@ var humanOnlyCLI = []humanOnlyCommand{
 	{path: []string{"task", "chat"}, verbs: []string{"fork"}, bare: true},
 	{path: []string{"profile"}, verbs: []string{"add", "edit"}, bare: true},
 	{path: []string{"profile", "seed"}, flag: "--apply", bare: true},
+	// ADR-0062 section 2b: not bare, because `npm config set` and
+	// `git config set` are other tools' verbs; a renamed copy of the binary is
+	// still caught by the CLI's own agent-run refusal.
+	{path: []string{"config"}, verbs: []string{"set", "unset"}, keyFilter: true},
 }
 
 // HumanOnlyCLI reports whether args (what follows the smind binary: flags are
@@ -88,10 +110,24 @@ func HumanOnlyCLI(args []string) bool {
 		case c.verbs == nil:
 			return true
 		case len(words) > len(c.path) && containsWord(c.verbs, words[len(c.path)]):
+			if c.keyFilter && agentSafeKey(words[len(c.path)+1:]) {
+				continue
+			}
 			return true
 		}
 	}
 	return false
+}
+
+// agentSafeKey reports whether the key of a keyFilter row -- the next
+// non-flag word after the verb -- is one an agent may set: present, not
+// computed by the shell, and listed in agentSafeKeys.
+func agentSafeKey(rest []string) bool {
+	if len(rest) == 0 || dynamicWord(rest[0]) {
+		return false
+	}
+	_, ok := agentSafeKeys[rest[0]]
+	return ok
 }
 
 // hasFlag reports `flag` or `flag=value` among args.
