@@ -36,6 +36,16 @@ async function closeByEscape(page: Page, testInfo: TestInfo) {
   await expect(dialog(page)).toBeHidden()
 }
 
+// Closes Settings with Escape: narrow deep-linked detail pages pop to the list first, so press until it is hidden.
+async function closeSettings(page: Page) {
+  const narrowLayout = (page.viewportSize()?.width ?? 1280) < 768
+  for (let i = 0; i < (narrowLayout ? 3 : 1); i++) {
+    if (!(await dialog(page).isVisible())) break
+    await page.keyboard.press('Escape')
+  }
+  await expect(dialog(page)).toBeHidden()
+}
+
 function framesDir() {
   const dir = process.env.UICLEAN3_FRAMES_DIR
   if (dir) fs.mkdirSync(dir, { recursive: true })
@@ -157,14 +167,13 @@ test('UC3-05 transition frames', async ({ app }, testInfo) => {
   }
   await page.keyboard.press('Escape')
   if (frames) await burst('tr-close')
-  await expect(dialog(page)).toBeHidden()
+  await closeSettings(page)
 
   if (frames) {
     for (const id of ['general', 'shortcuts', 'automations', 'browser']) {
       await openSettings(page, id)
       await settledShot(page, testInfo, `section-${id}`)
-      await page.keyboard.press('Escape')
-      await expect(dialog(page)).toBeHidden()
+      await closeSettings(page)
     }
     await page.keyboard.press('Shift+Slash')
     await expect(page.getByTestId('shortcuts-overlay')).toBeVisible()

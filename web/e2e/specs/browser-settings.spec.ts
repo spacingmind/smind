@@ -124,6 +124,8 @@ async function openSection(app: App) {
   await expect(app.page.getByTestId('settings-section-browser')).toBeVisible()
   // the section opens on the first workspace of the tree: the specs below (and the reset) assume it is alpha
   await expect(app.page.getByTestId('browser-workspace-select')).toContainText('alpha')
+  // the dialog opens with a zoom animation that scales boxes: measure only once it has settled
+  await app.page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))))
 }
 
 /** Puts the first workspace's browser settings back to the defaults (the worker's daemon is shared by every spec). */
