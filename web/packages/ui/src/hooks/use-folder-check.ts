@@ -93,5 +93,5 @@ export function useFolderCheck(client: WsClient | null, workspaces: readonly Wor
     return settle(lastSegment(path).startsWith(".") ? { kind: "unknown", path } : { kind: "missing", path });
   }
 
-  return { status, check, home: home.current };
+  return { status, check, home: home.current, /** The home as of now (after a check ran), for code that awaited one. */ getHome: () => home.current };
 }

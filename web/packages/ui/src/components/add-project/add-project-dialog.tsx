@@ -103,7 +103,14 @@ export function AddProjectDialog(props: {
     }
     // The path submit sends is the one the check judges: `~` expanded with the
     // daemon's home (the daemon does not expand it), then normalised.
-    const expanded = trimmed.startsWith("~") && folder.home !== null ? expandHome(trimmed, folder.home) : trimmed;
+    let home = folder.home;
+    if (trimmed.startsWith("~") && home === null) {
+      // Submitted with Enter before the path ever lost focus: judge it now, so `~` is still expanded.
+      const judged = await folder.check(trimmed);
+      if (judged.kind === "relative" || judged.kind === "missing" || judged.kind === "not-git") return;
+      home = folder.getHome();
+    }
+    const expanded = trimmed.startsWith("~") && home !== null ? expandHome(trimmed, home) : trimmed;
     const path = normalizeProjectPath(expanded);
     // A duplicate path opens the existing project; no second workspace on one path (D5).
     const existing = workspaces.find((ws) => samePath(ws.Path, path));

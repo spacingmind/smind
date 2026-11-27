@@ -388,6 +388,28 @@ describe("Add project open a folder", () => {
     expect(client.calls.filter((call) => call.method === "fs.listDir")).toHaveLength(0);
   });
 
+  it("add_project_tilde_is_expanded_when_submitting_with_enter", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("tilde-enter");
+    const { client } = renderDialog();
+    await flush();
+    // Typed and submitted with Enter: the path never lost focus, so no blur check ran first.
+    fireEvent.change(screen.getByTestId("add-project-path-input"), { target: { value: "~/code/y" } });
+    await act(async () => {
+      fireEvent.submit(screen.getByTestId("add-project-path-input").closest("form")!);
+    });
+    const home = await waitFor(() => client.nth("fs.listDir", 0));
+    await act(async () => {
+      home.resolve({ path: "/home/u", parent: "/home", entries: [] });
+    });
+    const parent = await waitFor(() => client.nth("fs.listDir", 1));
+    await act(async () => {
+      parent.resolve({ path: "/home/u/code", parent: "/home/u", entries: [{ name: "y", path: "/home/u/code/y", isGitRepo: true }] });
+    });
+    const create = await waitFor(() => client.nth("workspace.create", 0));
+    expect(create.params).toEqual({ path: "/home/u/code/y" });
+  });
+
   it("add_project_tilde_is_expanded", async () => {
     platformState.desktop = true;
     platformState.current = ownHost("tilde");
