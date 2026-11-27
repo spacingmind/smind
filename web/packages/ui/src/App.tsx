@@ -114,6 +114,7 @@ import { LoginRequiredError, type LoginReason } from "@/lib/auth";
 import { connectDaemon } from "@/lib/daemon";
 import { desktop, desktopOS, isDesktop } from "@/lib/platform";
 import { hasTrafficLights } from "@/lib/window-chrome";
+import { useUsageStartFetch } from "@/hooks/use-usage-start-fetch";
 import { useWindowState } from "@/hooks/use-window-state";
 import { WindowSidebarToggle } from "@/components/window-sidebar-toggle";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
@@ -1712,6 +1713,8 @@ function AppShell({
       <PluginTabReaper tabsByTask={tabsByTask} closeTab={closeTab} />
       {/* A terminal tab going away ends its PTY session (the pane itself only ever detaches). */}
       <TerminalTabReaper client={client} tabsByTask={tabsByTask} />
+      {/* ADR-0028 (2026-11-27): the one usage fetch of an app start, main window only. */}
+      {!isTaskWindow && <UsageStartFetch />}
       <ShellCommands
         client={client}
         tasks={allTasks}
@@ -1905,6 +1908,12 @@ function PluginActionsBridge({ openPanel, children }: { openPanel: (panel: Plugi
     [panels.panels, openPanel],
   );
   return <PluginActionsProvider value={actions}>{children}</PluginActionsProvider>;
+}
+
+/** Sends the one `account.usage` touch of an app start (see `useUsageStartFetch`); renders nothing. */
+function UsageStartFetch(): null {
+  useUsageStartFetch();
+  return null;
 }
 
 /**

@@ -3113,6 +3113,18 @@ describe("App chat column (dogfood Item 2)", () => {
 });
 
 describe("App plan usage modal (ADR-0028 PR-D1)", () => {
+  // jsdom's window is never focused; a real viewer's is, and the start fetch waits for an active window.
+  const windowSpies: { mockRestore: () => void }[] = [];
+  beforeEach(() => {
+    windowSpies.push(
+      vi.spyOn(document, "visibilityState", "get").mockImplementation(() => "visible"),
+      vi.spyOn(document, "hasFocus").mockImplementation(() => true),
+    );
+  });
+  afterEach(() => {
+    for (const spy of windowSpies.splice(0)) spy.mockRestore();
+  });
+
   const USAGE_RESULT = {
     enabled: true,
     ttlSeconds: 300,
@@ -3166,20 +3178,24 @@ describe("App plan usage modal (ADR-0028 PR-D1)", () => {
     respondChatList(socket, TASK_A);
     await flush();
     const hashBefore = window.location.hash;
-    // Nothing asks for plan usage until a surface that shows it opens.
-    expect(usageRequests(socket)).toHaveLength(0);
+    // The app start sent exactly one plan-usage request, a touch (ADR-0028 amendment 2026-11-27),
+    // before any surface that shows usage opens.
+    expect(usageRequests(socket)).toHaveLength(1);
+    expect(usageRequests(socket)[0]?.params?.mode).toBe("touch");
+    respondAll(socket, "account.usage", USAGE_RESULT);
+    await flush();
     expect(screen.queryByTestId("usage-modal")).not.toBeInTheDocument();
 
     await runUsageCommand();
     expect(screen.getByTestId("usage-modal")).toBeInTheDocument();
-    respondAll(socket, "account.usage", USAGE_RESULT);
     await flush();
     expect(within(screen.getByTestId("usage-modal")).getByTestId("usage-report-1")).toBeInTheDocument();
 
-    // No route change, and no fetch beyond one list: never a refresh.
+    // No route change, and the modal's own touch is skipped inside the TTL: still the one request, never a refresh.
     expect(window.location.hash).toBe(hashBefore);
-    expect(usageRequests(socket).length).toBeGreaterThanOrEqual(1);
-    expect(usageRequests(socket).every((e) => e.params?.mode !== "refresh")).toBe(true);
+    expect(usageRequests(socket)).toHaveLength(1);
+    expect(usageRequests(socket).every((e) => e.params?.mode === "touch")).toBe(true);
+    expect(usageRequests(socket).some((e) => e.params?.mode === "refresh")).toBe(false);
 
     // Escape closes it and unmounts it.
     fireEvent.keyDown(screen.getByTestId("usage-modal"), { key: "Escape" });

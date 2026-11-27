@@ -51,11 +51,12 @@ export function quotaLevel(usedPct: number): QuotaLevel | null {
 }
 
 /**
- * The notice's text: "5-hour window 92% used, resets 20:52", "… used up, resets Fri 20:52"
- * when the reset is on another local day, prefixed with the account name when the
- * provider has several accounts (D1 names the most used one).
+ * The notice's text: "Claude · 5-hour window 92% used, resets 20:52", "… used up, resets Fri 20:52"
+ * when the reset is on another local day. It always names the provider, and the account
+ * too ("Claude (work) · …") when the provider has several accounts (D1 names the most used one).
  */
 export function quotaNoticeText(a: {
+  providerLabel: string;
   windowName: string;
   level: QuotaLevel;
   usedPct: number;
@@ -75,7 +76,7 @@ export function quotaNoticeText(a: {
   const name = /window/i.test(a.windowName) ? a.windowName : `${a.windowName} window`;
   const body =
     a.level === "full" ? `${name} used up, resets ${time}` : `${name} ${Math.floor(a.usedPct)}% used, resets ${time}`;
-  return a.accountName ? `${a.accountName}: ${body}` : body;
+  return `${a.accountName ? `${a.providerLabel} (${a.accountName})` : a.providerLabel} · ${body}`;
 }
 
 /** A window percent: `usedPct` when present, else the complement of `remainingPct`; null when there is none. */
@@ -109,11 +110,12 @@ interface Candidate extends QuotaNotice {
 export function pickQuotaNotice(input: {
   usages: readonly AccountUsage[];
   accountProvider: string | undefined;
+  providerLabel: string;
   now: number;
   dismissed: ReadonlySet<string>;
   locale?: string;
 }): QuotaNotice | null {
-  const { usages, accountProvider, now, dismissed, locale } = input;
+  const { usages, accountProvider, providerLabel, now, dismissed, locale } = input;
   if (accountProvider === undefined) return null;
   const accounts = usages.filter((u) => u.provider === accountProvider);
 
@@ -170,7 +172,7 @@ export function pickQuotaNotice(input: {
       usedPct: shown.usedPct,
       resetsAtMs: shown.resetsAtMs,
       resetsAt: shown.resetsAt,
-      text: quotaNoticeText({ windowName, level, usedPct: shown.usedPct, resetsAtMs: shown.resetsAtMs, now, accountName, locale }),
+      text: quotaNoticeText({ providerLabel, windowName, level, usedPct: shown.usedPct, resetsAtMs: shown.resetsAtMs, now, accountName, locale }),
     });
   }
 

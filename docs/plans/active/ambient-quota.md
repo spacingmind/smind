@@ -81,3 +81,5 @@ whether the composer should do a one-time `cached` peek is the Human's decision.
 Frame of the real flow: `~/.smind/dogfood/ambient-quota/pair-01-notice-92.png` (e2e AQ-01: cold start shows no
 notice with `account.usage` requests = 0, Settings -> Usage fills the cache, back in the task the notice shows
 at 92 %). The cold-start frame is `pair-00-cold-start.png`.
+
+> Follow-up 2026-11-27: the cold-start limitation described in Validation above is resolved by `docs/plans/active/quota-start-fetch.md` (one `touch` per app start, ADR-0028 amended) and the notice text now names the provider.

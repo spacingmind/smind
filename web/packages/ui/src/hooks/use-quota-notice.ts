@@ -4,7 +4,7 @@ import { useNow } from "@/hooks/use-now";
 import { useProviderCatalog } from "@/hooks/use-provider-catalog";
 import { useUsageReports } from "@/hooks/use-usage-reports";
 import { pickQuotaNotice, type QuotaNotice } from "@/lib/ambient-quota";
-import { providerIdentity } from "@/lib/provider-catalog";
+import { accountProviderLabel, providerIdentity } from "@/lib/provider-catalog";
 import {
   dismissQuotaNotice,
   readDismissedQuotaNotices,
@@ -26,9 +26,10 @@ export function useQuotaNotice(provider: string): { notice: QuotaNotice | null; 
   const dismissed = useMemo(() => new Set(keys), [keys]);
 
   const accountProvider = providers.find((p) => p.id === provider)?.accountProvider ?? providerIdentity(provider)?.accountProvider;
+  const providerLabel = accountProvider === undefined ? provider : accountProviderLabel(accountProvider, providers);
   const notice = useMemo(
-    () => pickQuotaNotice({ usages: snapshot.reports, accountProvider, now, dismissed }),
-    [snapshot.reports, accountProvider, now, dismissed],
+    () => pickQuotaNotice({ usages: snapshot.reports, accountProvider, providerLabel, now, dismissed }),
+    [snapshot.reports, accountProvider, providerLabel, now, dismissed],
   );
 
   const dismiss = useCallback(() => {

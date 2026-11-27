@@ -123,13 +123,29 @@ describe("ambient quota notice", () => {
     vi.restoreAllMocks();
   });
 
+  it("ambient_quota_notice_names_the_daemon_provider_label", async () => {
+    const daemon = new FakeUsageDaemon([]);
+    // No catalog entry: the identity table's name.
+    const bare = mountNotice(daemon);
+    await seed(bare, [report({ fiveHourPct: 92 })]);
+    expect(screen.getByTestId("ambient-quota-text").textContent).toMatch(/^Claude Code · /);
+    bare.unmount();
+
+    // The daemon's label for the composer provider wins.
+    daemon.providers = { providers: [{ id: "claude-native", accountProvider: "anthropic", label: "Claude Max" }] };
+    const view = mountNotice(daemon);
+    await flush();
+    await seed(view, [report({ fiveHourPct: 92 })]);
+    expect(screen.getByTestId("ambient-quota-text").textContent).toMatch(/^Claude Max · 5-hour window 92% used/);
+  });
+
   it("ambient_quota_notice_shows_at_92_and_is_dismissible", async () => {
     const daemon = new FakeUsageDaemon([]);
     const view = mountNotice(daemon);
     await seed(view, [report({ fiveHourPct: 92 })]);
 
     const banner = screen.getByTestId("ambient-quota-notice");
-    expect(screen.getByTestId("ambient-quota-text")).toHaveTextContent(/^5-hour window 92% used, resets \d\d:\d\d$/);
+    expect(screen.getByTestId("ambient-quota-text")).toHaveTextContent(/^Claude Code · 5-hour window 92% used, resets \d\d:\d\d$/);
     // The banner announces itself as a live region with a labelled dismiss control.
     expect(screen.getByRole("status")).toBe(banner);
     const dismiss = screen.getByRole("button", { name: "Dismiss the quota notice" });
@@ -194,7 +210,7 @@ describe("ambient quota notice", () => {
 
     await pushReport(daemon, report({ fiveHourPct: 100, resetsAtMs: resetsAt, fetchedAtMs: FIXTURE_NOW - 50_000 }));
     const banner = screen.getByTestId("ambient-quota-notice");
-    expect(screen.getByTestId("ambient-quota-text")).toHaveTextContent(/^5-hour window used up, resets \d\d:\d\d$/);
+    expect(screen.getByTestId("ambient-quota-text")).toHaveTextContent(/^Claude Code · 5-hour window used up, resets \d\d:\d\d$/);
     expect(banner).toHaveAttribute("data-tone", "error");
     expect(banner.className).toContain("destructive");
 
@@ -248,7 +264,7 @@ describe("ambient quota notice", () => {
     const live = renderWithDaemon(<AmbientQuotaNotice provider="claude-native" />, daemon, { queryClient });
     await flush();
     await pushReport(daemon, report({ fiveHourPct: 93, fetchedAtMs: FIXTURE_NOW - 30_000 }));
-    expect(screen.getByTestId("ambient-quota-text")).toHaveTextContent(/^5-hour window 93% used, resets \d\d:\d\d$/);
+    expect(screen.getByTestId("ambient-quota-text")).toHaveTextContent(/^Claude Code · 5-hour window 93% used, resets \d\d:\d\d$/);
     live.unmount();
 
     expect(daemon.requests.length).toBe(0);

@@ -397,6 +397,8 @@ only the third can reach the network:
    serve the cache anyway; the client does this so it does not even send the
    request. Opening the modal or Settings → Usage asks once, then follows the
    same cadence while open and focused.
+   > *Amended 2026-11-27 (Human decision, quota follow-up): the web client sends exactly ONE `mode:"touch"` `account.usage` request per app start (once the window is visible and focused), with no account ids, so the ambient quota notice has data without a usage surface being open. It is single-flight (no touch already in flight), skipped when the cache is warm (held data and a touch inside the TTL), never a `refresh`, never repeated by a re-render, a remount, the notice or a reconnect (a reconnect still re-lists with `mode:"cached"`), and it is subject to every daemon rule above (per account one fetch per TTL, single-flight per account, floor, backoff, persisted state; a request over the floor is served from the cache). The daemon rule itself is unchanged: it never fetches on its own startup, on `account.updated` or on a client reconnect, and has no background timer.*
+
 5. **Failure handling, with persisted state.**
    - **429:** honor `Retry-After` (delta-seconds or HTTP-date), **at least
      5 minutes when the header is absent**, capped at 6 h so a bad header
