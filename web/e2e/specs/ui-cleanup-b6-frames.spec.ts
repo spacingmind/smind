@@ -205,6 +205,51 @@ async function stubRelayDeviceList(page: Page, answer: ListAnswer) {
   })
 }
 
+/** Holds every doctor.sessions request back from the daemon until release() forwards it, so "Running..." stays on screen. */
+async function holdDoctorSessions(page: Page) {
+  const held: string[] = []
+  let forward: (m: string) => void = () => {}
+  await page.routeWebSocket(/\/ws/, (ws) => {
+    const server = ws.connectToServer()
+    forward = (m) => server.send(m)
+    server.onMessage((m) => ws.send(m))
+    ws.onMessage((m) => {
+      let msg: { id?: string | number; method?: string }
+      try {
+        msg = JSON.parse(String(m))
+      } catch {
+        return forward(String(m))
+      }
+      if (msg.method === 'doctor.sessions') {
+        held.push(String(m))
+        return
+      }
+      forward(String(m))
+    })
+  })
+  return { held: () => held.length, release: () => { for (const m of held.splice(0)) forward(m) } }
+}
+
+/** Answers doctor.sessions with the daemon-shaped error the doctor-error frame needs; everything else is forwarded. */
+async function stubDoctorSessionsError(page: Page) {
+  await page.routeWebSocket(/\/ws/, (ws) => {
+    const server = ws.connectToServer()
+    server.onMessage((m) => ws.send(m))
+    ws.onMessage((m) => {
+      let msg: { id?: string | number; method?: string }
+      try {
+        msg = JSON.parse(String(m))
+      } catch {
+        return server.send(m)
+      }
+      if (msg.method === 'doctor.sessions') {
+        return ws.send(JSON.stringify({ id: msg.id, error: { message: 'doctor.sessions: store: disk is full' } }))
+      }
+      server.send(m)
+    })
+  })
+}
+
 test('devices-empty: the group with no devices and the pairing window closed', async ({ app }, testInfo) => {
   const { page } = app
   // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
@@ -353,4 +398,77 @@ test('devices-no-bridge: a daemon without the relay bridge says so', async ({ ap
   await expect(page.getByTestId('relay-devices-no-bridge')).toHaveText('Relay is not set up on this daemon.')
   await expect(page.getByTestId('relay-devices-refresh')).toBeVisible()
   await shot(page, testInfo, 'devices-no-bridge', page.getByTestId('relay-devices-group'))
+})
+
+test('doctor-idle: the probe has not been run yet', async ({ app }, testInfo) => {
+  const { page } = app
+  // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
+  // STUB: none -- the real daemon answers doctor.sessions when asked; this state never asks.
+  await installBridge(page)
+  await app.openApp()
+  await standInForVibrancy(page)
+  await openSettings(page, 'daemon')
+  await expect(page.getByTestId('settings-section-daemon')).toBeVisible()
+  if (!process.env.B6_FRAMES_DIR) return
+  await expect(page.getByTestId('doctor-idle')).toHaveText('Not run yet.')
+  await expect(page.getByTestId('doctor-run')).toHaveText('Run checks')
+  await shot(page, testInfo, 'doctor-idle', page.getByTestId('doctor-run'))
+})
+
+test('doctor-running: the probe in flight while the daemon answer is held back', async ({ app }, testInfo) => {
+  const { page } = app
+  // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
+  // STUB: doctor.sessions is held back from the daemon until after the shot, so "Running..." stays on screen;
+  // everything else is forwarded to the real daemon.
+  const hold = await holdDoctorSessions(page)
+  await installBridge(page)
+  await app.openApp()
+  await standInForVibrancy(page)
+  await openSettings(page, 'daemon')
+  await expect(page.getByTestId('settings-section-daemon')).toBeVisible()
+  if (!process.env.B6_FRAMES_DIR) return
+  await page.getByTestId('doctor-run').click()
+  await expect(page.getByTestId('doctor-run')).toHaveText('Running...')
+  // The request has reached the hold (never the daemon) before the frame is taken.
+  await expect.poll(() => hold.held()).toBe(1)
+  await shot(page, testInfo, 'doctor-running', page.getByTestId('doctor-run'))
+  // Forwarded after the shot, the held probe completes: the frame showed a real in-flight check, not a dead one.
+  hold.release()
+  await expect(page.getByTestId('doctor-result')).toBeVisible()
+})
+
+test('doctor-result: the counts the real daemon answers (no stub)', async ({ app }, testInfo) => {
+  const { page } = app
+  // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
+  // STUB: none -- the real daemon answers doctor.sessions with its own counts.
+  await installBridge(page)
+  await app.openApp()
+  await standInForVibrancy(page)
+  await openSettings(page, 'daemon')
+  await expect(page.getByTestId('settings-section-daemon')).toBeVisible()
+  if (!process.env.B6_FRAMES_DIR) return
+  await page.getByTestId('doctor-run').click()
+  await expect(page.getByTestId('doctor-result')).toBeVisible()
+  await expect(page.getByTestId('doctor-runs')).toHaveText(/^Finished runs\d+$/)
+  await expect(page.getByTestId('doctor-checked')).toHaveText(/^Checked\d+$/)
+  await expect(page.getByTestId('doctor-idle')).toHaveCount(0)
+  await shot(page, testInfo, 'doctor-result', page.getByTestId('doctor-result'))
+})
+
+test('doctor-error: a failed probe is one sentence and the button stays usable', async ({ app }, testInfo) => {
+  const { page } = app
+  // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
+  // STUB: doctor.sessions answers the daemon-shaped error locally; everything else is forwarded to the real daemon.
+  await stubDoctorSessionsError(page)
+  await installBridge(page)
+  await app.openApp()
+  await standInForVibrancy(page)
+  await openSettings(page, 'daemon')
+  await expect(page.getByTestId('settings-section-daemon')).toBeVisible()
+  if (!process.env.B6_FRAMES_DIR) return
+  await page.getByTestId('doctor-run').click()
+  await expect(page.getByTestId('doctor-error')).toContainText('Disk is full')
+  await expect(page.getByTestId('doctor-run')).toHaveText('Run checks')
+  await expect(page.getByTestId('doctor-run')).toBeEnabled()
+  await shot(page, testInfo, 'doctor-error', page.getByTestId('doctor-run'))
 })
