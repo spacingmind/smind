@@ -15,7 +15,7 @@ acs:
     covers: { tests: [ui_cleanup_b2_settings_list_is_one_divided_card, ui_cleanup_b2_settings_list_row_padding, ui_cleanup_b2_profiles_use_settings_list], frames: [] }
   - id: AC4
     text: "Policy, Saved grants and Usage use the shared primitives."
-    covers: { tests: [ui_cleanup_b2_policy_uses_shared_primitives, ui_cleanup_b2_saved_grants_one_group_row_per_grant, ui_cleanup_b2_usage_uses_shared_primitives], frames: [] }
+    covers: { tests: [ui_cleanup_b2_policy_uses_shared_primitives, ui_cleanup_b2_saved_grants_one_group_row_per_grant, ui_cleanup_b2_usage_uses_shared_primitives, ui_cleanup_b2_policy_file_row_wraps_long_path], frames: [] }
   - id: AC5
     text: "GitHub, Hosts, Daemon, Browser, Shortcuts and Automations follow the per-tab list."
     covers: { tests: [ui_cleanup_b2_github_rows_use_settings_rows, ui_cleanup_b2_hosts_row_is_responsive, ui_cleanup_b2_daemon_gap_is_six, ui_cleanup_b2_browser_gap_is_six, ui_cleanup_b2_shortcuts_in_card_shell, ui_cleanup_b2_automations_is_a_group_and_row], frames: [] }
@@ -34,6 +34,7 @@ tests:
   - { name: ui_cleanup_b2_one_column_width_for_every_section, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-screen.test.tsx -t ui_cleanup_b2_one_column_width_for_every_section", timeoutSec: 900 }
   - { name: ui_cleanup_b2_nav_groups, run: "cd web/packages/ui && bunx vitest run src/components/settings/settings-screen.test.tsx -t ui_cleanup_b2_nav_groups", timeoutSec: 900 }
   - { name: ui_cleanup_b2_policy_uses_shared_primitives, run: "cd web/packages/ui && bunx vitest run src/components/settings/policy-section.test.tsx -t ui_cleanup_b2_policy_uses_shared_primitives", timeoutSec: 900 }
+  - { name: ui_cleanup_b2_policy_file_row_wraps_long_path, run: "cd web/packages/ui && bunx vitest run src/components/settings/policy-section.test.tsx -t ui_cleanup_b2_policy_file_row_wraps_long_path", timeoutSec: 900 }
   - { name: ui_cleanup_b2_saved_grants_one_group_row_per_grant, run: "cd web/packages/ui && bunx vitest run src/components/settings/saved-grants-section.test.tsx -t ui_cleanup_b2_saved_grants_one_group_row_per_grant", timeoutSec: 900 }
   - { name: ui_cleanup_b2_usage_uses_shared_primitives, run: "cd web/packages/ui && bunx vitest run src/components/settings/usage-section.test.tsx -t ui_cleanup_b2_usage_uses_shared_primitives", timeoutSec: 900 }
   - { name: ui_cleanup_b2_github_rows_use_settings_rows, run: "cd web/packages/ui && bunx vitest run src/components/settings/github-section.test.tsx -t ui_cleanup_b2_github_rows_use_settings_rows", timeoutSec: 900 }
