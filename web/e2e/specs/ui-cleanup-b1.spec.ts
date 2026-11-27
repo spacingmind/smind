@@ -12,6 +12,8 @@ import { expect, test } from '../fixtures/test'
 async function frame(page: Page, testInfo: TestInfo, name: string) {
   const dir = process.env.UICLEAN_FRAMES_DIR
   if (!dir) return
+  // No mid-animation frames: wait for every running transition (the drawer slide-in at 390).
+  await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => undefined))))
   fs.mkdirSync(dir, { recursive: true })
   await page.screenshot({ path: path.join(dir, `${name}-${testInfo.project.name}.png`) })
 }

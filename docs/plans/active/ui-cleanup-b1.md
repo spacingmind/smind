@@ -73,4 +73,6 @@ Real macOS desktop window (scripts/desktop-audit-build.sh from this branch, dogf
 
 ## Validation
 
-(filled in when the work is done)
+- `sh scripts/verify.sh`: VERIFY PASS (build, test, lint). Full e2e matrix (`E2E_FULL=1`): 345 passed, 43 skipped. tsc clean.
+- Mutations on committed code, each failing its named test: M1 (Reload calls zoom-in) -> `ui_cleanup_palette_entry_runs_its_own_native_command`; M2 (gate removed) -> `ui_cleanup_palette_entries_absent_on_web`; M3 (the `?` binding moved away) -> `ui_cleanup_shortcuts_help_keystroke_still_opens_overlay`.
+- Frames: every frame is WEB-HARNESS (headless browser on the built web UI): light and dark at 1280x800, 800x520 and 390, for the header, the sidebar toolbar, the composer and the palette (UC-01 to UC-04). The macOS session was locked when the real-window pass started (an unlocked session was confirmed at the start, then the lock came on while the desktop app was rendering), so NO REAL-WINDOW frame exists for this change: the audit app was built (one Rust build, smoke test passed: it refuses the real daemon) but its window captured blank behind the lock, and it was shut down and its build cache deleted. The palette rows added on desktop are therefore verified by unit tests only, not by a frame: the web harness build is not a desktop build, so it shows the palette WITHOUT those rows (frame UC-04). A real Windows or Linux window cannot be captured on this Mac either.
