@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/spacingmind/smind/internal/claudecli"
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/permpolicy"
 	"github.com/spacingmind/smind/internal/selfupdate"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -81,6 +82,11 @@ func run(args []string) int {
 	}
 
 	if permpolicy.HumanOnlyCLI(args) && inAgentRun() {
+		if w := nonFlagWords(args, 2); len(w) == 2 && w[0] == "config" {
+			fmt.Fprintf(os.Stderr, "smind config %s is for people, not agents: it changes the daemon's own settings, and an agent cannot change what governs it. "+
+				"To configure a scratch daemon you start for a test, give that process its own home and address: SMIND_HOME=<dir> %s=127.0.0.1:<port> smind serve (smind serve takes no flags).\n", w[1], config.EnvListen)
+			return 1
+		}
 		fmt.Fprintf(os.Stderr, "smind %s is for humans, not agents: an agent cannot answer, approve or deny its own requests\n", strings.Join(nonFlagWords(args, 2), " "))
 		return 1
 	}
