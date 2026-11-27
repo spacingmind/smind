@@ -115,7 +115,7 @@ describe("settings-hosts section", () => {
 
     const off = screen.getByTestId("hosts-off");
     expect(off).toHaveTextContent("Fleet is off");
-    expect(off).toHaveTextContent("fleet.enabled: true");
+    expect(off).not.toHaveTextContent("config.yaml");
     // no rows, so none of the row actions exist in any form
     expect(document.querySelectorAll('[data-testid^="host-row-"]')).toHaveLength(0);
     expect(screen.queryByRole("button", { name: "Revoke" })).toBeNull();

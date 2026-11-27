@@ -7,7 +7,13 @@ import { AutomationsPage } from "@/components/automations/automations-page";
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/automations-link-section";
 import type { ConfigKeyView } from "@/lib/config-keys";
+import "@/components/settings/plugins-section";
+import "@/components/settings/hosts-section";
+import "@/components/settings/learned-skills-section";
 import { automation, AutomationDaemon } from "@/test/automation-fixtures";
+import { FleetDaemon, fleetHost } from "@/test/fleet-fixtures";
+import { learningDaemon, learningStatus } from "@/test/learning-test-client";
+import { PluginDaemon } from "@/test/plugin-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
 
 function view(key: string, over: Partial<ConfigKeyView> = {}): ConfigKeyView {
@@ -161,5 +167,66 @@ describe("config homes: automations", () => {
     await waitFor(() => expect(screen.getByTestId("automations-off-copy")).toBeInTheDocument());
     expect(screen.getByTestId("automations-off-card")).toHaveTextContent("smind config set automations.enabled true");
     expect(screen.queryByTestId("config-automations-enabled-switch")).toBeNull();
+  });
+});
+
+describe("config homes: plugins, fleet, learning", () => {
+  it("plugins_home_switch_replaces_the_alert", async () => {
+    const d = withConfig(new PluginDaemon(), [view("plugins.enabled")]);
+    d.daemon.listing = { globalEnabled: false, plugins: [] };
+    const section = listSettingsSections().find((s) => s.id === "plugins")!;
+    renderWithDaemon(<>{section.render({ client: d.daemon.client, events: d.daemon.events })}</>, d.daemon);
+    const sw = await screen.findByTestId("config-plugins-enabled-switch");
+    expect(screen.getByTestId("settings-section-plugins")).not.toHaveTextContent("config.yaml");
+    expect(screen.queryByTestId("plugins-off")).toBeNull();
+    fireEvent.click(sw);
+    await flush();
+    expect(await screen.findByTestId("config-plugins-enabled-dialog")).toBeInTheDocument();
+    expect(d.sets()).toEqual([]);
+  });
+
+  it("hosts_off_card_becomes_the_fleet_switch_with_restart_notice", async () => {
+    const d = withConfig(new FleetDaemon(), [view("fleet.enabled", { restart: true })]);
+    d.daemon.off = true;
+    const section = listSettingsSections().find((s) => s.id === "hosts")!;
+    renderWithDaemon(<>{section.render({ client: d.daemon.client, events: d.daemon.events })}</>, d.daemon);
+    const off = await screen.findByTestId("hosts-off");
+    await waitFor(() => expect(screen.getByTestId("config-fleet-enabled-switch")).toBeInTheDocument());
+    expect(off).toContainElement(screen.getByTestId("config-fleet-enabled-switch"));
+    expect(off).toHaveTextContent("Takes effect after the daemon restarts");
+    expect(screen.getByTestId("settings-section-hosts")).not.toHaveTextContent("config.yaml");
+  });
+
+  it("hosts_fleet_switch_stays_above_the_list_when_on", async () => {
+    const d = withConfig(new FleetDaemon(), [view("fleet.enabled", { value: "true", restart: true })]);
+    d.daemon.hosts = [fleetHost()];
+    const section = listSettingsSections().find((s) => s.id === "hosts")!;
+    renderWithDaemon(<>{section.render({ client: d.daemon.client, events: d.daemon.events })}</>, d.daemon);
+    const sw = await screen.findByTestId("config-fleet-enabled-switch");
+    expect(sw).toHaveAttribute("aria-checked", "true");
+    expect(sw.compareDocumentPosition(await screen.findByTestId("hosts-list")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("learning_kill_switch_row_replaces_the_alert", async () => {
+    const status = learningStatus({
+      enabled: false,
+      workspaces: [{ id: 1, title: "alpha", learningMode: "off", pendingProposals: 0, activeSkills: 0, disabledSkills: 0 }],
+    });
+    const base = learningDaemon((method) => (method === "learning.status" ? status : []));
+    const d = withConfig(base, [view("learning.enabled", { restart: true })]);
+    const section = listSettingsSections().find((s) => s.id === "learned-skills")!;
+    renderWithDaemon(<>{section.render({ client: base.client, events: base.events })}</>, base);
+    const sw = await screen.findByTestId("config-learning-enabled-switch");
+    expect(sw).toHaveAttribute("aria-checked", "false");
+    const root = screen.getByTestId("settings-section-learned-skills");
+    expect(root).not.toHaveTextContent("config.yaml");
+    expect(root).not.toHaveTextContent("SMIND_LEARNING");
+    expect(screen.queryByTestId("learning-kill-switch")).toBeNull();
+    // The per-workspace opt-in keeps its disabled state while the global switch is off.
+    await waitFor(() => expect(screen.getByRole("radio", { name: "Propose" })).toBeDisabled());
+    fireEvent.click(sw);
+    await flush();
+    expect(await screen.findByTestId("config-learning-enabled-dialog")).toBeInTheDocument();
+    expect(d.sets()).toEqual([]);
   });
 });

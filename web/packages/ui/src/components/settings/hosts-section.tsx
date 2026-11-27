@@ -7,7 +7,8 @@ import { EditLabelsDialog } from "@/components/hosts/edit-labels-dialog";
 import { HostRow } from "@/components/hosts/host-row";
 import { InviteHostDialog } from "@/components/hosts/invite-host-dialog";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
-import { SettingsEmptyCard } from "@/components/settings/settings-layout";
+import { ConfigSwitchRow } from "@/components/settings/config-switch-row";
+import { SettingsEmptyCard, SettingsGroup } from "@/components/settings/settings-layout";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -102,6 +103,7 @@ function HostsSection(_props: SettingsSectionContext) {
       <section className="flex flex-col gap-2">
         <SettingsSectionTitle title="Hosts" actions={headerActions} />
 
+        {data && !data.off && <FleetSwitch />}
         {!data ? (
           query.isError ? (
             <div className="flex items-center gap-2">
@@ -117,7 +119,11 @@ function HostsSection(_props: SettingsSectionContext) {
           <SettingsEmptyCard
             testId="hosts-off"
             title="Fleet is off"
-            description="Set fleet.enabled: true in config.yaml and restart smind to connect other hosts."
+            actions={
+              <div className="w-full text-left">
+                <FleetSwitch />
+              </div>
+            }
           />
         ) : data.hosts.length === 0 ? (
           <SettingsEmptyCard
@@ -278,3 +284,17 @@ registerSettingsSection({
   icon: <Icons.host aria-hidden className="size-3.5" />,
   render: (ctx) => <HostsSection {...ctx} />,
 });
+
+/** The one fleet switch, in the off card and above the host list; the restart notice comes from the row. */
+function FleetSwitch() {
+  return (
+    <SettingsGroup>
+      <ConfigSwitchRow
+        configKey="fleet.enabled"
+        label="Fleet"
+        description="Connect other hosts so tasks can run on them."
+        testId="config-fleet-enabled"
+      />
+    </SettingsGroup>
+  );
+}
