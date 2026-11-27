@@ -4,16 +4,20 @@ import { type Page, type TestInfo } from '@playwright/test'
 import { type App, expect, test } from '../fixtures/test'
 
 // The ambient quota notice (docs/plans/active/ambient-quota.md, ADR-0059 F): one dismissible row above the
-// composer's input card when a plan window of the composer provider's account reaches 90% used. The notice sends
-// NO `account.usage` request of any mode: it only reads the shared cache that a usage surface fills. So AQ-00
-// (a cold start with only a task open) sees no notice and no request at all, and AQ-01..AQ-06 first load the
-// reports the way a person would: Settings -> Usage (a touching surface whose single `touch` -- or `cached` read
-// when the window is not focused -- the stub answers) then back to the task. No test ever reaches a vendor:
-// every `account.usage` request is answered locally through page.routeWebSocket, and the real daemon's
-// `provider.list` answer is proxied with `accountProvider: "anthropic"` added to the seeded `uat` provider (a
-// custom provider has no account provider, and the notice only shows for a provider with one). Frames are
-// written only when QUOTA_FRAMES_DIR is set; every frame also asserts the theme's luminance and that nothing
-// scrolls sideways.
+// composer's input card when a plan window of the composer provider's account reaches 90% used, naming the
+// provider ("Claude Code · 5-hour window 92% used, resets 20:52"). Since the quota start fetch
+// (docs/plans/active/quota-start-fetch.md) every app start sends exactly ONE `account.usage` request with
+// mode "touch" (no account ids) once the window is visible and focused, the shared cache fills by itself:
+// no Settings detour is needed, the notice shows on the task alone, and it asks nothing itself. Every test
+// counts what the stub saw: exactly one `touch` per page load -- a reload is a new app start and sends its
+// own one -- and never a `refresh`, a `cached` or a second request from a navigation or a composer remount.
+// No test ever reaches a vendor: every `account.usage` request is answered locally through page.routeWebSocket,
+// and the real daemon's `provider.list` answer is proxied with `accountProvider: "anthropic"` added to the
+// seeded `uat` provider (a custom provider has no account provider, and the notice only shows for a provider
+// with one); the notice's provider label is the first provider.list row with that account provider, the
+// built-in claude-native row, whose label is the identity-table name for anthropic. Frames are written only
+// when QUOTA_FRAMES_DIR is set; every frame also asserts the theme's luminance and that nothing scrolls
+// sideways.
 
 type WindowSpec = { id: string; label: string; usedPct: number; resetsInMs: number; durationSeconds: number }
 
@@ -139,114 +143,124 @@ async function openSeededTask(app: App) {
 }
 
 /**
- * Loads the usage reports like a person would: Settings -> Usage is a touching surface, so opening it sends the
- * one `account.usage` request of the whole flow (`touch`, or a `cached` read when the window is not focused) and
- * fills the shared cache; the rendered list proves the reports reached the page. Then back to the task, whose
- * notice reads the cache and never asks.
+ * Opens one more chat of the open task through the tab strip's "+" menu and closes its tab again: a composer
+ * mounts for the new chat and unmounts with the tab, all inside the same app start.
  */
-async function loadReports(app: App) {
-  const { page } = app
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent('smind:open-settings', { detail: { sectionId: 'usage' } })))
-  await expect(page.getByTestId('settings-section-usage')).toBeVisible()
-  await expect(page.getByTestId('usage-list')).toBeVisible()
-  // The section opens as a detail page at narrow widths: that back button returns to the section list first.
-  if (app.narrow) await page.getByTestId('settings-detail-back').click()
-  await page.getByTestId('settings-back-button').click()
-  await expect(page.getByTestId('settings-screen')).toHaveCount(0)
-  await expect(page.getByTestId('composer')).toBeVisible()
-  // Off the settings sidebar, whose hover state would sit over the timeline for the rest of the test.
-  const vp = page.viewportSize()
-  if (vp) await page.mouse.move(vp.width / 2, vp.height / 3)
+async function openAndCloseComposer(page: Page) {
+  const tabs = page.locator('[role="tab"]')
+  const before = await tabs.count()
+  await page.getByTestId('tabs-new-tab').click()
+  await page.getByTestId('tabs-new-tab-new-chat').click()
+  await expect.poll(() => tabs.count()).toBe(before + 1)
+  // The close affordance only takes pointer events on the active tab, which the new chat is.
+  await page.locator('[role="tab"][aria-selected="true"]').getByTestId('workspace-tab-close').click()
+  await expect.poll(() => tabs.count()).toBe(before)
 }
 
-test('AQ-00 a cold start shows no notice and sends no account.usage request', async ({ app }, testInfo) => {
+test('AQ-00 a cold start sends exactly one touch, the notice follows, and it is never repeated', async ({ app }) => {
   const { page } = app
-  const stub = await stubUsage(page, { windows: [fiveHour(92)] }) // over the threshold: any request would show the notice
+  const stub = await stubUsage(page, { windows: [fiveHour(92)] }) // over the threshold: the stubbed answer must show the notice
   await openSeededTask(app)
-  await expect(page.getByTestId('ambient-quota-notice')).toHaveCount(0)
+  // The start fetch filled the cache on its own: one touch, then the notice, with no Settings visit.
+  await expect(page.getByTestId('ambient-quota-notice')).toBeVisible()
   expect(stub.proxied.length, 'the app is live on the stubbed socket').toBeGreaterThan(0)
-  expect(stub.modes, 'no account.usage request of any mode before a usage surface opens').toEqual([])
-  await frame(page, testInfo, '00-cold-start')
+  expect(stub.modes, 'exactly one account.usage request at app start, a touch, never a refresh or cached').toEqual(['touch'])
+  // Navigating within the app (another task, a composer that opens and closes) never repeats it.
+  await app.openTask('long-timeline')
+  await expect(page.getByTestId('ambient-quota-notice')).toBeVisible()
+  const vp = page.viewportSize()
+  if (vp) await page.mouse.move(vp.width / 2, vp.height / 3)
+  await openAndCloseComposer(page)
+  expect(stub.modes, 'no second request from a navigation or a composer remount').toEqual(['touch'])
+  // A reload is a new app start: the new page sends its own one touch, exactly one.
+  const beforeReload = stub.modes.length
+  await page.reload()
+  await expect(page.getByTestId('composer')).toBeVisible()
+  // The notice is back only through the new page's own start fetch: its request is the one just recorded.
+  await expect(page.getByTestId('ambient-quota-notice')).toBeVisible()
+  expect(stub.modes.slice(beforeReload), 'the new page sends exactly one touch').toEqual(['touch'])
+  expect(stub.modes, 'two app starts, one touch each').toEqual(['touch', 'touch'])
 })
 
 test('AQ-01 a window at 92 percent shows the notice with its name and local reset time', async ({ app }, testInfo) => {
   const { page } = app
   const stub = await stubUsage(page, { windows: [fiveHour(92)] })
   await openSeededTask(app)
-  await loadReports(app)
   const notice = page.getByTestId('ambient-quota-notice')
   await expect(notice).toBeVisible()
-  await expect(page.getByTestId('ambient-quota-text')).toHaveText(/^5-hour window 92% used, resets (\w{3} )?\d\d:\d\d$/) // a reset past local midnight adds the weekday
+  await expect(page.getByTestId('ambient-quota-text')).toHaveText(/^Claude Code · 5-hour window 92% used, resets (\w{3} )?\d\d:\d\d$/) // a reset past local midnight adds the weekday
   const noticeBox = await notice.boundingBox()
   const cardBox = await page.getByTestId('composer-card').boundingBox()
   if (!noticeBox || !cardBox) throw new Error('no bounding box')
   expect(noticeBox.y + noticeBox.height, 'the notice ends above the input card').toBeLessThanOrEqual(cardBox.y + 1)
-  expect(stub.modes.length, 'the reports arrived through one usage request').toBeGreaterThan(0)
-  expect(stub.modes.every((mode) => mode === 'touch' || mode === 'cached'), 'only the Usage section own read, never a refresh').toBe(true)
+  expect(stub.modes, 'the reports arrived through the start fetch alone').toEqual(['touch'])
   // The composer stays usable: typing lands and sends nothing (a send is a live call, never clicked here).
-  const afterLoad = stub.modes.length
   const textarea = page.locator('[aria-label="Prompt"]').first()
   await textarea.click()
   await textarea.fill('A draft kept while the quota notice shows')
   await expect(textarea).toHaveValue('A draft kept while the quota notice shows')
-  expect(stub.modes.length, 'back on the task the notice made no request of its own').toBe(afterLoad)
+  expect(stub.modes, 'the notice made no request of its own').toEqual(['touch'])
   expect(stub.proxied.includes('run.start'), 'nothing was sent').toBe(false)
-  await frame(page, testInfo, '01-notice-92')
+  await frame(page, testInfo, 'provider-92')
 })
 
 test('AQ-02 at 100 percent it says used up', async ({ app }, testInfo) => {
   const { page } = app
-  await stubUsage(page, { windows: [fiveHour(100)] })
+  const stub = await stubUsage(page, { windows: [fiveHour(100)] })
   await openSeededTask(app)
-  await loadReports(app)
   await expect(page.getByTestId('ambient-quota-notice')).toBeVisible()
-  await expect(page.getByTestId('ambient-quota-text')).toHaveText(/used up, resets/)
-  await frame(page, testInfo, '02-notice-100')
+  await expect(page.getByTestId('ambient-quota-text')).toHaveText(/^Claude Code · 5-hour window used up, resets (\w{3} )?\d\d:\d\d$/)
+  expect(stub.modes, 'one touch for the whole flow').toEqual(['touch'])
+  await frame(page, testInfo, 'provider-100')
 })
 
 test('AQ-03 a dismissed notice stays gone, also after a reload', async ({ app }, testInfo) => {
   const { page } = app
-  await stubUsage(page, { windows: [fiveHour(92)] })
+  const stub = await stubUsage(page, { windows: [fiveHour(92)] })
   await openSeededTask(app)
-  await loadReports(app)
   await expect(page.getByTestId('ambient-quota-notice')).toBeVisible()
+  expect(stub.modes).toEqual(['touch'])
   await page.getByTestId('ambient-quota-dismiss').click()
   await expect(page.getByTestId('ambient-quota-notice')).toHaveCount(0)
+  // The reload is a new app start whose own touch refills the cache; the dismissal still wins.
   await page.reload()
-  await openSeededTask(app)
-  // The reload dropped the in-memory cache: the reports come back through Settings -> Usage, not through the notice.
-  await loadReports(app)
+  await expect(page.getByTestId('composer')).toBeVisible()
+  // The new touch reached the stub and was answered before the absence is judged.
+  await expect.poll(() => stub.modes.length, 'the new app start sent its own one touch').toBe(2)
   await expect(page.getByTestId('ambient-quota-notice')).toHaveCount(0)
+  expect(stub.modes, 'one touch per page load, two loads').toEqual(['touch', 'touch'])
   await frame(page, testInfo, '03-dismissed')
 })
 
-test('AQ-04 below the threshold there is no notice', async ({ app }, testInfo) => {
+test('AQ-04 below the threshold there is no notice', async ({ app }) => {
   const { page } = app
-  await stubUsage(page, { windows: [fiveHour(80)] })
+  const stub = await stubUsage(page, { windows: [fiveHour(80)] })
   await openSeededTask(app)
-  await loadReports(app)
+  // The answer the start fetch got is what must not show a notice, so wait for it before asserting absence.
+  await expect.poll(() => stub.modes.length, 'the start fetch reached the stub and was answered').toBe(1)
   await expect(page.getByTestId('ambient-quota-notice')).toHaveCount(0)
-  await frame(page, testInfo, '04-below-threshold')
+  expect(stub.modes, 'the start fetch still ran, once').toEqual(['touch'])
 })
 
 test('AQ-05 two windows: the higher shows first, the other after a dismissal', async ({ app }, testInfo) => {
   const { page } = app
-  await stubUsage(page, { windows: [fiveHour(92), weekly(95)] })
+  const stub = await stubUsage(page, { windows: [fiveHour(92), weekly(95)] })
   await openSeededTask(app)
-  await loadReports(app)
   const text = page.getByTestId('ambient-quota-text')
-  await expect(text).toHaveText(/^Weekly window 95% used, resets/)
+  await expect(text).toHaveText(/^Claude Code · Weekly window 95% used, resets/)
+  expect(stub.modes).toEqual(['touch'])
   await frame(page, testInfo, '05-two-windows')
   await page.getByTestId('ambient-quota-dismiss').click()
-  await expect(text).toHaveText(/^5-hour window 92% used, resets/)
+  await expect(text).toHaveText(/^Claude Code · 5-hour window 92% used, resets/)
+  expect(stub.modes, 'a dismissal never re-asks').toEqual(['touch'])
   await frame(page, testInfo, '05b-two-windows-next')
 })
 
-test('AQ-06 a stale reading shows nothing', async ({ app }, testInfo) => {
+test('AQ-06 a stale reading shows nothing', async ({ app }) => {
   const { page } = app
-  await stubUsage(page, { windows: [fiveHour(92)], fetchedAgoMs: 2 * 3600_000 })
+  const stub = await stubUsage(page, { windows: [fiveHour(92)], fetchedAgoMs: 2 * 3600_000 })
   await openSeededTask(app)
-  await loadReports(app)
+  await expect.poll(() => stub.modes.length, 'the start fetch reached the stub and was answered').toBe(1)
   await expect(page.getByTestId('ambient-quota-notice')).toHaveCount(0)
-  await frame(page, testInfo, '06-stale-reading')
+  expect(stub.modes, 'the start fetch still ran, once').toEqual(['touch'])
 })
