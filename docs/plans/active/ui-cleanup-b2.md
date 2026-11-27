@@ -58,4 +58,8 @@ Real macOS desktop window (scripts/desktop-audit-build.sh from this branch, dogf
 
 ## Validation
 
-(filled in when the work is done)
+- `sh scripts/verify.sh`: VERIFY PASS (build, test, lint). Full e2e matrix (`E2E_FULL=1`): 361 passed, 47 skipped. tsc clean.
+- Mutations on committed code, each failing its named test: M1 (a hand-rolled `rounded-xl border bg-card` div in saved-grants) -> `ui_cleanup_b2_no_hand_rolled_cards_or_raw_h3`; M2 (column narrowed to `max-w-[510px]`) -> `ui_cleanup_b2_one_column_width_for_every_section`; M3 (the MCP `Switch` replaced by a checkbox input) -> `ui_cleanup_b2_mcp_enabled_is_a_switch`.
+- Column jump, measured (WEB-HARNESS, 1280x800): before (develop) the page title started at x=663 on General, Appearance, Notifications, GitHub, Hosts, Skills, Saved grants and Browser, and at x=536 on the other eight tabs; after, it starts at x=536 on all 16 web tabs (`UC2-01` asserts it, and asserts one column width). Shortcuts fits the same 48rem column, so no exception was needed.
+- Frames: every frame is WEB-HARNESS (headless browser on the built web UI). All 16 web tabs light and dark at 1280x800, the 8-tab subset (General, Shortcuts, Automations, Permission policy, Saved grants, Usage, Hosts, Browser) at 800x520, a before/after contact sheet of the same tab sequence, and Profiles with two profiles seeded on a dogfood daemon (light and dark). The macOS session was locked at the time of the frame pass, so there are NO REAL-WINDOW frames and the audit app was not built. The two desktop-only tabs (Daemon server, Daemon) are not in the web harness: their changes (Switch, ConfirmDialog, `gap-6`) are covered by unit tests only.
+- Not shown in any frame: rows with data on Saved grants, Permission policy rules and decisions, MCP servers, Plugins (a switch row), and GitHub signed-in hosts; the harness and dogfood daemon had none of those, so they are covered by the unit tests named above.
