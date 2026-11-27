@@ -42,6 +42,11 @@ Only these paths can be set:
 | `server.listen` | `host:port` to bind. |
 | `server.hostnames` | Comma-separated host names. |
 | `providers.<id>.defaultModel` | A model name. `<id>` is `claude-native`, `codex-native`, `glm` or `kimi`. |
+| `fleet.enabled` | `true` or `false`. Needs a restart. |
+| `plugins.enabled` | `true` or `false`. Applies on the next call. |
+| `learning.enabled` | `true` or `false`. Needs a restart. |
+| `automations.enabled` | `true` or `false`. Applies on the next engine tick. |
+| `automations.paused` | `true` or `false`. Applies on the next engine tick. |
 
 `server.passwordHash` can only be removed with `smind config unset`. Set it with
 `smind set-password`. Every other key below is edited by hand in `config.yaml`.
@@ -49,6 +54,35 @@ Only these paths can be set:
 Changes apply when the daemon restarts. If the file does not parse or a value
 fails the checks below, the daemon logs a `config:` error and carries on with
 its default settings, so check the log after you edit by hand.
+
+## Changing switches from the app (config.get and config.set)
+
+Five global switches can be changed from the app as well as from the command
+line: `automations.enabled`, `automations.paused`, `plugins.enabled`,
+`fleet.enabled` and `learning.enabled`. Every other setting stays in
+`config.yaml`. The app reads them with `config.get`, which reports each key's
+effective value, its default, where the value comes from (default, file or
+environment), whether a change needs a restart and whether this connection may
+change it. A paired phone or a remote login can read the switches, so it can
+say "change this on the daemon's machine", but it cannot change them. The
+`server.*` keys are shown only to a local connection.
+
+`config.set` changes one key per call and works only from a local (loopback)
+connection by the person at the machine. It is refused to agents, plugins,
+relay sessions, other hosts and remote logins, including password logins over
+a network. The edit is the same comment-preserving write as `smind config set`.
+
+- A key that an environment variable overrides is refused with "overridden by
+  `SMIND_x`, unset it first", because the file write would have no effect.
+- `fleet.enabled` and `learning.enabled` take effect after a daemon restart;
+  the other three apply live.
+- Every attempt, accepted or refused, is logged in `config-audit.jsonl` in the
+  daemon home (owner-only, rotated by size), with the key, the old and new
+  values, the outcome and the kind of caller.
+
+One honest limit: a process running as the same operating-system user can still
+edit `config.yaml` directly. Refusing agent runs and non-local callers narrows
+the easy path; it does not make the file private.
 
 ## Keys
 
