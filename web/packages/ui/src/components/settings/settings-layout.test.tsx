@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   SettingsEmptyCard,
   SettingsGroup,
+  SettingsList,
+  SettingsListRow,
   SettingsRow,
   SettingsStatStrip,
 } from "@/components/settings/settings-layout";
@@ -88,5 +90,40 @@ describe("settings layout primitives", () => {
     for (const value of ["12", "3", "1"]) {
       expect(screen.getByText(value)).toBeInTheDocument();
     }
+  });
+
+  it("ui_cleanup_b2_settings_list_is_one_divided_card", () => {
+    render(
+      <SettingsList testId="list">
+        <SettingsListRow>One</SettingsListRow>
+        <SettingsListRow>Two</SettingsListRow>
+      </SettingsList>
+    );
+
+    const list = screen.getByTestId("list");
+    expect(list).toHaveAttribute("data-slot", "settings-list");
+    expect(list.tagName).toBe("UL");
+    expect(list).toHaveClass("rounded-xl", "border-border", "bg-card", "overflow-hidden");
+    // Rows are divided by a hairline, not by a gap between separate cards.
+    expect(list.className).toContain("[&>*+*]:border-t");
+    expect(list.className).toContain("[&>*+*]:border-border");
+    expect(list.querySelectorAll("[data-slot='settings-list-row']")).toHaveLength(2);
+  });
+
+  it("ui_cleanup_b2_settings_list_row_padding", () => {
+    render(
+      <SettingsList>
+        <SettingsListRow testId="row" className="flex items-center justify-between">
+          Label
+        </SettingsListRow>
+      </SettingsList>
+    );
+
+    const row = screen.getByTestId("row");
+    expect(row).toHaveAttribute("data-slot", "settings-list-row");
+    expect(row.tagName).toBe("LI");
+    expect(row).toHaveClass("px-4", "py-3");
+    // A caller's layout classes merge with the padding, they don't replace it.
+    expect(row).toHaveClass("flex", "items-center", "justify-between");
   });
 });
