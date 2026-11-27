@@ -20,7 +20,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { FormError } from "@/components/ui/form-error";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ArchiveRisks, DeleteBranchOption } from "@/components/archive-preview";
@@ -117,108 +116,6 @@ function CrudForm({
         />
       </form>
     </DialogContent>
-  );
-}
-
-export function CreateWorkspaceDialog({
-  client,
-  open,
-  onOpenChange,
-  onCreated,
-  recentPaths = [],
-}: {
-  client: WsClient | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  /** Called with the created workspace so the sidebar can refresh the tree (and expand the newcomer). */
-  onCreated: (workspace: Workspace) => void;
-  /** Parent directories of already-registered workspaces, for the folder picker's quick-jump row -- see `recentWorkspaceParentDirs`. */
-  recentPaths?: string[];
-}) {
-  const [path, setPath] = useState("");
-  const [title, setTitle] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-
-  return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        {open && (
-          <CrudForm
-            title="New workspace"
-            description="Must be an existing git repository -- tasks are created as worktrees branched off it."
-            submitLabel="Create workspace"
-            onOpenChange={onOpenChange}
-            submitTestId="dialog-new-workspace-submit"
-            cancelTestId="dialog-new-workspace-cancel"
-            onSubmit={async () => {
-              if (!path.trim()) {
-                setError("Path is required.");
-                return false;
-              }
-              try {
-                const ws = await client!.call<Workspace>("workspace.create", {
-                  path: path.trim(),
-                  ...(title.trim() ? { title: title.trim() } : {}),
-                });
-                onCreated(ws);
-                setPath("");
-                setTitle("");
-                return true;
-              } catch (err) {
-                setError(err instanceof Error ? err.message : String(err));
-                return false;
-              }
-            }}
-          >
-            <div className="grid gap-2">
-              <label htmlFor="workspace-path" className="text-ui-base font-medium">
-                Path
-              </label>
-              <div className="flex gap-2">
-                <Input
-                  id="workspace-path"
-                  data-testid="dialog-new-workspace-path-input"
-                  placeholder="/path/to/repo"
-                  value={path}
-                  onChange={(e) => setPath(e.target.value)}
-                  autoFocus
-                  className="flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  data-testid="dialog-new-workspace-browse-button"
-                  onClick={() => setPickerOpen(true)}
-                >
-                  Browse…
-                </Button>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <label htmlFor="workspace-title" className="text-ui-base font-medium">
-                Title <span className="font-normal text-muted-foreground">(optional)</span>
-              </label>
-              <Input
-                id="workspace-title"
-                data-testid="dialog-new-workspace-title-input"
-                placeholder="Defaults to the repository directory name"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-              />
-            </div>
-            <FormError message={error} />
-          </CrudForm>
-        )}
-      </Dialog>
-      <FolderPickerDialog
-        client={client}
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        onSelect={(selected) => setPath(selected)}
-        recentPaths={recentPaths}
-      />
-    </>
   );
 }
 

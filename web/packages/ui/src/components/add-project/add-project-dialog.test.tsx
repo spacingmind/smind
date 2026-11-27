@@ -1,11 +1,14 @@
 import { act } from "react";
-import { fireEvent, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostStep } from "@/components/add-project/host-step";
+import { AddProjectDialog } from "@/components/add-project/add-project-dialog";
 import { FleetDaemon, fleetHost } from "@/test/fleet-fixtures";
-import { renderWithDaemon } from "@/test/render-with-daemon";
+import { renderWithClientProp, renderWithDaemon } from "@/test/render-with-daemon";
+import { FakeWsClient } from "@/test/fake-ws-client";
 import type { Connection } from "@/lib/platform";
+import type { WsClient } from "@/lib/ws-client";
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -55,6 +58,22 @@ function resetPlatform() {
   platformState.current = { id: "conn-current", kind: "local", label: "This Mac", baseUrl: "http://127.0.0.1:7700" };
   platformState.saved = [];
   platformState.selected = [];
+}
+
+/** The dialog as the sidebar mounts it, on a fake client whose calls the test resolves by hand. */
+function renderDialog(onProjectReady = vi.fn(), onOpenChange = vi.fn()) {
+  const client = new FakeWsClient();
+  const view = renderWithClientProp(
+    <AddProjectDialog
+      client={client as unknown as WsClient}
+      open
+      onOpenChange={onOpenChange}
+      workspaces={[]}
+      onProjectReady={onProjectReady}
+      onStartTask={vi.fn()}
+    />,
+  );
+  return { view, client, onProjectReady, onOpenChange };
 }
 
 describe("Add project host step", () => {
@@ -150,5 +169,140 @@ describe("Add project host step", () => {
     });
     // Listing a saved connection never switches to it from inside the dialog.
     expect(platformState.selected).toEqual([]);
+  });
+});
+
+describe("Add project dialog", () => {
+  beforeEach(resetPlatform);
+
+  it("add_project_only_open_a_folder_is_live", async () => {
+    const { client, onOpenChange } = renderDialog();
+    await flush();
+
+    const open = screen.getByTestId("add-project-method-open");
+    expect(open.tagName).toBe("BUTTON");
+    expect(open).toHaveAttribute("aria-pressed", "true");
+    for (const testId of ["add-project-method-clone", "add-project-method-new", "add-project-method-session"]) {
+      const card = screen.getByTestId(testId);
+      // Plain divs, not buttons: nothing that looks live is dead.
+      expect(card.tagName).toBe("DIV");
+      expect(card).toHaveAttribute("aria-disabled", "true");
+      expect(card).not.toHaveAttribute("aria-pressed");
+      expect(card).toHaveTextContent("Coming soon");
+      await act(async () => {
+        fireEvent.click(card);
+      });
+    }
+    // Clicking the disabled cards changed nothing: the dialog is still open
+    // and quiet, and no create was sent.
+    expect(screen.getByTestId("add-project-dialog")).toBeInTheDocument();
+    expect(screen.queryByTestId("add-project-error")).toBeNull();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(client.calls.filter((c) => c.method === "workspace.create")).toHaveLength(0);
+  });
+
+  it("add_project_errors_are_sentences_and_the_dialog_stays_open", async () => {
+    const { client, onProjectReady } = renderDialog();
+    await flush();
+
+    fireEvent.change(screen.getByTestId("add-project-path-input"), { target: { value: "/tmp/repo" } });
+    await flush();
+    fireEvent.click(screen.getByTestId("add-project-submit"));
+
+    const create = await waitFor(() => client.nth("workspace.create"));
+    expect(create.params).toEqual({ path: "/tmp/repo" });
+    await act(async () => {
+      create.reject(new Error("workspace.create: workspace: /tmp/repo is not a git repository"));
+    });
+    await flush();
+
+    // The method and package labels are dropped: the person reads one sentence.
+    expect(screen.getByTestId("add-project-error")).toHaveTextContent("/tmp/repo is not a git repository.");
+    // The dialog stays open with the typed path kept, ready to fix and retry.
+    expect(screen.getByTestId("add-project-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("add-project-path-input")).toHaveValue("/tmp/repo");
+    expect(onProjectReady).not.toHaveBeenCalled();
+  });
+
+  it("add_project_browse_home_place_lists_the_daemon_home", async () => {
+    const { client } = renderDialog();
+    await flush();
+
+    fireEvent.click(screen.getByTestId("add-project-browse-button"));
+    await flush();
+    // The chooser opens at the daemon's home (fs.listDir with no path); the
+    // Home place re-asks exactly that question.
+    const first = await waitFor(() => client.nth("fs.listDir"));
+    expect(first.params).toBeUndefined();
+    await act(async () => {
+      first.resolve({
+        path: "/home/dev/repo",
+        parent: "/home/dev",
+        entries: [{ name: "nested", path: "/home/dev/repo/nested", isGitRepo: false }],
+      });
+    });
+    await flush();
+
+    fireEvent.click(screen.getByTestId("folder-picker-home"));
+    const home = await waitFor(() => client.nth("fs.listDir", 1));
+    expect(home.params).toBeUndefined();
+  });
+});
+
+describe("Add project dialog small sizes", () => {
+  const originalMatchMedia = window.matchMedia;
+  const originalInnerWidth = window.innerWidth;
+  const originalInnerHeight = window.innerHeight;
+
+  function setViewport(width: number, height: number): void {
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: width });
+    Object.defineProperty(window, "innerHeight", { writable: true, configurable: true, value: height });
+  }
+
+  // jsdom's matchMedia stub answers false to everything; answer the
+  // max-width / max-height queries from the viewport like a real one would.
+  function matchesQuery(query: string): boolean {
+    const maxWidth = /\(max-width:\s*(\d+)px\)/.exec(query);
+    if (maxWidth) return window.innerWidth <= Number(maxWidth[1]);
+    const maxHeight = /\(max-height:\s*(\d+)px\)/.exec(query);
+    if (maxHeight) return window.innerHeight <= Number(maxHeight[1]);
+    return false;
+  }
+
+  beforeEach(() => {
+    resetPlatform();
+    window.matchMedia = vi.fn().mockImplementation(
+      (query: string) =>
+        ({
+          matches: matchesQuery(query),
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList,
+    );
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+    setViewport(originalInnerWidth, originalInnerHeight);
+  });
+
+  it("add_project_small_window_is_a_full_bleed_sheet", async () => {
+    setViewport(800, 520);
+    const small = renderDialog();
+    await flush();
+    expect(screen.getByTestId("add-project-dialog")).toHaveAttribute("data-sheet", "true");
+    small.onOpenChange.mockClear();
+
+    setViewport(1280, 800);
+    small.view.unmount();
+    const large = renderDialog();
+    await flush();
+    expect(screen.getByTestId("add-project-dialog")).not.toHaveAttribute("data-sheet");
+    expect(large.onOpenChange).not.toHaveBeenCalled();
   });
 });

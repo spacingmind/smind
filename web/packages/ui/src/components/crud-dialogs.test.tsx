@@ -1,7 +1,7 @@
 import { act, fireEvent, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ArchiveTaskDialog, CreateWorkspaceDialog } from "@/components/crud-dialogs";
+import { ArchiveTaskDialog } from "@/components/crud-dialogs";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { renderWithClientProp as render } from "@/test/render-with-daemon";
 import type { Task } from "@/lib/types";
@@ -11,19 +11,6 @@ import type { WsClient } from "@/lib/ws-client";
 function wsFake(): FakeWsClient & WsClient {
   return new FakeWsClient() as unknown as FakeWsClient & WsClient;
 }
-
-// visual-identity-console Item 4: a dialog's Cancel button is the "quiet"
-// call site -- non-committal next to the primary Create action, via the
-// shared `FormActions` row every CRUD dialog renders through.
-describe("crud dialog Cancel button", () => {
-  it("renders with the quiet variant", () => {
-    render(
-      <CreateWorkspaceDialog client={null} open={true} onOpenChange={vi.fn()} onCreated={vi.fn()} />,
-    );
-
-    expect(screen.getByTestId("dialog-new-workspace-cancel")).toHaveAttribute("data-variant", "quiet");
-  });
-});
 
 const ARCHIVE_TASK: Task = {
   ID: 7,

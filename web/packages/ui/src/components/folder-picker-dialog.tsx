@@ -106,26 +106,39 @@ export function FolderPickerDialog({
           </p>
         </div>
 
-        {recentPaths.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-ui-sm text-muted-foreground">Recent:</span>
-            {recentPaths.map((path) => (
-              <Button
-                key={path}
-                type="button"
-                variant="outline"
-                size="sm"
-                data-testid="folder-picker-recent-path"
-                data-path={path}
-                className="h-6 max-w-48 truncate px-2 text-ui-sm"
-                title={path}
-                onClick={() => void navigate(path)}
-              >
-                {path.slice(path.lastIndexOf("/") + 1) || path}
-              </Button>
-            ))}
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="folder-picker-home"
+            className="h-6 px-2 text-ui-sm"
+            onClick={() => void navigate()}
+          >
+            <Icons.home className="size-3.5" />
+            Home
+          </Button>
+          {recentPaths.length > 0 && (
+            <>
+              <span className="text-ui-sm text-muted-foreground">Recent:</span>
+              {recentPaths.map((path) => (
+                <Button
+                  key={path}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid="folder-picker-recent-path"
+                  data-path={path}
+                  className="h-6 max-w-48 truncate px-2 text-ui-sm"
+                  title={path}
+                  onClick={() => void navigate(path)}
+                >
+                  {path.slice(path.lastIndexOf("/") + 1) || path}
+                </Button>
+              ))}
+            </>
+          )}
+        </div>
 
         {error && (
           <p className="flex items-center gap-1.5 text-ui-base text-destructive">

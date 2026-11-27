@@ -34,7 +34,6 @@ import type {
   Workspace,
 } from "@/lib/types";
 import {
-  recentWorkspaceParentDirs,
   searchTasks,
   type SpaceWithTasks,
   type TaskSearchResult,
@@ -75,10 +74,10 @@ import {
   ArchiveTaskDialog,
   CreateSpaceDialog,
   CreateTaskDialog,
-  CreateWorkspaceDialog,
   DeleteSpaceDialog,
   DeleteWorkspaceDialog,
 } from "@/components/crud-dialogs";
+import { AddProjectDialog } from "@/components/add-project/add-project-dialog";
 import { SetupBadge } from "@/components/task-setup";
 import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
@@ -1134,17 +1133,23 @@ export function AppSidebar({
       {/* Outside <Sidebar>: on mobile it is a Sheet that unmounts while closed. */}
       {client && (
         <>
-          <CreateWorkspaceDialog
+          <AddProjectDialog
             client={client}
             open={crud?.kind === "workspace"}
             onOpenChange={(o) => !o && setCrud(null)}
-            onCreated={(ws) => {
+            workspaces={workspaces ?? []}
+            onProjectReady={(ws) => {
               // Land on the new workspace expanded, even if a deleted
               // workspace's id is still persisted as collapsed.
               nodes.open(`ws:${ws.ID}`);
               refresh();
             }}
-            recentPaths={recentWorkspaceParentDirs(workspaces ?? [])}
+            onStartTask={(ws) =>
+              // A freshly created workspace has no tree yet; the New task
+              // dialog only reads ID/Title/Path, and the next tree refresh
+              // replaces this object.
+              setCrud({ kind: "task", workspace: { ...ws, spaces: [], ungroupedTasks: [] }, spaceId: null })
+            }
           />
           {crud?.kind === "space" && (
             <CreateSpaceDialog

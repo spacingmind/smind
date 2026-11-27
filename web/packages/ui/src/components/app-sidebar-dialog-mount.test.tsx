@@ -85,6 +85,6 @@ describe("AppSidebar CRUD dialogs in the compact layout (UAT A-01)", () => {
     const cmd = commands().find((c) => c.title === "New workspace");
     expect(cmd).toBeDefined();
     act(() => cmd!.run());
-    expect(await screen.findByRole("dialog", { name: "New workspace" })).toBeInTheDocument();
+    expect(await screen.findByRole("dialog", { name: "Add project" })).toBeInTheDocument();
   });
 });

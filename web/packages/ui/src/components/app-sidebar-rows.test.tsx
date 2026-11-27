@@ -971,7 +971,7 @@ describe("expansion persistence (S8)", () => {
     expect(stored()).toEqual(["ws:1"]);
     fireEvent.click(screen.getByTestId("sidebar-footer-add-workspace"));
     fireEvent.change(await screen.findByLabelText("Path"), { target: { value: "/tmp/new" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add project" }));
     const create = await waitFor(() => client.nth("workspace.create"));
     await act(async () => {
       create.resolve({ ...WORKSPACE, ID: 1, Title: "Reborn" });
