@@ -53,7 +53,7 @@ function pick(
   dismissed: ReadonlySet<string> = new Set(),
   accountProvider: string | undefined = "anthropic",
 ) {
-  return pickQuotaNotice({ usages, accountProvider, now: NOW, dismissed, locale: "en-US" });
+  return pickQuotaNotice({ usages, accountProvider, providerLabel: "Claude", now: NOW, dismissed, locale: "en-US" });
 }
 
 /** The time the notice shows, built with the same formatter the code uses. */
@@ -81,7 +81,7 @@ describe("the ambient quota notice (ADR-0059 F)", () => {
   it("ambient_quota_100_says_used_up", () => {
     const full = pick([usage({ windows: [win({ usedPct: 100 })] })]);
     expect(full?.level).toBe("full");
-    expect(full?.text).toBe(`5-hour window used up, resets ${localTime(NOW + 2 * HOUR)}`);
+    expect(full?.text).toBe(`Claude · 5-hour window used up, resets ${localTime(NOW + 2 * HOUR)}`);
     const floored = pick([usage({ windows: [win({ usedPct: 99.7 })] })]);
     expect(floored?.text).toContain("99% used");
   });
@@ -89,6 +89,7 @@ describe("the ambient quota notice (ADR-0059 F)", () => {
   it("ambient_quota_text_names_window_and_local_reset_time", () => {
     const today = new Date(2026, 10, 26, 20, 52, 0).getTime();
     const text = quotaNoticeText({
+      providerLabel: "Claude",
       windowName: "5-hour",
       level: "warn",
       usedPct: 92,
@@ -96,19 +97,44 @@ describe("the ambient quota notice (ADR-0059 F)", () => {
       now: NOW,
       locale: "en-US",
     });
-    expect(text).toBe("5-hour window 92% used, resets 20:52");
+    expect(text).toBe("Claude · 5-hour window 92% used, resets 20:52");
     expect(
-      quotaNoticeText({ windowName: "Weekly", level: "warn", usedPct: 92, resetsAtMs: today, now: NOW, locale: "en-US" }),
-    ).toBe("Weekly window 92% used, resets 20:52");
+      quotaNoticeText({ providerLabel: "Claude", windowName: "Weekly", level: "warn", usedPct: 92, resetsAtMs: today, now: NOW, locale: "en-US" }),
+    ).toBe("Claude · Weekly window 92% used, resets 20:52");
     // a label that already says "window" is not doubled
     expect(
-      quotaNoticeText({ windowName: "5-hour window", level: "warn", usedPct: 92, resetsAtMs: today, now: NOW, locale: "en-US" }),
-    ).toBe("5-hour window 92% used, resets 20:52");
+      quotaNoticeText({ providerLabel: "Claude", windowName: "5-hour window", level: "warn", usedPct: 92, resetsAtMs: today, now: NOW, locale: "en-US" }),
+    ).toBe("Claude · 5-hour window 92% used, resets 20:52");
     // a reset on another local day adds the weekday
     const otherDay = new Date(2026, 10, 27, 20, 52, 0).getTime();
     expect(
-      quotaNoticeText({ windowName: "5-hour", level: "warn", usedPct: 92, resetsAtMs: otherDay, now: NOW, locale: "en-US" }),
-    ).toBe(`5-hour window 92% used, resets ${localTime(otherDay, true)}`);
+      quotaNoticeText({ providerLabel: "Claude", windowName: "5-hour", level: "warn", usedPct: 92, resetsAtMs: otherDay, now: NOW, locale: "en-US" }),
+    ).toBe(`Claude · 5-hour window 92% used, resets ${localTime(otherDay, true)}`);
+  });
+
+  it("ambient_quota_text_names_the_provider", () => {
+    const today = new Date(2026, 10, 26, 20, 52, 0).getTime();
+    const text = (o: { windowName: string; level: "warn" | "full"; usedPct: number }) =>
+      quotaNoticeText({ providerLabel: "Claude", resetsAtMs: today, now: NOW, locale: "en-US", ...o });
+    expect(text({ windowName: "5-hour", level: "warn", usedPct: 92 })).toBe("Claude · 5-hour window 92% used, resets 20:52");
+    expect(text({ windowName: "5-hour", level: "full", usedPct: 100 })).toBe("Claude · 5-hour window used up, resets 20:52");
+    expect(text({ windowName: "Weekly", level: "warn", usedPct: 91 })).toBe("Claude · Weekly window 91% used, resets 20:52");
+  });
+
+  it("ambient_quota_text_names_provider_and_account", () => {
+    const today = new Date(2026, 10, 26, 20, 52, 0).getTime();
+    expect(
+      quotaNoticeText({
+        providerLabel: "Claude",
+        accountName: "work",
+        windowName: "5-hour",
+        level: "warn",
+        usedPct: 92,
+        resetsAtMs: today,
+        now: NOW,
+        locale: "en-US",
+      }),
+    ).toBe("Claude (work) · 5-hour window 92% used, resets 20:52");
   });
 
   it("ambient_quota_none_for_stale_or_missing_reading", () => {
@@ -131,7 +157,7 @@ describe("the ambient quota notice (ADR-0059 F)", () => {
       pick([usage({ windows: [{ id: "five_hour", label: "5-hour", status: "allowed_warning" }] })]),
     ).toBeNull();
     expect(
-      pickQuotaNotice({ usages: [usage()], accountProvider: undefined, now: NOW, dismissed: new Set() }),
+      pickQuotaNotice({ usages: [usage()], accountProvider: undefined, providerLabel: "Claude", now: NOW, dismissed: new Set() }),
     ).toBeNull();
   });
 
@@ -151,13 +177,13 @@ describe("the ambient quota notice (ADR-0059 F)", () => {
     // every account at or over the threshold: the most used one is named
     const warn = pick([usage({ windows: [win({ usedPct: 95 })] }), second(91)]);
     expect(warn?.level).toBe("warn");
-    expect(warn?.text).toBe(`main: 5-hour window 95% used, resets ${localTime(NOW + 2 * HOUR)}`);
+    expect(warn?.text).toBe(`Claude (main) · 5-hour window 95% used, resets ${localTime(NOW + 2 * HOUR)}`);
     // the lower level wins: one full and one warn account is a warn pool
     expect(pick([usage({ windows: [win({ usedPct: 100 })] }), second(91)])?.level).toBe("warn");
     expect(pick([usage({ windows: [win({ usedPct: 100 })] }), second(100)])?.level).toBe("full");
     // a single account warns on its own and is not named
     const single = pick([usage({ windows: [win({ usedPct: 95 })] })]);
-    expect(single?.text).toBe(`5-hour window 95% used, resets ${localTime(NOW + 2 * HOUR)}`);
+    expect(single?.text).toBe(`Claude · 5-hour window 95% used, resets ${localTime(NOW + 2 * HOUR)}`);
     // an account with no fresh reading is unknown headroom, not headroom: the fresh one still warns
     expect(pick([usage({ windows: [win({ usedPct: 95 })] }), second(50, { stale: true })])?.level).toBe("warn");
   });
