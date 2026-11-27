@@ -4,7 +4,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ChangeList, ConsentSummary, linkWarningText } from "@/components/plugins/consent-summary";
 import { OwnerBadge } from "@/components/plugins/owner-badge";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
-import { SettingsEmptyCard } from "@/components/settings/settings-layout";
+import { SettingsEmptyCard, SettingsGroup, SettingsList, SettingsListRow } from "@/components/settings/settings-layout";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import { FormError } from "@/components/ui/form-error";
 import { Input } from "@/components/ui/input";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { Switch } from "@/components/ui/switch";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { useLastDefined } from "@/hooks/use-last-defined";
 import { usePluginActions, usePlugins } from "@/hooks/use-plugins";
@@ -176,29 +177,31 @@ function PluginsSection(_props: SettingsSectionContext) {
         {notice && <Alert variant="success" testId="plugins-notice" description={notice} />}
 
         {installOpen && (
-          <form className="flex flex-col gap-2 rounded-xl border bg-card p-3" data-testid="plugin-install-form" onSubmit={handleInstall}>
-            <Input
-              aria-label="Plugin source"
-              data-testid="plugin-install-source"
-              placeholder={SOURCE_PLACEHOLDER}
-              value={source}
-              autoComplete="off"
-              spellCheck={false}
-              onChange={(e) => setSource(e.target.value)}
-            />
-            <p className="text-ui-sm text-foreground-subtlest">
-              A plugin directory, a Git URL pinned to a full commit, or an archive pinned to its sha256. It stays disabled until you enable it.
-            </p>
-            <FormError message={installError} testId="plugin-install-error" />
-            <div className="flex justify-end gap-2">
-              <Button type="button" variant="ghost" size="sm" data-testid="plugin-install-cancel" onClick={() => setInstallOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" size="sm" data-testid="plugin-install-submit" disabled={!source.trim() || installing}>
-                {installing ? "Installing…" : "Install"}
-              </Button>
-            </div>
-          </form>
+          <SettingsGroup>
+            <form className="flex flex-col gap-2 px-4 py-3" data-testid="plugin-install-form" onSubmit={handleInstall}>
+              <Input
+                aria-label="Plugin source"
+                data-testid="plugin-install-source"
+                placeholder={SOURCE_PLACEHOLDER}
+                value={source}
+                autoComplete="off"
+                spellCheck={false}
+                onChange={(e) => setSource(e.target.value)}
+              />
+              <p className="text-ui-sm text-foreground-subtlest">
+                A plugin directory, a Git URL pinned to a full commit, or an archive pinned to its sha256. It stays disabled until you enable it.
+              </p>
+              <FormError message={installError} testId="plugin-install-error" />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" size="sm" data-testid="plugin-install-cancel" onClick={() => setInstallOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" size="sm" data-testid="plugin-install-submit" disabled={!source.trim() || installing}>
+                  {installing ? "Installing…" : "Install"}
+                </Button>
+              </div>
+            </form>
+          </SettingsGroup>
         )}
 
         {plugins === null ? (
@@ -223,7 +226,7 @@ function PluginsSection(_props: SettingsSectionContext) {
             }
           />
         ) : (
-          <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3" data-testid="plugins-list">
+          <SettingsList data-testid="plugins-list">
             {plugins.map((p) => (
               <PluginRow
                 key={p.id}
@@ -257,7 +260,7 @@ function PluginsSection(_props: SettingsSectionContext) {
                 }}
               />
             ))}
-          </ul>
+          </SettingsList>
         )}
       </section>
 
@@ -511,10 +514,10 @@ function PluginRow({
   const linkWarning = p.sourceKind === "link" ? linkWarningText(p.consent) : null;
   const disabled = locked || busy;
   return (
-    <li
+    <SettingsListRow
       data-testid={`plugin-row-${p.id}`}
       data-expanded={expanded}
-      className="flex flex-col gap-2 rounded-lg px-2 py-1.5 hover:bg-hover"
+      className="flex flex-col gap-2 hover:bg-hover"
     >
       <div className="flex items-start gap-2">
         <Button
@@ -558,15 +561,16 @@ function PluginRow({
           {error && <FormError message={error} size="sm" testId={`plugin-row-error-${p.id}`} />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          {p.enabled ? (
-            <Button type="button" variant="outline" size="sm" data-testid={`plugin-disable-${p.id}`} disabled={disabled} title={lockedReason ?? undefined} onClick={onDisable}>
-              Disable
-            </Button>
-          ) : (
-            <Button type="button" size="sm" data-testid={`plugin-enable-${p.id}`} disabled={disabled} title={lockedReason ?? undefined} onClick={onEnable}>
-              Enable
-            </Button>
-          )}
+          {/* The row's enabled state as one Switch (D4): turning it on opens the same consent step the Enable
+              button opened (nothing is loaded until confirmed), turning it off disables as the button did. */}
+          <Switch
+            data-testid={`plugin-${p.enabled ? "disable" : "enable"}-${p.id}`}
+            aria-label={`Enable ${p.name}`}
+            checked={p.enabled}
+            disabled={disabled}
+            title={lockedReason ?? undefined}
+            onCheckedChange={(next) => (next ? onEnable() : onDisable())}
+          />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button type="button" variant="ghost" size="icon-xs" aria-label={`${p.name} actions`} data-testid={`plugin-menu-${p.id}`} className="shrink-0">
@@ -599,7 +603,7 @@ function PluginRow({
         </div>
       </div>
       {expanded && <PluginDetail plugin={p} locked={locked} onReviewUpdate={onReviewUpdate} />}
-    </li>
+    </SettingsListRow>
   );
 }
 
@@ -701,7 +705,7 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
 registerSettingsSection({
   id: PLUGINS_SECTION_ID,
   label: "Plugins",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Agents",
   description: "Installed plugins and what they add.",
   order: 179,
   icon: <Icons.plugin aria-hidden className="size-3.5" />,

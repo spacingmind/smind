@@ -43,10 +43,10 @@ function renderSection() {
 }
 
 describe("saved-grants-section", () => {
-  it("registers under Profiles & providers", () => {
+  it("registers under Safety & usage", () => {
     const s = listSettingsSections().find((x) => x.id === "saved-grants");
     expect(s?.label).toBe("Saved grants");
-    expect(s?.groupLabel).toBe("Profiles & providers");
+    expect(s?.groupLabel).toBe("Safety & usage");
   });
 
   it("says so when nothing is saved", async () => {
@@ -141,5 +141,38 @@ describe("saved-grants-section", () => {
     await flush();
     expect(screen.getByTestId("grants-error")).toBeInTheDocument();
     expect(screen.queryByTestId("grants-empty")).toBeNull();
+  });
+
+  it("ui_cleanup_b2_saved_grants_one_group_row_per_grant", async () => {
+    const section = listSettingsSections().find((s) => s.id === "saved-grants");
+    if (!section) throw new Error("saved-grants did not register");
+    const client = new FakeWsClient();
+    const mounted = render(<>{section.render({ client: client as never, events: null })}</>);
+    client.nth("permission.grants.list").resolve({
+      grants: [grant(), grant({ id: 2, command: "make build" }), grant({ id: 3, command: "make test" })],
+    });
+    await flush();
+
+    // One group card, one row per grant -- not one card per grant.
+    const groups = document.querySelectorAll("[data-slot='settings-group']");
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.querySelectorAll("[data-slot='settings-row']")).toHaveLength(3);
+    for (const id of [1, 2, 3]) {
+      expect(within(screen.getByTestId(`grant-${id}`)).getByTestId(`grant-${id}-revoke`)).toBeInTheDocument();
+    }
+    // No grant hand-rolls its own rounded box outside the group's card.
+    expect(
+      Array.from(document.querySelectorAll(".rounded-xl")).filter((el) => !el.closest("[data-slot='settings-group']")),
+    ).toHaveLength(0);
+
+    mounted.unmount();
+
+    const client2 = new FakeWsClient();
+    render(<>{section.render({ client: client2 as never, events: null })}</>);
+    client2.nth("permission.grants.list").resolve({ grants: [] });
+    await flush();
+
+    expect(document.querySelector("[data-slot='settings-empty-card']")).not.toBeNull();
+    expect(screen.getByTestId("grants-empty")).toHaveTextContent("Nothing saved");
   });
 });

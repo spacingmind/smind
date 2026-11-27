@@ -52,6 +52,21 @@ describe("Settings → GitHub", () => {
     expect(listSettingsSections().map((s) => s.id)).toContain("github");
   });
 
+  it("ui_cleanup_b2_github_rows_use_settings_rows", async () => {
+    const signedIn = await mount(status());
+    const host = screen.getByTestId("github-host-github.com");
+    expect(host.getAttribute("data-slot")).toBe("settings-row");
+    expect(host.closest('[data-slot="settings-group"]')).not.toBeNull();
+    // no hand-rolled card boxes: every rounded-xl element is a settings-group card or the empty card
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>(".rounded-xl"))) {
+      const inGroup = el.closest('[data-slot="settings-group"]') !== null;
+      const isEmptyCard = el.getAttribute("data-slot") === "settings-empty-card";
+      expect(inGroup || isEmptyCard, el.outerHTML.slice(0, 120)).toBe(true);
+    }
+    expect(screen.getByTestId("settings-section-github").className).toContain("gap-6");
+    signedIn.view.unmount();
+  });
+
   it("shows each status state", async () => {
     const signedIn = await mount(status());
     expect(screen.getByTestId("github-host-github.com")).toHaveTextContent("octo");

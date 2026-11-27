@@ -323,6 +323,24 @@ describe("connections-section (desktop build)", () => {
     return { desktop, order };
   }
 
+  it("ui_cleanup_b2_connections_uses_switch_and_confirm_dialog", async () => {
+    await renderManage(MANAGED_RUNNING);
+    const toggle = screen.getByTestId("connection-manage-toggle");
+    // the shared Switch, not a hand-rolled button: every role=switch element is the ui primitive
+    expect(toggle.getAttribute("data-slot")).toBe("switch");
+    for (const el of Array.from(document.querySelectorAll('[role="switch"]'))) {
+      expect(el.getAttribute("data-slot")).toBe("switch");
+    }
+
+    fireEvent.click(toggle);
+    await flush();
+    const dialog = screen.getByTestId("connection-manage-confirm");
+    expect(dialog.getAttribute("data-slot")).toBe("dialog-content");
+    expect(dialog).toHaveAttribute("role", "dialog");
+    // the hand-built alertdialog box (rounded-xl ... p-3) is gone
+    expect(document.querySelector('div[role="alertdialog"]')).toBeNull();
+  });
+
   it("Manage this computer's daemon toggle confirms before disabling while the app owns a running daemon", async () => {
     const { desktop } = await renderManage(MANAGED_RUNNING);
     const toggle = screen.getByTestId("connection-manage-toggle");

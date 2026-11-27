@@ -46,11 +46,11 @@ function renderSection(client: FakeWsClient) {
 }
 
 describe("usage-section", () => {
-  it("registers as the usage section in Agents & providers", () => {
+  it("registers as the usage section in Safety & usage", () => {
     const section = listSettingsSections().find((s) => s.id === "usage");
     expect(section).toBeDefined();
     expect(section?.label).toBe("Usage");
-    expect(section?.groupLabel).toBe("Profiles & providers");
+    expect(section?.groupLabel).toBe("Safety & usage");
   });
 
   it("defaults to scope runs, groupBy task and a 7 day since", async () => {
@@ -201,6 +201,38 @@ describe("usage-section", () => {
 
     expect(screen.getByTestId("usage-empty")).toBeInTheDocument();
     expect(screen.getByText("No usage recorded in this range")).toBeInTheDocument();
+  });
+
+  it("ui_cleanup_b2_usage_uses_shared_primitives", async () => {
+    const section = listSettingsSections().find((s) => s.id === "usage");
+    if (!section) throw new Error("usage section did not register");
+    const client = new FakeWsClient();
+    const mounted = render(<>{section.render({ client: client as never, events: null })}</>);
+    client.nth("usage.summary").resolve([runRow()]);
+    await flush();
+
+    const root = screen.getByTestId("settings-section-usage");
+    expect(root.className).toContain("gap-6");
+    expect(root.className).not.toContain("gap-8");
+
+    // Both blocks are settings groups now, with the filter row and the
+    // table inside the token group's card (no card wrapper of its own).
+    expect(screen.getByTestId("settings-plan-usage")).toHaveAttribute("data-slot", "settings-group");
+    const tokens = screen.getByTestId("settings-token-usage");
+    expect(tokens).toHaveAttribute("data-slot", "settings-group");
+    expect(document.querySelectorAll("[data-slot='settings-group']").length).toBeGreaterThanOrEqual(2);
+    expect(within(tokens).getByTestId("usage-refresh")).toBeInTheDocument();
+    expect(within(tokens).getByTestId("settings-usage-scope-runs")).toBeInTheDocument();
+    expect(within(tokens).getByTestId("usage-row-runs-11")).toBeInTheDocument();
+
+    mounted.unmount();
+
+    const client2 = new FakeWsClient();
+    render(<>{section.render({ client: client2 as never, events: null })}</>);
+    client2.nth("usage.summary").resolve([]);
+    await flush();
+
+    expect(screen.getByTestId("usage-empty")).toHaveAttribute("data-slot", "settings-empty-card");
   });
 
   it("shows an error when usage.summary fails", async () => {

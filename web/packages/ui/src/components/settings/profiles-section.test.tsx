@@ -93,6 +93,25 @@ describe("profiles-section", () => {
     expect(screen.getByText("UI work")).toBeInTheDocument();
   });
 
+  it("ui_cleanup_b2_profiles_use_settings_list", async () => {
+    const { view } = await renderWithProfiles([PROFILE, { ...PROFILE, ID: 2, Name: "Second profile" }]);
+
+    // One list card (the shared shell), not one card per row.
+    const lists = view.container.querySelectorAll("[data-slot='settings-list']");
+    expect(lists).toHaveLength(1);
+    const rows = lists[0]!.querySelectorAll("[data-slot='settings-list-row']");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveAttribute("data-testid", "profile-row-1");
+    expect(rows[1]).toHaveAttribute("data-testid", "profile-row-2");
+    // The rows take the shell's own padding, not the old hand-rolled one.
+    for (const row of rows) {
+      expect(row.className).not.toContain("px-2");
+      expect(row.className).not.toContain("py-1.5");
+      expect(row.className).toContain("px-4");
+      expect(row.className).toContain("py-3");
+    }
+  });
+
   it("the header's + New profile button opens the add card at the top of the list, and creating a profile through it appears below", async () => {
     const { daemon } = await renderWithProfiles([PROFILE]);
 

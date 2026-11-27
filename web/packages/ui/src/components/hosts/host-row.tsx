@@ -53,7 +53,6 @@ export function HostRow({
       <SettingsGroup>
         <SettingsRow
           testId={`host-header-${alias}`}
-          className="flex-row items-center justify-between gap-3"
           label={
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <span className="truncate text-ui-base font-medium text-foreground">{alias}</span>
@@ -107,7 +106,6 @@ export function HostRow({
         />
         <SettingsRow
           testId={`host-dir-out-${alias}`}
-          className="flex-row items-center justify-between gap-3"
           label={`This host → ${alias}`}
           description="Use its workspaces and agents from here"
           control={
@@ -118,7 +116,6 @@ export function HostRow({
         />
         <SettingsRow
           testId={`host-dir-in-${alias}`}
-          className="flex-row items-center justify-between gap-3"
           label={`${alias} → this host`}
           description={
             host.inbound.enabled ? (
@@ -150,13 +147,12 @@ export function HostRow({
         {host.state === "approved" && (
           <SettingsRow
             testId={`host-labels-row-${alias}`}
-            className="flex-row items-center justify-between gap-3"
             label="Labels"
             description={
               Object.keys(host.labels ?? {}).length > 0 ? (
                 <span data-testid={`host-labels-${alias}`} className="mt-1 flex flex-wrap gap-1">
                   {rowsFromLabels(host.labels).map((l) => (
-                    <span key={l.key} className="whitespace-nowrap rounded-md bg-muted px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted">
+                    <span key={l.key} className="min-w-0 break-all rounded-md bg-muted px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted">
                       {l.key}:{l.value}
                     </span>
                   ))}

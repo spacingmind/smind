@@ -85,15 +85,15 @@ function ProvidersSection({ client }: SettingsSectionContext) {
   );
 }
 
-// Nests under "Agents & providers" (run-config IA plan) alongside Agents
-// (order 175) -- order 180 keeps it immediately after Agents, matching
+// Nests under "Agents" (UI cleanup B2 D2) alongside Profiles
+// (order 175) -- order 176 keeps it immediately after Profiles, matching
 // the plan's "sub-items: Agents, Providers" sequence.
 registerSettingsSection({
   id: "providers",
   label: "Providers",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Agents",
   description: "Connect provider accounts and add extra Claude Code or Codex logins.",
-  order: 180,
+  order: 176,
   icon: <Icons.credentials aria-hidden className="size-3.5" />,
   render: (ctx) => <ProvidersSection {...ctx} />,
 });

@@ -220,6 +220,27 @@ describe("mcp-servers-section", () => {
     expect(within(row).getByTestId("mcp-enabled-1")).toHaveAttribute("aria-checked", "false");
   });
 
+  it("ui_cleanup_b2_mcp_enabled_is_a_switch", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("mcp.list").resolve([STDIO_SERVER, HTTP_SERVER]);
+    await flush();
+
+    for (const m of [STDIO_SERVER, HTTP_SERVER]) {
+      const row = screen.getByTestId(`mcp-row-${m.id}`);
+      // The enabled control is the shared Switch, not a Checkbox.
+      const control = within(row).getByTestId(`mcp-enabled-${m.id}`);
+      expect(control).toHaveAttribute("data-slot", "switch");
+      expect(within(row).getByRole("switch", { name: `${m.name} enabled` })).toBe(control);
+      expect(within(row).queryByRole("checkbox")).toBeNull();
+    }
+
+    // Toggling it reaches the same update call the checkbox made.
+    fireEvent.click(screen.getByTestId("mcp-enabled-1"));
+    await flush();
+    expect(client.nth("mcp.setEnabled").params).toEqual({ id: 1, enabled: false });
+  });
+
   it("delete asks for confirmation then calls mcp.delete", async () => {
     const client = new FakeWsClient();
     renderSection(client);

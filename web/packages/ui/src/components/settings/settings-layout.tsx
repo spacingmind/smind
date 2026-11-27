@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -121,5 +121,53 @@ export function SettingsStatStrip({
         ))}
       </div>
     </div>
+  );
+}
+
+/** One list card for a Settings section: the rows are `<li>`s divided by hairlines, so a list reads as a single card instead of one card per row. */
+export function SettingsList({
+  children,
+  className,
+  testId,
+  ...rest
+}: {
+  children: ReactNode;
+  className?: string;
+  testId?: string;
+} & Omit<ComponentProps<"ul">, "className" | "children">) {
+  return (
+    <ul
+      data-testid={testId}
+      data-slot="settings-list"
+      className={cn(
+        "m-0 list-none overflow-hidden rounded-xl border border-border bg-card p-0 [&>*+*]:border-t [&>*+*]:border-border",
+        className,
+      )}
+      {...rest}
+    >
+      {children}
+    </ul>
+  );
+}
+
+export function SettingsListRow({
+  children,
+  className,
+  testId,
+  ...rest
+}: {
+  children: ReactNode;
+  className?: string;
+  testId?: string;
+} & Omit<ComponentProps<"li">, "className" | "children">) {
+  return (
+    <li
+      data-testid={testId}
+      data-slot="settings-list-row"
+      className={cn("px-4 py-3", className)}
+      {...rest}
+    >
+      {children}
+    </li>
   );
 }

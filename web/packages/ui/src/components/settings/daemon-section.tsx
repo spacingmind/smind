@@ -101,7 +101,7 @@ function DaemonSection() {
   const locked = busy || manageOff;
 
   return (
-    <div className="flex flex-col gap-3" data-testid="settings-section-daemon">
+    <div className="flex flex-col gap-6" data-testid="settings-section-daemon">
       <SettingsGroup title="Daemon">
         <SettingsRow
           label="Status"
@@ -124,8 +124,8 @@ function DaemonSection() {
         />
         <SettingsRow
           label="Log file"
-          control={
-            <span data-testid="daemon-log-path" className="block truncate font-mono text-ui-sm">
+          description={
+            <span data-testid="daemon-log-path" className="block min-w-0 font-mono text-ui-sm break-all text-foreground-muted">
               {status.logPath ?? "—"}
             </span>
           }
