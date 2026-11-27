@@ -58,14 +58,14 @@ tests:
   - { name: plugins_home_switch_replaces_the_alert, run: "cd web/packages/ui && bunx vitest run src/components/settings/config-homes.test.tsx -t plugins_home_switch_replaces_the_alert", timeoutSec: 900 }
   - { name: hosts_off_card_becomes_the_fleet_switch_with_restart_notice, run: "cd web/packages/ui && bunx vitest run src/components/settings/config-homes.test.tsx -t hosts_off_card_becomes_the_fleet_switch_with_restart_notice", timeoutSec: 900 }
   - { name: learning_kill_switch_row_replaces_the_alert, run: "cd web/packages/ui && bunx vitest run src/components/settings/config-homes.test.tsx -t learning_kill_switch_row_replaces_the_alert", timeoutSec: 900 }
-  - { name: UC5-01, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-01 --project=chromium-desktop", timeoutSec: 1200 }
-  - { name: UC5-02, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-02 --project=chromium-desktop", timeoutSec: 1200 }
-  - { name: UC5-03, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-03 --project=chromium-desktop", timeoutSec: 1200 }
-  - { name: UC5-04, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-04 --project=chromium-desktop", timeoutSec: 1200 }
-  - { name: UC5-05, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-05 --project=chromium-desktop", timeoutSec: 1200 }
-  - { name: UC5-06, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-06 --project=chromium-desktop", timeoutSec: 1200 }
-  - { name: UC5-07, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-07 --project=chromium-desktop", timeoutSec: 1200 }
-  - { name: UC5-08, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-08 --project=chromium-desktop", timeoutSec: 1200 }
+  - { name: UC5-01, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-01 --project=light-1280", timeoutSec: 1200 }
+  - { name: UC5-02, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-02 --project=light-1280", timeoutSec: 1200 }
+  - { name: UC5-03, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-03 --project=light-1280", timeoutSec: 1200 }
+  - { name: UC5-04, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-04 --project=light-1280", timeoutSec: 1200 }
+  - { name: UC5-05, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-05 --project=light-1280", timeoutSec: 1200 }
+  - { name: UC5-06, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-06 --project=light-1280", timeoutSec: 1200 }
+  - { name: UC5-07, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-07 --project=light-1280", timeoutSec: 1200 }
+  - { name: UC5-08, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/config-switches.spec.ts -g UC5-08 --project=light-1280", timeoutSec: 1200 }
   - { name: hygiene_and_scope, run: "go test ./internal/hygiene/ -count=1 && test -z \"$(git diff origin/develop...HEAD --name-only -- internal cmd mobile)\"", timeoutSec: 900 }
 mutations:
   - { id: M1, file: web/packages/ui/src/components/settings/config-switch-row.tsx, change: "the switch is rendered when writable is false", expectFail: [config_switch_shown_only_when_writable, config_read_only_copy_when_not_writable] }

@@ -55,10 +55,14 @@ GLM peers write the code from step briefs (A row + hook + keys + bridge + tests;
 
 ## Progress
 
-- [ ] spec + contract
-- [ ] A, B, C
-- [ ] review, mutations, validator, frames
+- [x] spec + contract
+- [x] A, B, C
+- [x] review, mutations, validator, frames (web harness)
 
 ## Validation
 
-(filled at PR time)
+- Unit: 20 named tests plus 3 extra (`config_refusal_without_a_dialog_shows_an_alert`, `config_saved_restart_notice_opens_daemon_settings`, `config_open_daemon_settings_is_offered_only_on_desktop`); full UI suite 537 files / 5911 tests; `bunx tsc -b` clean; `sh scripts/verify.sh` PASS; full e2e matrix `E2E_FULL=1`: 427 passed, 49 skipped, 0 failed; UC5-01 and UC5-02 write the real daemon's config.yaml and assert the file changed and `# keep me` survived.
+- Mutations by the Lead on committed code and by the validator: M1 (first run killed 2 of its 3 named tests; `config_switch_shown_only_when_writable` only checked the positive case, so a not-writable case was added), M2 to M6 each fail their named test.
+- Frame review found two defects, fixed: the notes (restart line, refusal) sat beside the switch because `SettingsRow` children share its flex row (now under the row), and "Open Daemon settings" does nothing on web because the Daemon section is desktop-only (now offered only on desktop).
+- Frames: all WEB-HARNESS (the macOS screen was locked, checked with `ioreg`), light and dark, 1280x800 and 800x520, inside the Settings modal (the Automations page frames are the page itself); 17 states, two contact sheets, 0 broken cells.
+- Wire gap noted, not blocking: the confirm sentences are not on the wire; the UI copy is kept equal by a source test.
