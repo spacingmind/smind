@@ -49,6 +49,10 @@ M1 the switch is rendered when `writable` is false; M2 `config.set` is sent with
 
 States: Automations off -> switch, confirm dialog, on, paused/resumed; Plugins off/on; Hosts off + switch + restart notice; Learning kill switch + restart notice; relay-style read-only row; env-overridden disabled; refusal error. Light and dark, 1280x800 and 800x520, inside the Settings modal. REAL-WINDOW with the audit app against a dogfood daemon; parked if the screen is locked or disk is short.
 
+## Hosts follow-up (Supervisor, after the real-window pass)
+
+The Fleet switch is a normal card at the top of Hosts (never inside an empty-state card); a state line says where the fleet stands from two facts (the daemon answers `fleet.host.list` = running; `config.get` value = what the file says): "Fleet is off.", "Fleet turns on after the daemon restarts.", "Fleet is running.", "Fleet turns off after the daemon restarts." (never "off" next to an on switch); the dashed "No hosts paired" card only when the fleet is running and has no hosts; "Open Daemon settings" is a link-styled button, desktop only, also next to the pending-restart line; "sMind" capitalised in the Hosts intro. Named tests: `hosts_fleet_switch_is_a_normal_card_at_the_top`, `hosts_state_line_off`, `hosts_state_line_pending_restart_after_turning_on`, `hosts_state_line_pending_restart_after_turning_off`, `hosts_state_line_running`, `hosts_empty_card_only_when_running_with_no_hosts`, `hosts_pending_restart_offers_open_daemon_settings_on_desktop_only`, `config_open_daemon_settings_looks_like_a_link`. Learning has no header or state line, so only its row's restart note applies.
+
 ## Staffing
 
 GLM peers write the code from step briefs (A row + hook + keys + bridge + tests; B the homes + tests; C e2e + frames). Lead: spec, contract, review, mutations, frames, PR.

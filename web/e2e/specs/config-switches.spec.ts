@@ -168,10 +168,14 @@ test('UC5-03 fleet on the real daemon shows the restart notice', async ({ app },
   await app.openApp()
   await openSettings(page, 'hosts')
   const id = 'config-fleet-enabled'
-  await expect(page.getByTestId('hosts-off')).toBeVisible()
+  await expect(page.getByTestId('hosts-fleet-state')).toHaveText('Fleet is off.')
+  await expect(page.getByTestId('hosts-empty')).toHaveCount(0)
   await shot(page, testInfo, 'UC5-03-off')
   await (await turnOn(page, id)).click()
   await expect(page.getByTestId(`${id}-restart`)).toContainText('Takes effect after the daemon restarts')
+  // saved, but the daemon only starts the fleet after a restart: never "off" next to an on switch
+  await expect(page.getByTestId('hosts-fleet-state')).toHaveText('Fleet turns on after the daemon restarts.')
+  await expect(page.getByText('Fleet is off')).toHaveCount(0)
   await expect.poll(() => readConfig(file)).toContain('fleet:')
   expect(readConfig(file)).toMatch(/enabled: true/)
   await shot(page, testInfo, 'UC5-03-on')
