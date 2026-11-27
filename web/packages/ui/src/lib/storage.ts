@@ -47,6 +47,8 @@ export const STORAGE_KEYS = {
   interfaceMode: "smind:interface-mode",
   /** Per workspace, the starting ratio of a new split per direction (D3); see lib/split-ratios.ts. */
   splitRatios: "smind:split-ratios",
+  /** Ambient quota notices the person dismissed (ADR-0059 F); see lib/quota-notice-store.ts. */
+  dismissedQuotaNotices: "smind:dismissed-quota-notices",
 } as const;
 
 /**
