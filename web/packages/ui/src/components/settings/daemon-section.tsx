@@ -124,8 +124,8 @@ function DaemonSection() {
         />
         <SettingsRow
           label="Log file"
-          control={
-            <span data-testid="daemon-log-path" className="block truncate font-mono text-ui-sm">
+          description={
+            <span data-testid="daemon-log-path" className="block min-w-0 font-mono text-ui-sm break-all text-foreground-muted">
               {status.logPath ?? "—"}
             </span>
           }

@@ -152,7 +152,7 @@ export function HostRow({
               Object.keys(host.labels ?? {}).length > 0 ? (
                 <span data-testid={`host-labels-${alias}`} className="mt-1 flex flex-wrap gap-1">
                   {rowsFromLabels(host.labels).map((l) => (
-                    <span key={l.key} className="whitespace-nowrap rounded-md bg-muted px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted">
+                    <span key={l.key} className="min-w-0 break-all rounded-md bg-muted px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted">
                       {l.key}:{l.value}
                     </span>
                   ))}
