@@ -231,9 +231,9 @@ function ValidityAlert({ status }: { status: PolicyStatus | undefined }) {
 registerSettingsSection({
   id: "permission-policy",
   label: "Permission policy",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Safety & usage",
   description: "Rules that auto-allow or deny agent permission requests. Read-only.",
-  order: 195,
+  order: 190,
   icon: <Icons.permission aria-hidden className="size-3.5" />,
   render: (ctx) => <PolicySection {...ctx} />,
 });

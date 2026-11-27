@@ -40,9 +40,9 @@ function AutomationsLinkSection({ closeSettings }: SettingsSectionContext) {
 registerSettingsSection({
   id: AUTOMATIONS_SECTION_ID,
   label: "Automations",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Agents",
   description: "Rules that start a task when a signal fires.",
-  order: 179,
+  order: 180,
   icon: <Icons.automation aria-hidden className="size-3.5" />,
   render: (ctx) => <AutomationsLinkSection {...ctx} />,
 });

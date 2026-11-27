@@ -46,11 +46,11 @@ function renderSection(client: FakeWsClient) {
 }
 
 describe("usage-section", () => {
-  it("registers as the usage section in Agents & providers", () => {
+  it("registers as the usage section in Safety & usage", () => {
     const section = listSettingsSections().find((s) => s.id === "usage");
     expect(section).toBeDefined();
     expect(section?.label).toBe("Usage");
-    expect(section?.groupLabel).toBe("Profiles & providers");
+    expect(section?.groupLabel).toBe("Safety & usage");
   });
 
   it("defaults to scope runs, groupBy task and a 7 day since", async () => {

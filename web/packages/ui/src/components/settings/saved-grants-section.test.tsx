@@ -43,10 +43,10 @@ function renderSection() {
 }
 
 describe("saved-grants-section", () => {
-  it("registers under Profiles & providers", () => {
+  it("registers under Safety & usage", () => {
     const s = listSettingsSections().find((x) => x.id === "saved-grants");
     expect(s?.label).toBe("Saved grants");
-    expect(s?.groupLabel).toBe("Profiles & providers");
+    expect(s?.groupLabel).toBe("Safety & usage");
   });
 
   it("says so when nothing is saved", async () => {

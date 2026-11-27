@@ -123,9 +123,9 @@ function SavedGrantsSection(_ctx: SettingsSectionContext) {
 registerSettingsSection({
   id: "saved-grants",
   label: "Saved grants",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Safety & usage",
   description: "Commands you chose to always allow in a project. Revoke any of them.",
-  order: 196,
+  order: 191,
   icon: <Icons.permission aria-hidden className="size-3.5" />,
   render: (ctx) => <SavedGrantsSection {...ctx} />,
 });

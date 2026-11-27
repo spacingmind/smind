@@ -558,7 +558,7 @@ function ProfileActionsMenu({
 registerSettingsSection({
   id: "agents",
   label: "Profiles",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Agents",
   description: "Named bundles of provider, mode and thinking level for new tasks.",
   order: 175,
   icon: <Icons.agent aria-hidden className="size-3.5" />,

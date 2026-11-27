@@ -426,9 +426,9 @@ function UsageSection({ client }: SettingsSectionContext) {
 registerSettingsSection({
   id: "usage",
   label: "Usage",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Safety & usage",
   description: "Plan windows and token usage.",
-  order: 190,
+  order: 193,
   icon: <Icons.usage aria-hidden className="size-3.5" />,
   render: (ctx) => <UsageSection {...ctx} />,
 });

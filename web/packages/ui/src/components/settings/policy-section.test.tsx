@@ -71,11 +71,11 @@ function renderSection() {
 }
 
 describe("policy-section", () => {
-  it("registers as the permission-policy section in Agents & providers", () => {
+  it("registers as the permission-policy section in Safety & usage", () => {
     const section = listSettingsSections().find((s) => s.id === "permission-policy");
     expect(section).toBeDefined();
     expect(section?.label).toBe("Permission policy");
-    expect(section?.groupLabel).toBe("Profiles & providers");
+    expect(section?.groupLabel).toBe("Safety & usage");
   });
 
   it("policy settings page is read-only", async () => {

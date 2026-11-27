@@ -701,7 +701,7 @@ function PluginDetail({ plugin: p, locked, onReviewUpdate }: { plugin: PluginInf
 registerSettingsSection({
   id: PLUGINS_SECTION_ID,
   label: "Plugins",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Agents",
   description: "Installed plugins and what they add.",
   order: 179,
   icon: <Icons.plugin aria-hidden className="size-3.5" />,

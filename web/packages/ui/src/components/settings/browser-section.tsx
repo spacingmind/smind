@@ -297,9 +297,9 @@ function BrowserSection() {
 registerSettingsSection({
   id: "browser",
   label: "Browser",
-  groupLabel: "Profiles & providers",
+  groupLabel: "Safety & usage",
   description: "Let agents open and read pages on this machine, per workspace.",
-  order: 197,
+  order: 192,
   icon: <Icons.web aria-hidden className="size-3.5" />,
   render: () => <BrowserSection />,
 });
