@@ -313,6 +313,7 @@ function FleetSwitch() {
         label="Fleet"
         description="Connect other hosts so tasks can run on them."
         testId="config-fleet-enabled"
+        noRestartNotes
       />
     </SettingsGroup>
   );

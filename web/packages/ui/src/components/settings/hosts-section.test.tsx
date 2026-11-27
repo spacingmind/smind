@@ -101,6 +101,22 @@ describe("settings-hosts section", () => {
     expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet turns off after the daemon restarts.");
   });
 
+  it("hosts_pending_restart_is_said_once_not_twice", async () => {
+    try {
+      desktopFlag = true;
+      const d = withFleetConfig(new FleetDaemon(), true);
+      d.off = true;
+      await renderSection(d);
+      await screen.findByTestId("hosts-fleet-state");
+      // The state line is the one place that says what a restart changes: the switch row adds neither its own
+      // restart line nor a second link (frame review of the real window showed both, twice).
+      expect(screen.queryByTestId("config-fleet-enabled-restart")).toBeNull();
+      expect(screen.getAllByRole("button", { name: /Open Daemon settings/ })).toHaveLength(1);
+    } finally {
+      desktopFlag = false;
+    }
+  });
+
   it("hosts_pending_restart_offers_open_daemon_settings_on_desktop_only", async () => {
     try {
       desktopFlag = true;

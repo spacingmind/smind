@@ -192,7 +192,10 @@ describe("config homes: plugins, fleet, learning", () => {
     renderWithDaemon(<>{section.render({ client: d.daemon.client, events: d.daemon.events })}</>, d.daemon);
     await waitFor(() => expect(screen.getByTestId("config-fleet-enabled-switch")).toBeInTheDocument());
     expect(screen.queryByTestId("hosts-off")).toBeNull();
-    expect(screen.getByTestId("settings-section-hosts")).toHaveTextContent("Takes effect after the daemon restarts");
+    // Hosts has its own state line (the one place that says what a restart changes); the confirm says it too.
+    expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet is off.");
+    fireEvent.click(screen.getByTestId("config-fleet-enabled-switch"));
+    expect(await screen.findByTestId("config-fleet-enabled-dialog")).toHaveTextContent("applies after the daemon restarts");
     expect(screen.getByTestId("settings-section-hosts")).not.toHaveTextContent("config.yaml");
   });
 

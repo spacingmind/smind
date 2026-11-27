@@ -50,6 +50,7 @@ export function ConfigSwitchRow({
   description,
   testId,
   flush,
+  noRestartNotes,
 }: {
   configKey: WritableConfigKey;
   label: string;
@@ -57,12 +58,14 @@ export function ConfigSwitchRow({
   testId: string;
   /** No side padding: for a row placed inside a card that already pads its content. */
   flush?: boolean;
+  /** The page already says what a restart changes (Hosts has its own state line): no restart line or link here. */
+  noRestartNotes?: boolean;
 }) {
   if (!isWritableConfigKey(configKey)) return null;
-  return <Row configKey={configKey} label={label} description={description} testId={testId} flush={flush} />;
+  return <Row configKey={configKey} label={label} description={description} testId={testId} flush={flush} noRestartNotes={noRestartNotes} />;
 }
 
-function Row({ configKey, label, description, testId, flush }: { configKey: WritableConfigKey; label: string; description: ReactNode; testId: string; flush?: boolean }) {
+function Row({ configKey, label, description, testId, flush, noRestartNotes }: { configKey: WritableConfigKey; label: string; description: ReactNode; testId: string; flush?: boolean; noRestartNotes?: boolean }) {
   const px = flush ? "px-0" : undefined;
   const { view, isPending, error } = useConfigKey(configKey);
   const set = useConfigSet();
@@ -121,13 +124,14 @@ function Row({ configKey, label, description, testId, flush }: { configKey: Writ
     void send(next);
   }
 
-  const restartLine = view.restart ? (
+  const showRestart = view.restart && !noRestartNotes;
+  const restartLine = showRestart ? (
     <p data-testid={`${testId}-restart`} className="mt-1 text-ui-sm text-foreground-muted">
       {saved ? `Saved. ${RESTART_NOTE}` : RESTART_NOTE}
     </p>
   ) : null;
   // The Daemon section (and its restart) exists only in the desktop app, so the button does too.
-  const openDaemon = saved && view.restart ? <OpenDaemonSettingsButton testId={`${testId}-open-daemon`} /> : null;
+  const openDaemon = saved && showRestart ? <OpenDaemonSettingsButton testId={`${testId}-open-daemon`} /> : null;
 
   const notes = (
     <>
