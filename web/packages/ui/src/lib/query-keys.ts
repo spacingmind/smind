@@ -125,6 +125,8 @@ export const queryKeys = {
   providerTestAll: () => ["provider.test"] as const,
   providerTest: (providerKey: string) => ["provider.test", providerKey] as const,
   /** The `useRunProviderTest` mutation for that provider: its pending entries are the row's "Testing…". */
+  /** The global config keys (`config.get`, ADR-0062): one answer for every switch row. */
+  configGet: () => ["config.get"] as const,
   /** One workspace's agent-browser settings view (`browser.settings.get`, human-only and local-only). */
   browserSettings: (workspaceId: number) => ["browser.settings.get", { workspaceId }] as const,
   // Self-learning skills (ADR-0026): the RPC name plus the params that change its answer. The

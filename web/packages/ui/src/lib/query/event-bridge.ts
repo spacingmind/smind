@@ -146,6 +146,16 @@ export function applyDaemonEvent(queryClient: QueryClient, topic: string, payloa
       void queryClient.invalidateQueries({ queryKey: queryKeys.inboxAll() });
       return;
     }
+    case "config.updated": {
+      // {key}: a global config key changed (this or another client). The switch rows re-read config.get, and the
+      // screens the key turns on or off (automations, plugins, learning, fleet) re-read their own state.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.configGet() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.automationList() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.pluginList() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.learningStatus() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.fleetHosts() });
+      return;
+    }
     case "fleet.hosts.changed": {
       void queryClient.invalidateQueries({ queryKey: queryKeys.fleetHosts() });
       return;
