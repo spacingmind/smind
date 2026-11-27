@@ -188,4 +188,41 @@ describe("policy-section", () => {
     const rules = screen.getByTestId("policy-rules");
     expect(within(rules).getByText("allow-git-status").className).toContain("whitespace-nowrap");
   });
+
+  it("ui_cleanup_b2_policy_uses_shared_primitives", async () => {
+    mobile.value = false;
+    const section = listSettingsSections().find((s) => s.id === "permission-policy");
+    if (!section) throw new Error("permission-policy section did not register");
+    const client = new FakeWsClient();
+    const mounted = render(<>{section.render({ client: client as never, events: null })}</>);
+    client.nth("policy.get").resolve(policyStatus({ rules: [rule()] }));
+    client.nth("policy.audit").resolve({ rows: [decision()], next: 0 });
+    await flush();
+
+    // "Rules" and "Recent decisions" are group titles now (the policy file
+    // group is the third), and no raw h3 escapes a settings-group.
+    const groups = Array.from(document.querySelectorAll("[data-slot='settings-group']"));
+    expect(groups).toHaveLength(3);
+    expect(groups.map((g) => g.querySelector("h3")?.textContent)).toEqual(
+      expect.arrayContaining(["Policy file", "Rules", "Recent decisions"]),
+    );
+    for (const h3 of document.querySelectorAll("h3")) {
+      expect(h3.closest("[data-slot='settings-group']")).not.toBeNull();
+    }
+    // The table sits inside the group card, with no wrapper card of its own.
+    const rules = screen.getByTestId("policy-rules");
+    expect(rules.querySelector("table")).not.toBeNull();
+
+    mounted.unmount();
+
+    const client2 = new FakeWsClient();
+    render(<>{section.render({ client: client2 as never, events: null })}</>);
+    client2.nth("policy.get").resolve(policyStatus());
+    client2.nth("policy.audit").resolve({ rows: [], next: 0 });
+    await flush();
+
+    const emptyTexts = Array.from(document.querySelectorAll("[data-slot='settings-empty-card']")).map((c) => c.textContent);
+    expect(emptyTexts).toContain("No rules.");
+    expect(emptyTexts).toContain("No decisions recorded yet.");
+  });
 });
