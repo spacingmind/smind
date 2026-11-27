@@ -37,10 +37,11 @@ function lastSegment(path: string): string {
  * empty and relative paths, `~` expansion (the daemon user's home, fetched
  * once per hook with `fs.listDir {}`), and a duplicate of a current workspace.
  * Every check increments a request id, and only the newest one may update
- * `status`, so a slow earlier answer cannot overwrite a later one.
+ * `status`, so a slow earlier answer cannot overwrite a later one. Nothing
+ * has been judged yet at mount, so the status starts as "unknown".
  */
 export function useFolderCheck(client: WsClient | null, workspaces: readonly Workspace[]) {
-  const [status, setStatus] = useState<FolderStatus>({ kind: "empty", path: "" });
+  const [status, setStatus] = useState<FolderStatus>({ kind: "unknown", path: "" });
   const home = useRef<string | null>(null);
   const latest = useRef(0);
 

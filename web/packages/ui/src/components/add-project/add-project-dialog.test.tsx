@@ -8,6 +8,7 @@ import { FleetDaemon, fleetHost } from "@/test/fleet-fixtures";
 import { renderWithClientProp, renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { Connection } from "@/lib/platform";
+import type { Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 async function flush(): Promise<void> {
@@ -61,20 +62,45 @@ function resetPlatform() {
 }
 
 /** The dialog as the sidebar mounts it, on a fake client whose calls the test resolves by hand. */
-function renderDialog(onProjectReady = vi.fn(), onOpenChange = vi.fn()) {
+function renderDialog(onProjectReady = vi.fn(), onOpenChange = vi.fn(), workspaces: Workspace[] = []) {
   const client = new FakeWsClient();
   const view = renderWithClientProp(
     <AddProjectDialog
       client={client as unknown as WsClient}
       open
       onOpenChange={onOpenChange}
-      workspaces={[]}
+      workspaces={workspaces}
       onProjectReady={onProjectReady}
       onStartTask={vi.fn()}
     />,
   );
   return { view, client, onProjectReady, onOpenChange };
 }
+
+/** One current workspace, as workspace.list answers it. */
+function workspaceFixture(path: string, title: string): Workspace {
+  return {
+    ID: 1,
+    Path: path,
+    Title: title,
+    RoutingPolicy: "",
+    CreatedAt: "2026-01-02T03:04:05Z",
+    UpdatedAt: "2026-01-02T03:04:05Z",
+  };
+}
+
+let hostSeq = 0;
+
+/**
+ * A desktop connection with a fresh id, so every test below owns its recents
+ * key (the connection id, C1 D4): the recents module keeps a session-level
+ * cache, and one key per test keeps one test's recents out of the next.
+ */
+function ownHost(label: string): Connection {
+  hostSeq += 1;
+  return { id: `conn-${label}-${hostSeq}`, kind: "local", label: "This Mac", baseUrl: "http://127.0.0.1:7700" };
+}
+
 
 describe("Add project host step", () => {
   beforeEach(resetPlatform);
@@ -246,6 +272,241 @@ describe("Add project dialog", () => {
     fireEvent.click(screen.getByTestId("folder-picker-home"));
     const home = await waitFor(() => client.nth("fs.listDir", 1));
     expect(home.params).toBeUndefined();
+  });
+});
+
+describe("Add project open a folder", () => {
+  beforeEach(resetPlatform);
+
+  /** Blurs the path input with the given value, so the folder check runs (C1 D3: validation on blur). */
+  async function typeAndBlur(path: string): Promise<void> {
+    const input = screen.getByTestId("add-project-path-input");
+    fireEvent.change(input, { target: { value: path } });
+    await flush();
+    fireEvent.blur(input);
+    await flush();
+  }
+
+  it("add_project_non_git_hint_before_submit_and_no_git_init_action", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("non-git");
+    const { client } = renderDialog();
+    await flush();
+
+    await typeAndBlur("/w/plain");
+    // The check asks for the PARENT of the typed path (fs.listDir says nothing about the listed dir itself).
+    const parent = client.nth("fs.listDir", 0);
+    expect(parent.params).toEqual({ path: "/w" });
+    await act(async () => {
+      parent.resolve({
+        path: "/w",
+        parent: "/",
+        entries: [{ name: "plain", path: "/w/plain", isGitRepo: false }],
+      });
+    });
+    await flush();
+
+    // The hint names the problem and the next step, before submit (AC5).
+    const hint = screen.getByTestId("add-project-hint-not-git");
+    expect(hint).toHaveTextContent("Not a git repository");
+    expect(hint).toHaveTextContent("git init");
+    // A known non-repo never reaches the daemon.
+    expect(screen.getByTestId("add-project-submit")).toBeDisabled();
+
+    // No git-init action of any kind (C1 has none; that is C2): the instruction is text only.
+    expect(screen.queryByRole("button", { name: /git init/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /git init/i })).toBeNull();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-submit"));
+    });
+    await flush();
+    expect(client.calls.filter((call) => call.method === "workspace.create")).toHaveLength(0);
+  });
+
+  it("add_project_missing_folder_is_said_before_submit", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("missing");
+    const { client } = renderDialog();
+    await flush();
+
+    await typeAndBlur("/w/nope");
+    const parent = client.nth("fs.listDir", 0);
+    await act(async () => {
+      // The parent lists another folder: the typed one is not there.
+      parent.resolve({
+        path: "/w",
+        parent: "/",
+        entries: [{ name: "plain", path: "/w/plain", isGitRepo: true }],
+      });
+    });
+    await flush();
+
+    // <host> is the current connection's name (useProjectHosts().current.name).
+    expect(screen.getByTestId("add-project-hint-missing")).toHaveTextContent("This folder does not exist on This Mac.");
+    expect(screen.getByTestId("add-project-submit")).toBeDisabled();
+    expect(client.calls.filter((call) => call.method === "workspace.create")).toHaveLength(0);
+  });
+
+  it("add_project_relative_path_gets_a_hint", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("relative");
+    const { client } = renderDialog();
+    await flush();
+
+    await typeAndBlur("code/x");
+    expect(screen.getByTestId("add-project-hint-relative")).toHaveTextContent("Use an absolute path, or start with ~.");
+    expect(screen.getByTestId("add-project-submit")).toBeDisabled();
+    // A relative path is judged client-side: no fs call, no create.
+    expect(client.calls.filter((call) => call.method === "fs.listDir")).toHaveLength(0);
+    expect(client.calls.filter((call) => call.method === "workspace.create")).toHaveLength(0);
+  });
+
+  it("add_project_duplicate_path_switches_instead_of_creating", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("duplicate");
+    const alpha = workspaceFixture("/w/alpha", "Alpha");
+    const { client, onProjectReady, onOpenChange } = renderDialog(vi.fn(), vi.fn(), [alpha]);
+    await flush();
+
+    // The trailing-slash variant of the existing path still matches (D5: the normalised path is compared).
+    await typeAndBlur("/w/alpha/");
+    expect(screen.getByTestId("add-project-hint-duplicate")).toHaveTextContent("Already a project: Alpha.");
+    expect(screen.getByTestId("add-project-open-existing")).toBeInTheDocument();
+    expect(screen.getByTestId("add-project-submit")).toHaveTextContent("Open project");
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-submit"));
+    });
+    await flush();
+
+    // Find-or-switch: the existing project is opened, and nothing is created.
+    expect(onProjectReady).toHaveBeenCalledWith(alpha, "existing");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(client.calls.filter((call) => call.method === "workspace.create")).toHaveLength(0);
+    // The duplicate was decided without any fs call.
+    expect(client.calls.filter((call) => call.method === "fs.listDir")).toHaveLength(0);
+  });
+
+  it("add_project_tilde_is_expanded", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("tilde");
+    const { client, onProjectReady } = renderDialog();
+    await flush();
+
+    await typeAndBlur("~/code/x");
+    // `~` is expanded with the daemon user's home, from fs.listDir with no path (C1 D3).
+    const home = client.nth("fs.listDir", 0);
+    expect(home.params).toEqual({});
+    await act(async () => {
+      home.resolve({ path: "/home/u", parent: "/home", entries: [] });
+    });
+    await flush();
+    // The check then judges the EXPANDED path, from its parent's listing.
+    const parent = client.nth("fs.listDir", 1);
+    expect(parent.params).toEqual({ path: "/home/u/code" });
+    await act(async () => {
+      parent.resolve({
+        path: "/home/u/code",
+        parent: "/home/u",
+        entries: [{ name: "x", path: "/home/u/code/x", isGitRepo: true }],
+      });
+    });
+    await flush();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-submit"));
+    });
+    const create = await waitFor(() => client.nth("workspace.create", 0));
+    expect(create.params).toEqual({ path: "/home/u/code/x" });
+    const created = workspaceFixture("/home/u/code/x", "x");
+    await act(async () => {
+      create.resolve(created);
+    });
+    await flush();
+    expect(onProjectReady).toHaveBeenCalledWith(created, "created");
+  });
+
+  it("add_project_recents_list_and_remove", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("recents");
+    const gone = workspaceFixture("/w/gone", "Gone");
+    const { view, client } = renderDialog(vi.fn(), vi.fn(), [gone]);
+    await flush();
+
+    // A current workspace is merged into recents on open but not listed (it is in the sidebar already).
+    expect(screen.queryByTestId("add-project-recents")).toBeNull();
+
+    // The project is later removed from the daemon: re-rendering with the new list, the recent stays (D4, AC4).
+    view.rerender(
+      <AddProjectDialog
+        client={client as unknown as WsClient}
+        open
+        onOpenChange={vi.fn()}
+        workspaces={[]}
+        onProjectReady={vi.fn()}
+        onStartTask={vi.fn()}
+      />,
+    );
+    await flush();
+    const row = screen.getByTestId("add-project-recent-0");
+    expect(screen.getByTestId("add-project-recents")).toHaveTextContent("Recent");
+    expect(row).toHaveTextContent("Gone");
+    expect(row).toHaveTextContent("/w/gone");
+
+    // Clicking a row fills the path (and checks it: the parent listing it asks for is a read).
+    await act(async () => {
+      fireEvent.click(row);
+    });
+    await flush();
+    expect(screen.getByTestId("add-project-path-input")).toHaveValue("/w/gone");
+
+    // The x removes the entry from recents alone, sending no RPC of any kind.
+    const x = screen.getByTestId("add-project-recent-remove-0");
+    expect(x).toHaveAccessibleName("Remove /w/gone from recents");
+    const callsBefore = client.calls.length;
+    await act(async () => {
+      fireEvent.click(x);
+    });
+    await flush();
+    expect(screen.queryByTestId("add-project-recents")).toBeNull();
+    expect(client.calls).toHaveLength(callsBefore);
+  });
+
+  it("add_project_created_project_is_recorded_in_recents", async () => {
+    platformState.desktop = true;
+    const host = ownHost("created");
+    platformState.current = host;
+    const { client, onProjectReady } = renderDialog();
+    await flush();
+
+    await typeAndBlur("/w/new");
+    const parent = client.nth("fs.listDir", 0);
+    await act(async () => {
+      parent.resolve({
+        path: "/w",
+        parent: "/",
+        entries: [{ name: "new", path: "/w/new", isGitRepo: true }],
+      });
+    });
+    await flush();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-submit"));
+    });
+    const create = await waitFor(() => client.nth("workspace.create", 0));
+    expect(create.params).toEqual({ path: "/w/new" });
+    const created: Workspace = { ...workspaceFixture("/w/new", "New"), ID: 9 };
+    await act(async () => {
+      create.resolve(created);
+    });
+    await flush();
+    expect(onProjectReady).toHaveBeenCalledWith(created, "created");
+
+    // The project created here is recorded as a recent, persisted for this host (D4).
+    expect(screen.getByTestId("add-project-recent-0")).toHaveTextContent("New");
+    expect(screen.getByTestId("add-project-recent-0")).toHaveTextContent("/w/new");
+    expect(window.localStorage.getItem(`smind:project-recents:${host.id}`)).toContain("/w/new");
   });
 });
 

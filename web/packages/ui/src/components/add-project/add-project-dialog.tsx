@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { HostStep } from "@/components/add-project/host-step";
 import { MethodCards } from "@/components/add-project/method-cards";
 import { OpenFolderStep, type OpenFolderValue } from "@/components/add-project/open-folder-step";
+import { useFolderCheck } from "@/hooks/use-folder-check";
+import { useProjectHosts } from "@/hooks/use-project-hosts";
 import { useWindowState } from "@/hooks/use-window-state";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +17,8 @@ import {
 } from "@/components/ui/dialog";
 import { FormError } from "@/components/ui/form-error";
 import { daemonSentence } from "@/lib/daemon-sentence";
+import { expandHome, normalizeProjectPath, samePath } from "@/lib/project-path";
+import { mergeWorkspaces, recordRecent } from "@/lib/project-recents";
 import { desktopOS, isDesktop } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { hasTrafficLights } from "@/lib/window-chrome";
@@ -45,16 +49,18 @@ const EMPTY: OpenFolderValue = { path: "", name: "" };
  * (MethodCards), then the details of the live method (OpenFolderStep). About
  * 640px and centred at desktop sizes; at the settings dialog's small sizes it
  * is the full-bleed sheet, exactly as that dialog does it. Submit creates the
- * workspace and hands it to `onProjectReady`; a daemon error is a sentence and
- * the dialog stays open with everything typed still in place (D6).
+ * workspace with the checked path (expanded, normalised), records it in the
+ * host's recents and hands it to `onProjectReady`; a duplicate path opens the
+ * existing project instead of creating a second one (D5). A daemon error is a
+ * sentence and the dialog stays open with everything typed still in place (D6).
  */
 export function AddProjectDialog(props: {
   client: WsClient | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** The current workspaces: the folder picker's Recent row and (later) duplicate detection read them. */
+  /** The current workspaces: the recents merge, the duplicate find-or-switch and the picker's quick-jump row read them. */
   workspaces: Workspace[];
-  /** Called with the workspace the flow landed on: "created" here, "existing" once find-or-switch exists (D5). */
+  /** Called with the workspace the flow landed on: "created", or "existing" when a duplicate path was opened (D5). */
   onProjectReady: (workspace: Workspace, how: "created" | "existing") => void;
   /** Opens the New task dialog for the workspace, from the later done state (D6). */
   onStartTask: (workspace: Workspace) => void;
@@ -63,16 +69,48 @@ export function AddProjectDialog(props: {
   const [value, setValue] = useState<OpenFolderValue>(EMPTY);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const hosts = useProjectHosts();
+  const folder = useFolderCheck(client, workspaces);
   const { fullscreen } = useWindowState();
   // macOS traffic lights float over the window's top-left; in sheet mode the
   // sheet starts below that native title-bar band (copied from SettingsDialog).
   const lights = isDesktop && hasTrafficLights(desktopOS, fullscreen);
   const sheet = useSheetLayout();
+  // The check's blocking conclusions (C1 D3): a path a check judged to be
+  // missing, not a repo, relative, or empty-after-trim never reaches the
+  // daemon. Before anything is judged ("unknown", the initial state, or still
+  // "checking") the button stays live: the daemon is the authority, and an
+  // empty submit says "Path is required." itself.
+  const blocked =
+    folder.status.kind === "not-git" ||
+    folder.status.kind === "missing" ||
+    folder.status.kind === "relative" ||
+    folder.status.kind === "empty";
+  const duplicate = folder.status.kind === "duplicate";
+
+  // Real recents (C1 D4): the host's current workspaces are merged in on every
+  // open, so a project removed later stays in the list until it is dismissed.
+  useEffect(() => {
+    if (!open) return;
+    mergeWorkspaces(hosts.hostKey, workspaces);
+  }, [open, hosts.hostKey, workspaces]);
 
   async function submit(): Promise<void> {
-    const path = value.path.trim();
-    if (!path) {
+    const trimmed = value.path.trim();
+    if (!trimmed) {
       setError("Path is required.");
+      return;
+    }
+    // The path submit sends is the one the check judges: `~` expanded with the
+    // daemon's home (the daemon does not expand it), then normalised.
+    const expanded = trimmed.startsWith("~") && folder.home !== null ? expandHome(trimmed, folder.home) : trimmed;
+    const path = normalizeProjectPath(expanded);
+    // A duplicate path opens the existing project; no second workspace on one path (D5).
+    const existing = workspaces.find((ws) => samePath(ws.Path, path));
+    if (existing) {
+      setValue(EMPTY);
+      onProjectReady(existing, "existing");
+      onOpenChange(false);
       return;
     }
     if (!client) return;
@@ -83,6 +121,7 @@ export function AddProjectDialog(props: {
         path,
         ...(value.name.trim() ? { title: value.name.trim() } : {}),
       });
+      recordRecent(hosts.hostKey, { path, title: ws.Title });
       setValue(EMPTY);
       onProjectReady(ws, "created");
       onOpenChange(false);
@@ -137,14 +176,19 @@ export function AddProjectDialog(props: {
               value={value}
               onChange={setValue}
               recentPaths={recentWorkspaceParentDirs(workspaces)}
+              status={folder.status}
+              onCheck={folder.check}
+              hostKey={hosts.hostKey}
+              hostName={hosts.current.name}
+              workspaces={workspaces}
             />
             <FormError message={error} testId="add-project-error" />
             <DialogFooter>
               <Button type="button" variant="quiet" data-testid="add-project-cancel" onClick={() => onOpenChange(false)}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={pending} data-testid="add-project-submit">
-                {pending ? "Adding…" : "Add project"}
+              <Button type="submit" disabled={pending || blocked} data-testid="add-project-submit">
+                {pending ? "Adding…" : duplicate ? "Open project" : "Add project"}
               </Button>
             </DialogFooter>
           </form>
