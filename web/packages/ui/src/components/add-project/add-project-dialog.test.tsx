@@ -436,6 +436,10 @@ describe("Add project open a folder", () => {
     expect(screen.getByTestId("add-project-done")).toHaveTextContent("New2 is ready.");
     expect(screen.queryByTestId("add-project-cancel")).toBeNull();
     expect(screen.queryByTestId("add-project-submit")).toBeNull();
+    // The header sentence no longer applies once the project is added: it stays for screen readers only,
+    // and focus lands on Start a task (not on the dialog box, which drew a focus ring).
+    expect(screen.getByText("This folder must be a git repository.")).toHaveClass("sr-only");
+    expect(screen.getByTestId("add-project-start-task")).toHaveFocus();
 
     await act(async () => {
       fireEvent.click(screen.getByTestId("add-project-start-task"));

@@ -71,6 +71,7 @@ export function AddProjectDialog(props: {
 }) {
   const { client, open, onOpenChange, workspaces, onProjectReady, onStartTask } = props;
   const hosts = useProjectHosts();
+  const [landed, setLanded] = useState(false);
   const { fullscreen } = useWindowState();
   // macOS traffic lights float over the window's top-left; in sheet mode the
   // sheet starts below that native title-bar band (copied from SettingsDialog).
@@ -108,7 +109,8 @@ export function AddProjectDialog(props: {
           )}
           <DialogHeader>
             <DialogTitle>Add project</DialogTitle>
-            <DialogDescription>
+            {/* Once the project is added the sentence no longer applies: kept for screen readers only. */}
+            <DialogDescription className={landed ? "sr-only" : undefined}>
               This folder must be a git repository.
             </DialogDescription>
           </DialogHeader>
@@ -118,6 +120,7 @@ export function AddProjectDialog(props: {
             workspaces={workspaces}
             onProjectReady={onProjectReady}
             onStartTask={onStartTask}
+            onLanded={setLanded}
             hostKey={hosts.hostKey}
             hostName={hosts.current.name}
             recentPaths={recentWorkspaceParentDirs(workspaces)}
@@ -143,6 +146,7 @@ function AddProjectBody({
   workspaces,
   onProjectReady,
   onStartTask,
+  onLanded,
   hostKey,
   hostName,
   recentPaths,
@@ -152,6 +156,8 @@ function AddProjectBody({
   workspaces: Workspace[];
   onProjectReady: (workspace: Workspace, how: DoneHow) => void;
   onStartTask: (workspace: Workspace) => void;
+  /** Tells the shell the flow has landed on a project (the done state shows), so it can drop the header sentence. */
+  onLanded: (landed: boolean) => void;
   /** The recents key (C1 D4): the desktop connection id, or the page origin on the web. */
   hostKey: string;
   /** The host the "does not exist" hint names. */
@@ -164,6 +170,9 @@ function AddProjectBody({
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState<{ workspace: Workspace; how: DoneHow } | null>(null);
   const folder = useFolderCheck(client, workspaces);
+  useEffect(() => {
+    onLanded(done !== null);
+  }, [done, onLanded]);
   // The check's blocking conclusions (C1 D3): a path a check judged to be
   // missing, not a repo, relative, or empty-after-trim never reaches the
   // daemon. Before anything is judged ("unknown", the initial state, or still
@@ -233,6 +242,7 @@ function AddProjectBody({
           <Button
             type="button"
             data-testid="add-project-start-task"
+            autoFocus
             onClick={() => {
               // Close before the hand-over: both flip the sidebar's one crud
               // state in the same batch, and the New task write is the one
