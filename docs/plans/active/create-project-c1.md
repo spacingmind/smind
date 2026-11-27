@@ -11,7 +11,7 @@ Size M, **web UI only, NO new RPC** (`fs.listDir`, `workspace.create`, `workspac
 
 ## Facts verified in the code (before any design)
 
-- One dialog, `CreateWorkspaceDialog` (`components/crud-dialogs.tsx`), owned by the sidebar (`app-sidebar.tsx`: `setCrud({kind:"workspace"})`). Every entry point ends there: sidebar "+", the sidebar empty state (header "+" and "Add project"), home "Add project", the first-run cards, the Get-started card, the palette "New workspace" and the `smind:new-workspace` window event.
+- One dialog, `CreateWorkspaceDialog` (`components/crud-dialogs.tsx`), owned by the sidebar (`app-sidebar.tsx`: `setCrud({kind:"workspace"})`). Every entry point ends there: the sidebar footer "Add workspace" button (the header "+" was removed by UI cleanup B1), the sidebar empty state (header "+" and "Add project"), home "Add project", the first-run cards, the Get-started card, the palette "New workspace" and the `smind:new-workspace` window event.
 - `fs.listDir {path?}` lists **sub-directories only**, hidden (dot) entries excluded, each `{name, path, isGitRepo}`; an empty path means the daemon user's home; the answer is `{path, parent, entries}`. It does not say whether the listed directory itself is a repo, so a typed path P is judged from its **parent's** listing (the entry whose path is P). A path under a hidden directory cannot be judged: no hint, the daemon decides at create.
 - `workspace.create {path, title?}` validates on the daemon (absolute, exists, directory, has `.git`) and **does not reject a duplicate path** (a plain INSERT). `~` is not expanded by the daemon.
 - The browse chooser's "Recent:" chips are the parent folders of existing workspaces (max 5), not real recents.
@@ -66,9 +66,10 @@ GLM peers write the code from step briefs (A the modal shell and the host and me
 
 ## Progress
 
-- [ ] spec and contract
-- [ ] peers A, B, C
-- [ ] review, mutations, validator, real-window frames
+- [x] spec and contract
+- [x] peers A, B, B2, C1, C2 (all GLM)
+- [x] mutations M1 to M4 (each killed)
+- [ ] validator, frames (web-harness first; REAL-WINDOW before ACCEPT, the screen is locked at the time of writing)
 
 ## Validation
 
