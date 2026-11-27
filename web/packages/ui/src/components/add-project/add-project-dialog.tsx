@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { HostStep } from "@/components/add-project/host-step";
 import { MethodCards } from "@/components/add-project/method-cards";
@@ -72,6 +72,14 @@ export function AddProjectDialog(props: {
   const { client, open, onOpenChange, workspaces, onProjectReady, onStartTask } = props;
   const hosts = useProjectHosts();
   const [landed, setLanded] = useState(false);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Once the project is added the form (and the focused path field) is gone: focus
+  // lands on the dialog box itself, with no ring. A programmatic focus on the
+  // Start a task button would draw the keyboard ring for a mouse flow; the first
+  // Tab still reaches the buttons with their normal ring (same approach as Settings).
+  useEffect(() => {
+    if (landed) contentRef.current?.focus();
+  }, [landed]);
   const { fullscreen } = useWindowState();
   // macOS traffic lights float over the window's top-left; in sheet mode the
   // sheet starts below that native title-bar band (copied from SettingsDialog).
@@ -89,10 +97,12 @@ export function AddProjectDialog(props: {
     <Dialog open={open} onOpenChange={onOpenChange}>
       {open && (
         <DialogContent
+          ref={contentRef}
+          tabIndex={-1}
           data-testid="add-project-dialog"
           data-sheet={sheet ? "true" : undefined}
           className={cn(
-            "sm:max-w-[640px]",
+            "outline-none focus:outline-none focus-visible:outline-none sm:max-w-[640px]",
             // The full-bleed sheet at small sizes, exactly as SettingsDialog
             // does it: drop the centring, size and radius.
             "max-[860px]:content-start max-[860px]:overflow-y-auto [@media(max-height:560px)]:content-start [@media(max-height:560px)]:overflow-y-auto max-[860px]:inset-0 max-[860px]:left-0 max-[860px]:top-0 max-[860px]:h-auto max-[860px]:w-auto max-[860px]:max-w-none max-[860px]:translate-x-0 max-[860px]:translate-y-0 max-[860px]:rounded-none max-[860px]:border-0",
@@ -242,7 +252,6 @@ function AddProjectBody({
           <Button
             type="button"
             data-testid="add-project-start-task"
-            autoFocus
             onClick={() => {
               // Close before the hand-over: both flip the sidebar's one crud
               // state in the same batch, and the New task write is the one

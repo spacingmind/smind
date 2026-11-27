@@ -436,10 +436,8 @@ describe("Add project open a folder", () => {
     expect(screen.getByTestId("add-project-done")).toHaveTextContent("New2 is ready.");
     expect(screen.queryByTestId("add-project-cancel")).toBeNull();
     expect(screen.queryByTestId("add-project-submit")).toBeNull();
-    // The header sentence no longer applies once the project is added: it stays for screen readers only,
-    // and focus lands on Start a task (not on the dialog box, which drew a focus ring).
+    // The header sentence no longer applies once the project is added: it stays for screen readers only.
     expect(screen.getByText("This folder must be a git repository.")).toHaveClass("sr-only");
-    expect(screen.getByTestId("add-project-start-task")).toHaveFocus();
 
     await act(async () => {
       fireEvent.click(screen.getByTestId("add-project-start-task"));
@@ -505,6 +503,55 @@ describe("Add project open a folder", () => {
     expect(chip.querySelectorAll("span")[0]).toHaveTextContent("This Mac");
     expect(chip.querySelectorAll("span")[1]).toHaveTextContent("127.0.0.1:7700");
     expect(chip.querySelectorAll("span")[1]).toHaveClass("text-foreground-muted");
+  });
+
+  /** Drives the dialog to the done state ("New2 is ready.") the way a mouse user would. */
+  async function landOnDone() {
+    platformState.desktop = true;
+    platformState.current = ownHost("ring");
+    const { client } = renderDialog();
+    await flush();
+    await typeAndBlur("/w/new2");
+    await act(async () => {
+      client.nth("fs.listDir", 0).resolve({
+        path: "/w",
+        parent: "/",
+        entries: [{ name: "new2", path: "/w/new2", isGitRepo: true }],
+      });
+    });
+    await flush();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("add-project-submit"));
+    });
+    const create = await waitFor(() => client.nth("workspace.create", 0));
+    await act(async () => {
+      create.resolve({ ...workspaceFixture("/w/new2", "New2"), ID: 9 });
+    });
+    await flush();
+    expect(screen.getByTestId("add-project-done")).toBeInTheDocument();
+  }
+
+  it("add_project_no_focus_ring_after_create", async () => {
+    await landOnDone();
+    // Focus lands on the dialog box with no outline, not on a button: a programmatic
+    // focus on Start a task would draw the keyboard ring for a mouse flow.
+    const box = screen.getByTestId("add-project-dialog");
+    expect(box).toHaveFocus();
+    expect(box).toHaveClass("outline-none", "focus:outline-none", "focus-visible:outline-none");
+    expect(screen.getByTestId("add-project-start-task")).not.toHaveFocus();
+  });
+
+  it("add_project_tab_after_create_still_shows_the_ring", async () => {
+    await landOnDone();
+    // The first Tab reaches the buttons, which keep their normal focus-visible ring.
+    const start = screen.getByTestId("add-project-start-task");
+    const done = screen.getByTestId("add-project-done-close");
+    for (const el of [done, start]) {
+      expect(el.className).toContain("focus-visible:ring-3");
+      expect(el.className).not.toContain("outline-none focus:outline-none");
+    }
+    act(() => start.focus());
+    expect(start).toHaveFocus();
   });
 
   it("add_project_tilde_is_expanded", async () => {
