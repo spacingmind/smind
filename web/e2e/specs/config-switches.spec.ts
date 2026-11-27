@@ -172,7 +172,8 @@ test('UC5-03 fleet on the real daemon shows the restart notice', async ({ app },
   await expect(page.getByTestId('hosts-empty')).toHaveCount(0)
   await shot(page, testInfo, 'UC5-03-off')
   await (await turnOn(page, id)).click()
-  await expect(page.getByTestId(`${id}-restart`)).toContainText('Takes effect after the daemon restarts')
+  // the Hosts state line is the one place that says what a restart changes (the row adds no second message)
+  await expect(page.getByTestId(`${id}-restart`)).toHaveCount(0)
   // saved, but the daemon only starts the fleet after a restart: never "off" next to an on switch
   await expect(page.getByTestId('hosts-fleet-state')).toHaveText('Fleet turns on after the daemon restarts.')
   await expect(page.getByText('Fleet is off')).toHaveCount(0)

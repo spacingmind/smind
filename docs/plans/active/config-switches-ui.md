@@ -53,6 +53,8 @@ States: Automations off -> switch, confirm dialog, on, paused/resumed; Plugins o
 
 The Fleet switch is a normal card at the top of Hosts (never inside an empty-state card); a state line says where the fleet stands from two facts (the daemon answers `fleet.host.list` = running; `config.get` value = what the file says): "Fleet is off.", "Fleet turns on after the daemon restarts.", "Fleet is running.", "Fleet turns off after the daemon restarts." (never "off" next to an on switch); the dashed "No hosts paired" card only when the fleet is running and has no hosts; "Open Daemon settings" is a link-styled button, desktop only, also next to the pending-restart line; "sMind" capitalised in the Hosts intro. Named tests: `hosts_fleet_switch_is_a_normal_card_at_the_top`, `hosts_state_line_off`, `hosts_state_line_pending_restart_after_turning_on`, `hosts_state_line_pending_restart_after_turning_off`, `hosts_state_line_running`, `hosts_empty_card_only_when_running_with_no_hosts`, `hosts_pending_restart_offers_open_daemon_settings_on_desktop_only`, `config_open_daemon_settings_looks_like_a_link`. Learning has no header or state line, so only its row's restart note applies.
 
+- Real-window review of the Hosts page found one more defect, fixed: with the fleet switch saved, the switch row AND the Hosts state line both said "takes effect after the daemon restarts" and both offered "Open Daemon settings" (twice). Hosts now says it once, in the state line (`noRestartNotes` on its row); test `hosts_pending_restart_is_said_once_not_twice`.
+
 ## Staffing
 
 GLM peers write the code from step briefs (A row + hook + keys + bridge + tests; B the homes + tests; C e2e + frames). Lead: spec, contract, review, mutations, frames, PR.
@@ -64,7 +66,7 @@ GLM peers write the code from step briefs (A row + hook + keys + bridge + tests;
 - [x] review, mutations, validator, frames (web harness)
 - [x] REAL-WINDOW frame pass DONE (see Validation): earlier parked state: branch `feat/config-switches-ui`, head `a6567cce9`, validationId 44 (pass, mergeReady), PR #992. Shot list: Automations off/confirm/on/paused/resumed (Settings + page), Plugins off/on, Hosts off + restart notice, Learning kill switch + restart notice, read-only row (web harness if unreachable), env-overridden disabled (daemon started once with SMIND_LEARNING=0), refusal; light/dark, 1280x800 and 800x520, inside the Settings modal. Audit app: `scripts/desktop-audit-build.sh`, CARGO_TARGET_DIR under `~/.smind/dogfood/ui-b5/`, deleted after.
 
-- [ ] PENDING (screen was locked): REAL-WINDOW re-shoot of Hosts off/confirm/pending-restart (+learning pending-restart if touched), light+dark, 1280x800+800x520, from head c84f120f2, then update the PR body and report. (Audit app: scripts/desktop-audit-build.sh with CARGO_TARGET_DIR under ~/.smind/dogfood/ui-b5/, delete after; dogfood daemon with its own SMIND_HOME; helpers in ~/.smind/dogfood/ui-b5/real/.)
+- [x] DONE 2026-11-27 (screen unlocked): REAL-WINDOW re-shoot of Hosts off/confirm/pending-restart (+learning pending-restart if touched), light+dark, 1280x800+800x520, from head c84f120f2, then update the PR body and report. (Audit app: scripts/desktop-audit-build.sh with CARGO_TARGET_DIR under ~/.smind/dogfood/ui-b5/, delete after; dogfood daemon with its own SMIND_HOME; helpers in ~/.smind/dogfood/ui-b5/real/.)
 
 ## Validation
 
