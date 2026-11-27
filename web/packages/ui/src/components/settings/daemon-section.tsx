@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { SetupSection } from "@/components/first-run/setup-section";
 import { RelayDevicesGroup } from "@/components/settings/relay-devices-group";
+import { DiagnosticsGroup } from "@/components/settings/diagnostics-group";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
@@ -223,6 +224,7 @@ function DaemonSection() {
         )}
         </div>
       </SettingsGroup>
+      <DiagnosticsGroup />
       <SetupSection />
       <RelayDevicesGroup />
     </div>
