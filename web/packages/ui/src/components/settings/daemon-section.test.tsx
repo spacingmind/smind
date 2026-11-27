@@ -80,6 +80,13 @@ describe("daemon-section (desktop build)", () => {
     expect(screen.queryByTestId("daemon-install")).not.toBeInTheDocument();
   });
 
+  it("ui_cleanup_b2_daemon_gap_is_six", async () => {
+    await renderSection({ daemonStatus: () => Promise.resolve(baseStatus()) });
+    const root = screen.getByTestId("settings-section-daemon");
+    expect(root.className).toContain("gap-6");
+    expect(root.className).not.toContain("gap-3");
+  });
+
   it("offers Update & restart when managed and older", async () => {
     await renderSection({ daemonStatus: () => Promise.resolve(baseStatus({ comparison: "older", daemonVersion: "0.6.0" })) });
     expect(screen.getByTestId("daemon-update")).toBeInTheDocument();

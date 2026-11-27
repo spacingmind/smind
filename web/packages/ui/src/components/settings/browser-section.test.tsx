@@ -76,6 +76,14 @@ describe("browser section", () => {
     expect(d.calls.filter((c) => c.method.startsWith("browser.")).map((c) => c.method)).toEqual(["browser.settings.get"]);
   });
 
+  it("ui_cleanup_b2_browser_gap_is_six", async () => {
+    renderSection(stateful().handler);
+    await ready();
+    const root = screen.getByTestId("settings-section-browser");
+    expect(root.className).toContain("gap-6");
+    expect(root.className).not.toContain("gap-5");
+  });
+
   it("the switch sends exactly {workspaceId, enabled} and shows the answered state (AC3)", async () => {
     const s = stateful();
     const d = renderSection(s.handler);

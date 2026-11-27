@@ -74,7 +74,7 @@ function BrowserSection() {
   }
 
   return (
-    <div className="flex flex-col gap-5" data-testid="settings-section-browser">
+    <div className="flex flex-col gap-6" data-testid="settings-section-browser">
       <Select
         value={String(workspace.ID)}
         onValueChange={(v) => {

@@ -101,7 +101,7 @@ function DaemonSection() {
   const locked = busy || manageOff;
 
   return (
-    <div className="flex flex-col gap-3" data-testid="settings-section-daemon">
+    <div className="flex flex-col gap-6" data-testid="settings-section-daemon">
       <SettingsGroup title="Daemon">
         <SettingsRow
           label="Status"
