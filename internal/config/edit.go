@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 
@@ -223,7 +224,15 @@ func SetPasswordHash(hash string) error {
 // mutate reads config.yaml (an absent file is an empty document), applies fn,
 // refuses the change when the result would not load, and rewrites the file
 // atomically with owner-only permissions.
+//
+// editMu serialises the read-modify-write for every writer inside this
+// process (the config.set RPC, provider.setDefaultModel, set-password), so two
+// of them cannot lose each other's change (ADR-0062). A second process or an
+// editor is a separate writer the daemon cannot lock; the atomic rename keeps
+// the file whole.
 func mutate(fn func(root *yaml.Node) error) error {
+	editMu.Lock()
+	defer editMu.Unlock()
 	root, err := readDoc()
 	if err != nil {
 		return err
@@ -251,6 +260,8 @@ func mutate(fn func(root *yaml.Node) error) error {
 	}
 	return writeAtomic(Path(), buf.Bytes())
 }
+
+var editMu sync.Mutex
 
 func readDoc() (*yaml.Node, error) {
 	data, err := os.ReadFile(Path())

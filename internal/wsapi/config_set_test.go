@@ -364,3 +364,35 @@ func Test_human_only_rpcs_drift(t *testing.T) {
 		t.Error("config.set is on RunScopedMethods")
 	}
 }
+
+// Test_config_set_audit_chain_is_consistent_under_concurrency hammers ONE key
+// from many goroutines: the handler's mutex makes read-old, write and audit one
+// step, so each audit line's old value is the previous line's new value. With
+// the handler mutex gone the old value is read before a rival's write lands and
+// the chain breaks.
+func Test_config_set_audit_chain_is_consistent_under_concurrency(t *testing.T) {
+	e := newConfigSetEnv(t)
+	var wg sync.WaitGroup
+	for i := 0; i < 24; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 6; j++ {
+				v := (i+j)%2 == 0
+				if _, err := e.set(localRC(), "plugins.enabled", v); err != nil {
+					t.Errorf("set: %v", err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	lines := e.audit(t)
+	if len(lines) != 24*6 {
+		t.Fatalf("audit lines = %d, want %d", len(lines), 24*6)
+	}
+	for i := 1; i < len(lines); i++ {
+		if lines[i].Old != lines[i-1].New {
+			t.Fatalf("audit line %d old = %q but line %d new = %q: a rival write slipped between read and write", i, lines[i].Old, i-1, lines[i-1].New)
+		}
+	}
+}
