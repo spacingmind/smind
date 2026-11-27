@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
+	"sync"
 
 	"github.com/spacingmind/smind/internal/config"
 )
@@ -89,5 +91,122 @@ func handleConfigGet() handlerFunc {
 			})
 		}
 		return map[string]any{"keys": out}, nil
+	}
+}
+
+// config.set (ADR-0062): change one writable allowlisted key. Human-only and
+// loopback-only (no allowRemoteManage escape hatch); every attempt, allowed or
+// refused, leaves one line in config-audit.jsonl.
+
+// configSetMu serialises the read-old / write / re-read sequence so two calls
+// cannot lose each other's update or misreport the old value.
+var configSetMu sync.Mutex
+
+// configAfterWrite is a test seam: it runs after config.Set wrote the file and
+// before the value is re-read, so a test can prove the response comes from the
+// file and not from the submitted value.
+var configAfterWrite func()
+
+// configCaller classifies the caller for the audit line.
+func configCaller(rc *requestContext) (channel, caller string) {
+	switch {
+	case rc == nil:
+		return "", "unknown"
+	case rc.runScoped:
+		return string(rc.channel), "run"
+	case !rc.local:
+		return string(rc.channel), "relay"
+	case rc.channel != ChannelLoopback:
+		return string(rc.channel), "remote"
+	}
+	return string(rc.channel), "human"
+}
+
+func auditConfig(e config.AuditEntry) {
+	if err := config.AppendAudit(e); err != nil {
+		log.Printf("config.set: audit write failed: %v", err)
+	}
+}
+
+func handleConfigSet(publish func(key string)) handlerFunc {
+	return func(_ context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		channel, caller := configCaller(rc)
+		entry := config.AuditEntry{Channel: channel, Caller: caller}
+		refuse := func(outcome string, err error) (any, error) {
+			entry.Outcome = outcome
+			auditConfig(entry)
+			return nil, err
+		}
+		switch {
+		case rc == nil || rc.runScoped:
+			return refuse("refused: run-scoped", forbidden("config.set is not available to agents"))
+		case !rc.local:
+			return refuse("refused: relay", forbidden("config.set is only available on a direct connection, not over the relay"))
+		case rc.channel != ChannelLoopback:
+			return refuse("refused: non-loopback", forbidden("config.set needs a local (loopback) connection"))
+		}
+
+		var params struct {
+			Key   string `json:"key"`
+			Value any    `json:"value"`
+		}
+		if err := json.Unmarshal(raw, &params); err != nil {
+			return refuse("refused: invalid params", &rpcCodeError{code: codeInvalid, msg: "config.set: invalid params: " + err.Error()})
+		}
+		entry.Key = params.Key
+		ck, ok := config.LookupConfigKey(params.Key)
+		if !ok {
+			return refuse("refused: not in allowlist", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("config.set: unknown key %q", params.Key)})
+		}
+		if !ck.Writable {
+			return refuse("refused: read-only", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("config.set: %s is read-only over the API (change it in config.yaml)", params.Key)})
+		}
+		var value string
+		switch v := params.Value.(type) {
+		case string:
+			value = v
+		case bool:
+			value = fmt.Sprintf("%t", v)
+		default:
+			return refuse("refused: invalid", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("config.set: %s wants true or false", params.Key)})
+		}
+
+		configSetMu.Lock()
+		old, err := config.Effective(params.Key)
+		if err != nil {
+			configSetMu.Unlock()
+			return refuse("refused: invalid: "+err.Error(), &rpcCodeError{code: codeInvalid, msg: "config.set: " + err.Error()})
+		}
+		entry.Old = old.Value
+		if old.Source == "env" {
+			configSetMu.Unlock()
+			return refuse("refused: env-overridden", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("overridden by %s, unset it first", old.Env)})
+		}
+		// Every writable row is a bool (the table says so).
+		if value != "true" && value != "false" {
+			configSetMu.Unlock()
+			return refuse("refused: invalid", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("config.set: %s wants true or false", params.Key)})
+		}
+		if err := config.Set(params.Key, value); err != nil {
+			configSetMu.Unlock()
+			return refuse("refused: invalid: "+err.Error(), &rpcCodeError{code: codeInvalid, msg: "config.set: " + err.Error()})
+		}
+		if configAfterWrite != nil {
+			configAfterWrite()
+		}
+		cur, err := config.Effective(params.Key)
+		if err != nil {
+			configSetMu.Unlock()
+			return refuse("refused: invalid: "+err.Error(), &rpcCodeError{code: codeInvalid, msg: "config.set: " + err.Error()})
+		}
+		entry.New = cur.Value
+		entry.Outcome = "ok"
+		auditConfig(entry)
+		configSetMu.Unlock()
+
+		if publish != nil {
+			publish(params.Key)
+		}
+		return map[string]any{"key": params.Key, "value": cur.Value, "restart": ck.Restart}, nil
 	}
 }

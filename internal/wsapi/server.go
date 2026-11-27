@@ -321,6 +321,9 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	pruner := runs.NewPruner(reg, db, retentionDays)
 	hs["runs.prune"] = handleRunsPrune(pruner)
 	hs["config.get"] = handleConfigGet()
+	hs["config.set"] = handleConfigSet(func(key string) {
+		bus.Publish(Event{Topic: TopicConfigUpdated, Payload: map[string]string{"key": key}})
+	})
 	hs["doctor.sessions"] = handleDoctorSessions(db, runner)
 	hs["db.compact"] = handleDBCompact(reg, db)
 	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)

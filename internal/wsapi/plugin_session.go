@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/learning/redact"
 	"github.com/spacingmind/smind/internal/plugins/host"
@@ -87,7 +88,7 @@ var PluginCapabilityTable = map[string][]PluginMethod{
 var pluginNeverPrefixes = []string{
 	"plugin.", "provider.", "account.", "relay.", "push.", "learning.", "terminal.",
 	"forge.", "automation.", "settings.", "permission.", "device.", "auth.", "fs.", "file.",
-	"usage.", "scratch.", "daemon.", "browser.",
+	"usage.", "scratch.", "daemon.", "browser.", "config.",
 }
 
 var pluginNeverMethods = []string{
@@ -287,6 +288,9 @@ func rpcErr(code int, msg string, data any) *host.RPCError {
 // Request resolves one plugin-to-host call. See the file comment for the order.
 func (s *pluginSession) Request(ctx context.Context, method string, params json.RawMessage) (any, *host.RPCError) {
 	if pluginNever(method) {
+		if strings.HasPrefix(method, "config.") {
+			auditConfig(config.AuditEntry{Outcome: "refused: plugin session", Channel: "plugin", Caller: "plugin"})
+		}
 		return nil, rpcErr(host.ErrCodeForbidden, "method "+clipMethod(method)+" is never available to plugins", nil)
 	}
 	if method == pluginRPCUIRefresh {
