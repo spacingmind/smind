@@ -42,6 +42,10 @@ var knownKeys = map[string]keyInfo{
 	"server.hostnames":    {kindList, "extra Host header names, comma separated; a leading . matches subdomains"},
 	"server.passwordHash": {kindSecret, "set with `smind set-password`; shown only as <set>"},
 	"automations.enabled": {kindBool, "turn the automations engine on (cron schedules, CI failure signals); default false"},
+	"automations.paused":  {kindBool, "pause the engine: signals are recorded as paused and nothing fires; default false"},
+	"plugins.enabled":     {kindBool, "turn the plugin system on (each plugin still needs its consent); default false"},
+	"fleet.enabled":       {kindBool, "turn the fleet layer on (peer hosts; restart to apply); default false"},
+	"learning.enabled":    {kindBool, "the learning subsystem's global kill switch; default true, SMIND_LEARNING=0 wins"},
 }
 
 func init() {
