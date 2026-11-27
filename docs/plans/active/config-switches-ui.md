@@ -64,6 +64,8 @@ GLM peers write the code from step briefs (A row + hook + keys + bridge + tests;
 - [x] review, mutations, validator, frames (web harness)
 - [x] REAL-WINDOW frame pass DONE (see Validation): earlier parked state: branch `feat/config-switches-ui`, head `a6567cce9`, validationId 44 (pass, mergeReady), PR #992. Shot list: Automations off/confirm/on/paused/resumed (Settings + page), Plugins off/on, Hosts off + restart notice, Learning kill switch + restart notice, read-only row (web harness if unreachable), env-overridden disabled (daemon started once with SMIND_LEARNING=0), refusal; light/dark, 1280x800 and 800x520, inside the Settings modal. Audit app: `scripts/desktop-audit-build.sh`, CARGO_TARGET_DIR under `~/.smind/dogfood/ui-b5/`, deleted after.
 
+- [ ] PENDING (screen was locked): REAL-WINDOW re-shoot of Hosts off/confirm/pending-restart (+learning pending-restart if touched), light+dark, 1280x800+800x520, from head c84f120f2, then update the PR body and report. (Audit app: scripts/desktop-audit-build.sh with CARGO_TARGET_DIR under ~/.smind/dogfood/ui-b5/, delete after; dogfood daemon with its own SMIND_HOME; helpers in ~/.smind/dogfood/ui-b5/real/.)
+
 ## Validation
 
 - Unit: 20 named tests plus 3 extra (`config_refusal_without_a_dialog_shows_an_alert`, `config_saved_restart_notice_opens_daemon_settings`, `config_open_daemon_settings_is_offered_only_on_desktop`); full UI suite 537 files / 5911 tests; `bunx tsc -b` clean; `sh scripts/verify.sh` PASS; full e2e matrix `E2E_FULL=1`: 427 passed, 49 skipped, 0 failed; UC5-01 and UC5-02 write the real daemon's config.yaml and assert the file changed and `# keep me` survived.
