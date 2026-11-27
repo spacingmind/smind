@@ -110,6 +110,8 @@ profile.create
 profile.delete
 profile.get
 profile.list
+profile.rolePack.apply
+profile.rolePack.check
 profile.update
 provider.addFromRecipe
 provider.addInstance

@@ -24,9 +24,4 @@ export const BROWSER_RESIDUAL_WINDOWS_KEY = "On Windows the browser is not offer
  * internal and are dropped, the first letter is capitalised and a full stop is added when the text has none. The words
  * in between are the daemon's, unchanged (the CLI keeps printing the daemon's text as it is).
  */
-export function daemonSentence(message: string): string {
-  const bare = message.replace(/^browser\.(?:settings\.(?:get|set)|data\.clear): /, "").replace(/^browser: /, "").trim();
-  if (bare === "") return bare;
-  const capital = bare.charAt(0).toUpperCase() + bare.slice(1);
-  return /[.!?]$/.test(capital) ? capital : `${capital}.`;
-}
+export { daemonSentence } from "@/lib/daemon-sentence";
