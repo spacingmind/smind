@@ -237,6 +237,14 @@ describe("ConfigSwitchRow", () => {
     expect(screen.queryByTestId("row-open-daemon")).toBeNull();
   });
 
+  it("config_flush_row_has_no_side_padding_inside_a_card", async () => {
+    const d = daemonWith([view("automations.enabled", { writable: true })]);
+    renderWithDaemon(<ConfigSwitchRow configKey="automations.enabled" label="Label" description="Described." testId="row" flush />, d.daemon);
+    await ready();
+    expect(screen.getByTestId("row")).toHaveClass("px-0");
+    expect(screen.getByTestId("row")).not.toHaveClass("px-4");
+  });
+
   it("config_get_error_shows_a_read_only_sentence", async () => {
     const d = daemonWith([]);
     mount(d, "plugins.enabled");

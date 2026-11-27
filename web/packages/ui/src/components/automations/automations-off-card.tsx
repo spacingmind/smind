@@ -39,6 +39,7 @@ export function AutomationsOffCard() {
         label="Automations"
         description="Rules that start a task when a signal fires."
         testId="config-automations-enabled"
+        flush
       />
       {readOnly && (
         <>
