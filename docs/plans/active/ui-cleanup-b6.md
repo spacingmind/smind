@@ -52,8 +52,11 @@ GLM peers write every line of code from step-by-step briefs, one commit per step
 
 ## Progress
 
-- Spec written (this commit). Code: not started.
+- Spec and contract committed first. Code by GLM peers (A devices, B diagnostics, C push + demo refusals + window error, D automations relay tests + UC6-04, E UC6-01..03, F the desktop-mode frames spec), one commit per step, each reviewed and cherry-picked by the Lead.
+- Corrections found while building: `push.status` needs a paired device (not callable from the local client); the Daemon section is desktop-only, so devices and diagnostics are covered by unit tests and desktop-mode frames, not by the normal web e2e; demo mode refuses `relay.device.*` and `push.test` (the demo-coverage guard caught it).
 
 ## Validation
 
-- Pending.
+- Mutations M1-M4 each fail their named test on committed code (Lead): approve without confirm, relay view makes the call, doctor polls, key bytes rendered.
+- Full UI suite 543 files / 5955 tests, `tsc -b`, `sh scripts/verify.sh` PASS, `ui-cleanup-b6` e2e 4 passed (UC6-01..04).
+- Validator verdict and frames: in the PR body.
