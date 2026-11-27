@@ -59,6 +59,8 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
   if (!dir) return
   fs.mkdirSync(dir, { recursive: true })
   await settled(page)
+  // Frames start from the top of the section (a section that loaded late can leave its scroller part-way down).
+  await page.evaluate(() => document.querySelectorAll('[data-testid="settings-dialog"] *').forEach((el) => { if (el.scrollTop > 0) el.scrollTop = 0 }))
   const wide = (page.viewportSize()?.width ?? 0) >= 1280
   await page.screenshot({ path: path.join(dir, `${name}-${testInfo.project.name}${wide ? '-1280x800' : ''}.png`) })
   if (!wide) return
