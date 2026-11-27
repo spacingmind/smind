@@ -45,12 +45,7 @@ var HumanOnlyRPCs = []string{
 // PendingHumanOnlyRPCs are the entries of HumanOnlyRPCs whose handlers are not
 // on this branch yet; the wsapi drift test lets them be absent and drops the
 // tolerance for each as soon as its handler exists.
-var PendingHumanOnlyRPCs = []string{
-	// The config.set wsapi handler arrives in another change of this branch
-	// (internal/wsapi/config_handlers.go); the drift test tolerates a pending
-	// name until its handler exists.
-	"config.set",
-}
+var PendingHumanOnlyRPCs = []string{}
 
 // humanOnlyCommand is one human-only smind command: the words that name it
 // and the verbs of it that are human-only (nil: every verb).

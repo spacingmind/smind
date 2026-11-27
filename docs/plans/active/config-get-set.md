@@ -40,7 +40,9 @@ Floor and CLI: `human_only_table_names_config_set` (`internal/permpolicy`, plus 
 
 ## Mutations (committed code; each must fail a named test)
 
-M1 run-scoped guard removed from `config.set`; M2 relay guard removed; M3 loopback guard removed; M4 plugin never-prefix `config.` removed; M5 `config.set` accepts a read-only key; M6 env-overridden check removed; M7 audit skipped on refusal; M8 mutex removed (race test); M9 `agentSafeKeys` made non-empty; M10 the floor row removed; M11 `server.*` returned to a non-loopback `config.get`; M12 the re-read after write replaced by the submitted value.
+M1 run-scoped guard removed from `config.set`; M2 relay guard removed; M3 loopback guard removed; M4 plugin never-prefix `config.` removed; M5 `config.set` accepts a read-only key; M6 env-overridden check removed; M7 audit skipped on refusal; M8 handler mutex removed (audit-chain concurrency test); M8b the `mutate` mutex of every in-process writer removed (writers race test); M9 `agentSafeKeys` made non-empty; M10 the floor row removed; M11 `server.*` returned to a non-loopback `config.get`; M12 the re-read after write replaced by the submitted value.
+
+Lead findings from running them on committed code: M1 and M2 were only killed by an error-message mismatch because the tests used an agent and a relay context with no loopback channel (a later guard caught them); the tests now use an agent and a relay context ON loopback so each guard is isolated. M4 SURVIVED (a method outside the plugin table is refused anyway as unknown): the test now requires the refusal text "never available to plugins". M8 (handler mutex) and M8b: with the lock only in the handler a direct `config.Set` writer (provider.setDefaultModel, set-password) could still race, so the lock moved into `mutate` and a config-package test drives `Set` concurrently; M8b SURVIVED until that test existed. Each is disclosed in the PR body.
 
 ## Staffing
 
@@ -55,4 +57,4 @@ Lead (Sonnet 5.5) writes spec, contract, review, mutations. GLM peers write the 
 
 ## Validation
 
-(filled in as the work lands)
+(filled in at PR time)
