@@ -10,7 +10,8 @@ import { LearningOptIn } from "@/components/learning/learning-optin";
 import { PendingProposalBadge } from "@/components/learning/pending-badge";
 import { LearnedSkillRow, ProposalRow } from "@/components/learning/skill-row";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
-import { SettingsEmptyCard } from "@/components/settings/settings-layout";
+import { ConfigSwitchRow } from "@/components/settings/config-switch-row";
+import { SettingsEmptyCard, SettingsGroup } from "@/components/settings/settings-layout";
 import { SettingsWorkspacePicker } from "@/components/settings/settings-workspace-picker";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -115,6 +116,20 @@ function SkillsTab({
   );
 }
 
+/** The global kill switch, always shown (so it can be switched back on); the per-workspace opt-in below disables itself while it is off. */
+function LearningKillSwitch() {
+  return (
+    <SettingsGroup>
+      <ConfigSwitchRow
+        configKey="learning.enabled"
+        label="Learning"
+        description="The global kill switch. Off: nothing is collected and no learned skill is offered to agents."
+        testId="config-learning-enabled"
+      />
+    </SettingsGroup>
+  );
+}
+
 /**
  * Settings -> Skills (learned) (ADR-0026 §8): per-workspace learning opt-in, and the workspace's
  * skill proposals (the inbox), active skills and archive. Everything is read through the shared
@@ -141,7 +156,8 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
   }
   if (!workspace) {
     return (
-      <div data-testid="settings-section-learned-skills">
+      <div className="flex flex-col gap-4" data-testid="settings-section-learned-skills">
+        <LearningKillSwitch />
         <SettingsEmptyCard testId="learning-no-workspaces" title="No workspaces yet" description="Add a workspace to start learning from its runs." />
       </div>
     );
@@ -163,6 +179,7 @@ function LearnedSkillsSection({ closeSettings }: SettingsSectionContext) {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-section-learned-skills">
+      <LearningKillSwitch />
       <SettingsWorkspacePicker
         workspaces={workspaces}
         value={workspace.id}

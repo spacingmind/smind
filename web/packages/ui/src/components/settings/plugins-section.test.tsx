@@ -61,14 +61,11 @@ describe("settings-plugins section", () => {
     expect(listSettingsSections().find((s) => s.id === "plugins")?.label).toBe("Plugins");
   });
 
-  it("off state: says plugins are off, how to turn them on, and has no control for the switch", async () => {
+  it("off state: no alert and no config.yaml text, and the page itself stays read-only", async () => {
     await renderSection(daemonWith([DIR], false));
-    const off = screen.getByTestId("plugins-off");
-    expect(off).toHaveTextContent("Plugins are off");
-    expect(off).toHaveTextContent("plugins.enabled");
-    expect(off).toHaveTextContent("config.yaml");
-    // The page has NO control that flips the global switch: no checkbox, nothing to "turn on", and the row's
-    // own enable switch (the only switch on the page) is locked.
+    expect(screen.queryByTestId("plugins-off")).toBeNull();
+    expect(screen.getByTestId("settings-section-plugins")).not.toHaveTextContent("config.yaml");
+    // No config.get answer here, so no global switch row; the plugin row's own enable switch is the only switch and is locked.
     expect(screen.getAllByRole("switch")).toHaveLength(1);
     expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
     expect(screen.queryByRole("button", { name: /turn on|enable plugins|plugins on/i })).toBeNull();
@@ -337,10 +334,10 @@ describe("settings-plugins section", () => {
   it("live: a flip of the global switch shows or hides the off state without a reload", async () => {
     const d = daemonWith([DIR], true);
     await renderSection(d);
-    expect(screen.queryByTestId("plugins-off")).toBeNull();
+    expect(screen.getByTestId("plugin-install-button")).toBeEnabled();
     d.listing = { globalEnabled: false, plugins: [DIR] };
     act(() => d.emit("plugin.updated", { id: "", globalEnabled: false }));
-    await waitFor(() => expect(screen.getByTestId("plugins-off")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("plugin-install-button")).toBeDisabled());
   });
 
   it("a plugin focus request (from an owner badge) expands that plugin's detail", async () => {
