@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"strings"
 	"sync"
 
 	"github.com/spacingmind/smind/internal/config"
@@ -141,6 +142,11 @@ func configErr(method string, err error) *rpcCodeError {
 		log.Printf("%s: %v", method, err)
 		return &rpcCodeError{code: codeInvalid, msg: method + ": " + config.ErrConfigUnreadable.Error() + "; fix it and try again"}
 	}
+	if strings.Contains(err.Error(), "would not parse") || strings.Contains(err.Error(), "unmarshal") {
+		// The yaml library's words carry fragments of the file's values.
+		log.Printf("%s: %v", method, err)
+		return &rpcCodeError{code: codeInvalid, msg: method + ": config.yaml would not load with this change (details are in the daemon log)"}
+	}
 	return &rpcCodeError{code: codeInvalid, msg: method + ": " + err.Error()}
 }
 
@@ -190,7 +196,7 @@ func handleConfigSet(publish func(key string)) handlerFunc {
 		// The locked section is a closure with a deferred unlock, so a panic in
 		// the write cannot leave every later config.set waiting forever.
 		var cur config.EffectiveValue
-		var auditErr error
+		var auditErr, rereadErr error
 		res, rerr := func() (any, error) {
 			configSetMu.Lock()
 			defer configSetMu.Unlock()
@@ -214,7 +220,12 @@ func handleConfigSet(publish func(key string)) handlerFunc {
 			}
 			cur, err = config.Effective(params.Key)
 			if err != nil {
-				return refuse("refused: unreadable config.yaml after write", configErr("config.set", err))
+				// The write landed: audit it as applied, tell the caller, and
+				// still publish so open UIs refetch.
+				entry.Outcome = "applied: could not re-read after write"
+				auditErr = auditConfig(entry)
+				rereadErr = err
+				return nil, nil
 			}
 			entry.New = cur.Value
 			entry.Outcome = "ok"
@@ -227,6 +238,9 @@ func handleConfigSet(publish func(key string)) handlerFunc {
 
 		if publish != nil {
 			publish(params.Key)
+		}
+		if rereadErr != nil {
+			return nil, configErr("config.set", rereadErr)
 		}
 		if auditErr != nil {
 			// The switch moved; say so rather than pretend it did not.

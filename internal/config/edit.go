@@ -310,6 +310,9 @@ func refuseAnchored(root *yaml.Node, path string) error {
 		if cur == nil || cur.Kind != yaml.MappingNode {
 			return nil
 		}
+		if k, _ := mapGet(cur, "<<"); k != nil {
+			return fmt.Errorf("%s: config.yaml uses a YAML merge key here; edit the file by hand", path)
+		}
 		_, v := mapGet(cur, p)
 		if v == nil {
 			return nil

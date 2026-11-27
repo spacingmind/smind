@@ -208,10 +208,10 @@ func (a *API) ServeDevice(ctx context.Context, tr Transport, deviceID string) {
 // serveLocal is ServeTransport for the token-authenticated /ws connection:
 // the one surface allowed to administer the daemon itself (relay.device.*).
 func (a *API) serveLocal(ctx context.Context, tr Transport, ch Channel) {
-	a.serveLocalStrict(ctx, tr, ch, ch == ChannelLoopback)
+	a.serveLocalStrict(ctx, tr, ch, false)
 }
 
-// serveLocalStrict is serveLocal with the proxy-aware fact of requestContext.strictLocal.
+// serveLocal never claims the proxy-aware fact (strictLocal false: the safe default); serveLocalStrict is serveLocal with the proxy-aware fact of requestContext.strictLocal.
 func (a *API) serveLocalStrict(ctx context.Context, tr Transport, ch Channel, strict bool) {
 	a.serve(ctx, tr, true, DirectMaxMessage, "", ch, strict)
 }

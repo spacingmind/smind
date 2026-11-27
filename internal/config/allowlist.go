@@ -128,14 +128,22 @@ func Effective(key string) (EffectiveValue, error) {
 	if ev, ok := envEffective(ck); ok {
 		return ev, nil
 	}
-	root, err := readDoc()
-	if err != nil {
-		// An unreadable or unparsable config.yaml is not "the default": the
-		// loader fails closed on it, so reporting defaults here would show the
-		// opposite of what the daemon runs for the kill switches.
+	data, err := os.ReadFile(Path())
+	if err != nil && !os.IsNotExist(err) {
 		return EffectiveValue{}, fmt.Errorf("%w: %w", ErrConfigUnreadable, err)
 	}
-	if v, present := fileValue(root, key); present {
+	// An unreadable or unparsable config.yaml is not "the default": the loader
+	// fails closed on it, so reporting defaults here would show the opposite of
+	// what the daemon runs for the kill switches. Decoding into a generic map
+	// resolves aliases and merge keys the way the loader does, and reads
+	// yes/on/True as the bool they are.
+	var doc map[string]any
+	if len(data) > 0 {
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return EffectiveValue{}, fmt.Errorf("%w: %w", ErrConfigUnreadable, err)
+		}
+	}
+	if v, present := decodedValue(doc, key); present {
 		if ck.Kind == kindBool {
 			v = normalizeBool(v)
 		}
@@ -147,9 +155,8 @@ func Effective(key string) (EffectiveValue, error) {
 // ErrConfigUnreadable wraps a failure to read or parse config.yaml.
 var ErrConfigUnreadable = errors.New("config.yaml could not be read or parsed")
 
-// normalizeBool turns the YAML 1.1 spellings of a bool (yes, on, True, ...)
-// into true/false, the way the loader reads them; anything else is returned as
-// written.
+// normalizeBool turns the spellings the loader reads as a bool (yes, on, no,
+// off, True, ...) into true/false; anything else is returned as written.
 func normalizeBool(v string) string {
 	var b bool
 	if err := yaml.Unmarshal([]byte(v), &b); err != nil {
@@ -201,20 +208,29 @@ func envHostnames(v string) []string {
 	return out
 }
 
-// fileValue reads one key's stored value from the parsed config.yaml the way
-// Get does (a scalar as written, a list comma-joined), reporting whether the
-// key is present at all.
-func fileValue(root *yaml.Node, key string) (string, bool) {
-	n := find(root, strings.Split(key, "."))
-	if n == nil {
-		return "", false
+// decodedValue walks a decoded config document to key and formats a scalar the
+// way `smind config get` prints it (a list comma-joined). present is false when
+// any step is absent or null.
+func decodedValue(doc map[string]any, key string) (string, bool) {
+	var cur any = doc
+	for _, p := range strings.Split(key, ".") {
+		m, ok := cur.(map[string]any)
+		if !ok {
+			return "", false
+		}
+		if cur, ok = m[p]; !ok || cur == nil {
+			return "", false
+		}
 	}
-	if n.Kind == yaml.SequenceNode {
-		parts := make([]string, 0, len(n.Content))
-		for _, c := range n.Content {
-			parts = append(parts, c.Value)
+	switch v := cur.(type) {
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, e := range v {
+			parts = append(parts, fmt.Sprint(e))
 		}
 		return strings.Join(parts, ","), true
+	case map[string]any:
+		return "", false
 	}
-	return n.Value, true
+	return fmt.Sprint(cur), true
 }

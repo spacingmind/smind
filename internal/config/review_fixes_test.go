@@ -81,3 +81,32 @@ func Test_config_audit_caps_fields_and_keeps_generations(t *testing.T) {
 		t.Errorf("more than %d generations kept", auditGenerations)
 	}
 }
+
+// Aliases and merge keys are resolved the way the loader does (reviewer 3).
+func Test_config_effective_resolves_aliases_and_merge_keys(t *testing.T) {
+	writeConfig(t, "base: &a\n  enabled: true\nautomations: *a\n")
+	if ev, err := Effective("automations.enabled"); err != nil || ev.Value != "true" || ev.Source != "file" {
+		t.Errorf("alias section: %+v (%v), want true from file", ev, err)
+	}
+	writeConfig(t, "x: &t true\nbrowser:\n  disabled: *t\n")
+	if ev, err := Effective("browser.disabled"); err != nil || ev.Value != "true" {
+		t.Errorf("alias leaf: %+v (%v), want true", ev, err)
+	}
+	writeConfig(t, "defaults: &d\n  automations:\n    enabled: true\n    maxBudgetUsd: 5\n<<: *d\n")
+	if ev, err := Effective("automations.enabled"); err != nil || ev.Value != "true" {
+		t.Errorf("merge key: %+v (%v), want true", ev, err)
+	}
+}
+
+// A merge key above the path: a fresh section would shadow the merged one and
+// drop its siblings, so the edit is refused (reviewer 3).
+func Test_config_set_refuses_under_a_merge_key(t *testing.T) {
+	body := "defaults: &d\n  automations:\n    enabled: true\n    maxBudgetUsd: 5\n<<: *d\n"
+	path := writeConfig(t, body)
+	if err := Set("automations.paused", "true"); err == nil || !strings.Contains(err.Error(), "merge key") {
+		t.Fatalf("Set under a merge key = %v, want a refusal", err)
+	}
+	if got, _ := os.ReadFile(path); string(got) != body {
+		t.Fatalf("config.yaml changed:\n%s", got)
+	}
+}

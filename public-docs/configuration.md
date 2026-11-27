@@ -82,7 +82,12 @@ a network. The edit is the same comment-preserving write as `smind config set`.
 
 One honest limit: a process running as the same operating-system user can still
 edit `config.yaml` directly. Refusing agent runs and non-local callers narrows
-the easy path; it does not make the file private.
+the easy path; it does not make the file private. In the same way, `config.set`
+treats a connection as local only when it comes straight from the machine (a
+loopback address, a local host name, no proxy headers). A reverse proxy on the
+same machine that rewrites the host name and adds no forwarding headers cannot
+be told apart from a local client, so do not put one in front of a daemon whose
+password you share.
 
 ## Keys
 

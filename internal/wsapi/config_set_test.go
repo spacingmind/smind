@@ -491,3 +491,19 @@ func Test_config_get_unreadable_file_is_an_error_without_parser_text(t *testing.
 		t.Fatalf("the error carries the file's text: %v", err)
 	}
 }
+
+// The yaml library's error words carry fragments of the file's values; the
+// caller sees a generic line (reviewer 3).
+func Test_config_set_error_carries_no_file_fragment(t *testing.T) {
+	e := newConfigSetEnv(t)
+	if err := os.WriteFile(filepath.Join(e.home, "config.yaml"), []byte("server:\n  port: SECRET-FRAGMENT\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.set(localRC(), "plugins.enabled", true)
+	if err == nil {
+		t.Fatal("config.set on a file that does not load was accepted")
+	}
+	if strings.Contains(err.Error(), "SECRET-FRAGMENT") {
+		t.Fatalf("the error carries the file's text: %v", err)
+	}
+}
