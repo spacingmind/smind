@@ -29,7 +29,7 @@ import { DesktopUpdateDialogView } from "@/components/desktop-update-dialog";
 import { DesktopUnreachable } from "@/components/desktop-unreachable";
 import { InboxScreen } from "@/components/inbox/inbox-screen";
 import { PageChromeContext } from "@/hooks/use-page-chrome";
-import { SettingsScreen } from "@/components/settings/settings-screen";
+import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
@@ -236,10 +236,10 @@ export function App({
 }
 
 /**
- * The only shortcut actions that dispatch while Settings covers the shell.
- * Everything else (task/tab/pane/chat navigation, new tab, quick open,
+ * The only shortcut actions that dispatch while Settings or a full-page view
+ * is open. Everything else (task/tab/pane/chat navigation, new tab, quick open,
  * run.interrupt, sidebar toggle, ...) belongs to handlers that stay mounted
- * in the hidden shell and must not act on it unseen.
+ * under the modal or page and must not act on the workspace unseen.
  */
 const SETTINGS_SAFE_ACTIONS: readonly ActionId[] = [
   "palette.open",
@@ -316,20 +316,28 @@ function AppShell({
   // the plan's "no router library introduction" decision; settings is not
   // deep-linkable and does not disturb the hash the task routing below
   // owns.
-  const [activeView, setActiveView] = useState<"workspace" | "settings" | "inbox" | "automations" | "plugin">("workspace");
+  const [activeView, setActiveView] = useState<"workspace" | "inbox" | "automations" | "plugin">("workspace");
   // Bumped on every request to open Settings, and used as the screen's key:
   // asking for a section while Settings is already open (shortcuts.help,
   // a deep link) remounts it onto that section instead of being ignored.
   const [settingsOpenNonce, setSettingsOpenNonce] = useState(0);
-  useActionRestriction(activeView !== "workspace" ? SETTINGS_SAFE_ACTIONS : null);
+  // Settings is a modal over the workspace, not a view: open/closed on its own.
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  useActionRestriction(settingsOpen || activeView !== "workspace" ? SETTINGS_SAFE_ACTIONS : null);
   const openSettings = useCallback((sectionId?: string) => {
     // A task window has no Settings: its connection, daemon and update sections need main-only commands.
     if (isTaskWindow) return;
     setSettingsInitialSectionId(sectionId ?? null);
     setSettingsOpenNonce((n) => n + 1);
-    setActiveView("settings");
+    setSettingsOpen(true);
   }, []);
-  const closeSettings = useCallback(() => setActiveView("workspace"), []);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const closeView = useCallback(() => setActiveView("workspace"), []);
+  // A navigation action leaves everything that covers the workspace: the Settings modal and any full-page view.
+  const leaveOverlays = useCallback(() => {
+    setSettingsOpen(false);
+    setActiveView("workspace");
+  }, []);
   // The Human inbox (ADR-0045): a full-screen view like Settings, reached from the sidebar footer.
   // In the compact layout the sidebar is a sheet: let it finish closing before the inbox covers the screen, so
   // its exit animation never ghosts over the page.
@@ -562,11 +570,11 @@ function AppShell({
   const selectTaskFromSidebar = useCallback(
     (task: Task) => {
       // With the sidebar kept beside a full-page view (Settings, Inbox, ...), a click on a task leaves that view.
-      closeSettings();
+      leaveOverlays();
       selectTask(task);
       closeMobileSidebarRef.current?.();
     },
-    [closeSettings, selectTask],
+    [leaveOverlays, selectTask],
   );
 
   // UAT A-11: a task made through the New task dialog lands with the composer
@@ -1256,7 +1264,8 @@ function AppShell({
 
   useActionHandler("settings.open", () => {
     // Already open: keep the user's current section rather than resetting it.
-    if (activeView !== "settings") openSettings();
+    if (settingsOpen) closeSettings();
+    else openSettings();
   });
 
   // Plan usage opens as a modal over whatever is showing, Settings included
@@ -1320,12 +1329,11 @@ function AppShell({
         setSelectedTask(null);
       }
       if (entry.view === "workspace") setActiveView("workspace");
-      else if (entry.view === "settings") openSettings();
       else if (entry.view === "automations") openAutomations();
       else setActiveView("inbox");
       return true;
     },
-    [allTasks, client, selectTask, openSettings, openAutomations],
+    [allTasks, client, selectTask, openAutomations],
   );
   const nav = useNavHistory(navEntry, applyNavEntry);
   useActionHandler("nav.back", () => void nav.back(), { enabled: nav.canBack });
@@ -1611,7 +1619,6 @@ function AppShell({
     </div>
   );
 
-  const settingsOpen = activeView === "settings";
   // A full-page view is open. Below the mobile breakpoint it covers the whole shell (hidden and inert behind it); on
   // desktop widths it sits beside the sidebar, so only the content region is hidden and inert.
   const viewOpen = activeView !== "workspace";
@@ -1619,33 +1626,33 @@ function AppShell({
   // Stable identities: ShellCommands memoizes its palette entries on them.
   const selectTaskFromPalette = useCallback(
     (task: Task) => {
-      closeSettings();
+      leaveOverlays();
       selectTask(task);
     },
-    [closeSettings, selectTask],
+    [leaveOverlays, selectTask],
   );
   const openTabFromPalette = useCallback(
     (taskId: number, entry: TabEntry, placement?: TabPlacement) => {
-      closeSettings();
+      leaveOverlays();
       openTab(taskId, entry, placement);
     },
-    [closeSettings, openTab],
+    [leaveOverlays, openTab],
   );
   const activateFromPalette = useCallback(
     (taskId: number, key: string) => {
-      closeSettings();
+      leaveOverlays();
       activate(taskId, key);
     },
-    [closeSettings, activate],
+    [leaveOverlays, activate],
   );
   // A plugin panel chosen in the palette leaves whatever covered the shell
   // first, then goes through the one shared open path (page vs task tab).
   const openPluginPanelFromPalette = useCallback(
     (panel: PluginPanel) => {
-      closeSettings();
+      leaveOverlays();
       openPluginPanel(panel);
     },
-    [closeSettings, openPluginPanel],
+    [leaveOverlays, openPluginPanel],
   );
   // Full-page views (Settings, Inbox, Automations, plugin pages). On desktop widths they are drawn INSIDE the shell,
   // in the content region beside the sidebar, so the sidebar stays usable and the traffic lights never sit over a
@@ -1656,10 +1663,10 @@ function AppShell({
       {activeView === "inbox" && (
         <div className="absolute inset-0 z-40">
           <InboxScreen
-            onNavigateBack={closeSettings}
+            onNavigateBack={closeView}
             onOpenSettings={(id) => openSettings(id)}
             onOpenTask={(taskId) => {
-              closeSettings();
+              closeView();
               void jumpToTask(taskId);
             }}
           />
@@ -1667,7 +1674,7 @@ function AppShell({
       )}
       {activeView === "automations" && (
         <div className="absolute inset-0 z-40">
-          <AutomationsPage onNavigateBack={closeSettings} closeSettings={closeSettings} />
+          <AutomationsPage onNavigateBack={closeView} closeSettings={closeSettings} />
         </div>
       )}
       {activeView === "plugin" && pluginPage && (
@@ -1677,20 +1684,7 @@ function AppShell({
           <PluginPage
             pluginId={pluginPage.pluginId}
             panelId={pluginPage.panelId}
-            onNavigateBack={closeSettings}
-          />
-        </div>
-      )}
-      {settingsOpen && (
-        // No background here: on macOS the settings sidebar is a vibrancy
-        // surface and the screen paints its own opaque panes.
-        <div className="absolute inset-0 z-40">
-          <SettingsScreen
-            key={settingsOpenNonce}
-            client={client}
-            events={events}
-            onNavigateBack={closeSettings}
-            initialSectionId={settingsInitialSectionId ?? undefined}
+            onNavigateBack={closeView}
           />
         </div>
       )}
@@ -1734,11 +1728,11 @@ function AppShell({
         onOpenTab={openTabFromPalette}
         onActivateTab={activateFromPalette}
         onNewChat={() => {
-          closeSettings();
+          leaveOverlays();
           openNewChat("prefer");
         }}
         onOpenChat={(chatId) => {
-          closeSettings();
+          leaveOverlays();
           openChatById(chatId, "prefer");
         }}
         onOpenPluginPanel={openPluginPanelFromPalette}
@@ -1872,8 +1866,21 @@ function AppShell({
         <ShortcutsOverlay
           open={shortcutsOverlayOpen}
           onOpenChange={setShortcutsOverlayOpen}
-          onCustomize={() => openSettings("shortcuts")}
+          onCustomize={() => {
+            setShortcutsOverlayOpen(false);
+            openSettings("shortcuts");
+          }}
         />
+        {!isTaskWindow && (
+          <SettingsDialog
+            open={settingsOpen}
+            onClose={closeSettings}
+            client={client}
+            events={events}
+            initialSectionId={settingsInitialSectionId ?? undefined}
+            openNonce={settingsOpenNonce}
+          />
+        )}
         </div>
       </PluginActionsBridge>
     </DaemonQueryProvider>

@@ -272,6 +272,8 @@ Feature **off by default** (`fleet.enabled: false`; off = today's behaviour byte
 Caps: `maxHosts` 16, `maxConnectionsPerPeer` 1, handshake 10 s, frame 256 KiB, outstanding requests per link 16, observation backoff
 1 s → 60 s, idempotency window 24 h, replay window 10 min.
 
+> *Amended by ADR-0062 (2026-11-27): `fleet.enabled` is writable through `config.set` (human-only, loopback-only; a restart applies it) and is added to the CLI key list. Off is still today's behaviour byte for byte.*
+
 ## Options considered
 
 1. **Mesh object / cluster membership.** One shared membership list. Rejected: a registry every node trusts is a new central authority;
