@@ -30,7 +30,7 @@ Status: active. Size M. Web only: no daemon, wire or `mobile/` change, no new RP
 - AC6 Doctor: one `doctor.sessions` per click, rows for the six counts, an error sentence, no polling; running disables the button.
 - AC7 Push: the group reads one list, shows "no device" without error, sends one `push.test` per click, maps result codes to sentences, shows no secrets, and is read-only over relay.
 - AC8 A relay client keeps Disable on the Automations page and gets a refusal sentence (not a crash) for Enable/Resume.
-- AC9 Real daemon: Run checks returns counts; the group is inert and honest when relay devices are unavailable.
+- AC9 Mobile push on the real e2e daemon (no relay bridge) is honest: no error banner, a clear "no device" state.
 - AC12 No daemon, wire or mobile change; hygiene green.
 
 ## Test scenarios (named)
@@ -42,7 +42,7 @@ Unit (`web/packages/ui`):
 - `mobile-push-group.test.tsx`: `push_group_counts_registered_devices`, `push_test_with_no_device_is_not_an_error`, `push_test_results_map_codes_to_sentences`, `push_test_shows_no_secrets`, `push_test_one_call_per_click`, `push_group_relay_connection_is_read_only_and_makes_no_call`, `push_disabled_is_a_sentence`.
 - `automations-page.test.tsx`: `automation_relay_client_can_disable_but_enable_and_resume_are_refused_with_a_sentence`.
 
-E2E (`web/e2e/specs/ui-cleanup-b6.spec.ts`, the daemon is real except where a method does not exist on the e2e daemon, which is stubbed through `page.routeWebSocket` and labelled): `UC6-01` Run checks on the real daemon, `UC6-02` devices list + approve/revoke/rename/window against a stubbed relay.device.*, `UC6-03` relay refusal read-only, `UC6-04` push test with no device and with a stubbed device.
+E2E (`web/e2e/specs/ui-cleanup-b6.spec.ts`, the web harness): the Daemon section (devices, diagnostics) exists in the desktop build only, so the web e2e cannot reach it; those two groups are covered by the unit tests and by REAL-WINDOW frames of the desktop audit build. The web e2e covers what the web build has: `UC6-01` Mobile push on the real e2e daemon with no relay bridge and no device (the group says so and "Send test notification" is honest, not an error), `UC6-02` Mobile push with a stubbed `relay.device.list` (one push-registered device) and a stubbed `push.test` result (labelled stub, `page.routeWebSocket`), `UC6-03` Mobile push over a connection that answers `forbidden` (stub): read-only copy, no button, `UC6-04` the Automations page with a stub that answers `forbidden` to `automation.enable` / `automation.resume` and accepts `automation.disable` (a relay client): Disable works, Enable shows the refusal as a sentence.
 
 Mutations on committed code (the validator re-runs them): M1 approve sent without the confirm -> `relay_devices_approve_confirms_then_calls`; M2 the read-only view renders Approve -> `relay_devices_relay_connection_is_read_only_and_makes_no_call`; M3 doctor polls -> `doctor_does_not_poll`; M4 a key byte rendered -> `relay_devices_never_render_key_bytes`.
 

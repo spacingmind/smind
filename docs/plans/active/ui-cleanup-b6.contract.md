@@ -6,10 +6,10 @@ planRef: docs/plans/active/ui-cleanup-b6.md
 acs:
   - id: AC1
     text: "Device list renders every state, connected flag, last seen, push flag; empty state; no key bytes."
-    covers: { tests: [relay_devices_list_renders_all_states, relay_devices_empty_state, relay_devices_never_render_key_bytes, UC6-02], frames: [] }
+    covers: { tests: [relay_devices_list_renders_all_states, relay_devices_empty_state, relay_devices_never_render_key_bytes], frames: [] }
   - id: AC2
     text: "Approve and Revoke confirm by device name, then call exactly once; Cancel sends nothing."
-    covers: { tests: [relay_devices_approve_confirms_then_calls, relay_devices_approve_cancel_sends_nothing, relay_devices_revoke_confirms_then_calls, UC6-02], frames: [] }
+    covers: { tests: [relay_devices_approve_confirms_then_calls, relay_devices_approve_cancel_sends_nothing, relay_devices_revoke_confirms_then_calls], frames: [] }
   - id: AC3
     text: "Rename sends {id,label}; empty label refused."
     covers: { tests: [relay_devices_rename_sends_label, relay_devices_rename_empty_label_refused], frames: [] }
@@ -18,16 +18,16 @@ acs:
     covers: { tests: [relay_devices_pairing_window_opens_and_shows_remaining, relay_devices_one_list_call_on_mount_and_after_a_change], frames: [] }
   - id: AC5
     text: "Relay connection and forbidden answer: read-only copy, no buttons, no call from a known relay connection."
-    covers: { tests: [relay_devices_relay_connection_is_read_only_and_makes_no_call, relay_devices_forbidden_answer_becomes_read_only_copy, relay_devices_no_bridge_says_relay_not_set_up, relay_devices_error_is_a_sentence, UC6-03], frames: [] }
+    covers: { tests: [relay_devices_relay_connection_is_read_only_and_makes_no_call, relay_devices_forbidden_answer_becomes_read_only_copy, relay_devices_no_bridge_says_relay_not_set_up, relay_devices_error_is_a_sentence], frames: [] }
   - id: AC6
     text: "Doctor: once per click, six counts, error sentence, no polling."
-    covers: { tests: [doctor_runs_once_per_click, doctor_shows_the_six_counts, doctor_error_is_a_sentence, doctor_does_not_poll, doctor_button_disabled_while_running, doctor_relay_connection_is_read_only_and_makes_no_call, UC6-01], frames: [] }
+    covers: { tests: [doctor_runs_once_per_click, doctor_shows_the_six_counts, doctor_error_is_a_sentence, doctor_does_not_poll, doctor_button_disabled_while_running, doctor_relay_connection_is_read_only_and_makes_no_call], frames: [] }
   - id: AC7
     text: "Push: count, no-device is not an error, code sentences, no secrets, one call per click, read-only over relay."
-    covers: { tests: [push_group_counts_registered_devices, push_test_with_no_device_is_not_an_error, push_test_results_map_codes_to_sentences, push_test_shows_no_secrets, push_test_one_call_per_click, push_group_relay_connection_is_read_only_and_makes_no_call, push_disabled_is_a_sentence, UC6-04], frames: [] }
+    covers: { tests: [push_group_counts_registered_devices, push_test_with_no_device_is_not_an_error, push_test_results_map_codes_to_sentences, push_test_shows_no_secrets, push_test_one_call_per_click, push_group_relay_connection_is_read_only_and_makes_no_call, push_disabled_is_a_sentence, UC6-01, UC6-02, UC6-03], frames: [] }
   - id: AC8
     text: "A relay client keeps Disable; Enable/Resume refused with a sentence."
-    covers: { tests: [automation_relay_client_can_disable_but_enable_and_resume_are_refused_with_a_sentence], frames: [] }
+    covers: { tests: [automation_relay_client_can_disable_but_enable_and_resume_are_refused_with_a_sentence, UC6-04], frames: [] }
   - id: AC12
     text: "No daemon, wire or mobile change; hygiene green."
     covers: { tests: [hygiene_and_scope], frames: [] }
