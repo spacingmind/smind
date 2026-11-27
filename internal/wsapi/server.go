@@ -320,6 +320,7 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["task.tree"] = handleTaskTree(db, reg, stalled)
 	pruner := runs.NewPruner(reg, db, retentionDays)
 	hs["runs.prune"] = handleRunsPrune(pruner)
+	hs["config.get"] = handleConfigGet()
 	hs["doctor.sessions"] = handleDoctorSessions(db, runner)
 	hs["db.compact"] = handleDBCompact(reg, db)
 	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)
