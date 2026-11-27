@@ -481,6 +481,9 @@ export const REFUSED_METHODS = [
   "profile.rolePack.apply",
   "provider.addFromRecipe", "provider.addInstance", "provider.clearCooldown", "provider.clearSecret", "provider.reload",
   "provider.setDefaultModel", "provider.setEnv", "provider.setSecret", "provider.updateInstance",
+  // the relay devices and the mobile test push are local-only settings of a real daemon: the demo has none
+  "push.test",
+  "relay.device.approve", "relay.device.list", "relay.device.rename", "relay.device.revoke", "relay.device.window",
   "scratch.clean",
   "space.create", "space.delete",
   "run.revealToolHeredoc",
