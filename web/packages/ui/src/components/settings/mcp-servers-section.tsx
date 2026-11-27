@@ -1,13 +1,13 @@
 import { useEffect, useState, type FormEvent } from "react";
 
-import { Checkbox } from "@/components/ui/checkbox";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
-import { SettingsEmptyCard } from "@/components/settings/settings-layout";
+import { SettingsEmptyCard, SettingsList, SettingsListRow } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Switch } from "@/components/ui/switch";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { useLastDefined } from "@/hooks/use-last-defined";
 import { FormError } from "@/components/ui/form-error";
@@ -264,9 +264,9 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
               />
             )}
             {(servers.length > 0 || openCard === "new") && (
-              <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3">
+              <SettingsList>
                 {openCard === "new" && (
-                  <li data-testid="mcp-new-form" className="rounded-lg px-2 py-1.5">
+                  <SettingsListRow data-testid="mcp-new-form">
                     <McpServerForm
                       idPrefix="mcp-form"
                       form={form}
@@ -277,17 +277,17 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                       error={error}
                       submitLabel={pending ? "Saving…" : "Add server"}
                     />
-                  </li>
+                  </SettingsListRow>
                 )}
                 {servers.map((m) => {
                   const editing = openCard === m.id;
                   // A plugin-owned row is read-only for every caller (the daemon answers `read_only_owned`): manage it in Settings -> Plugins.
                   const owned = m.readOnly === true || !!m.owner;
                   return (
-                    <li
+                    <SettingsListRow
                       key={m.id}
                       data-testid={`mcp-row-${m.id}`}
-                      className={`flex flex-col gap-2 rounded-lg px-2 py-1.5 hover:bg-hover ${m.enabled ? "" : "opacity-60"}`}
+                      className={`flex flex-col gap-2 hover:bg-hover ${m.enabled ? "" : "opacity-60"}`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex min-w-0 flex-1 flex-col">
@@ -307,12 +307,12 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                           className="flex shrink-0 cursor-pointer items-center gap-1.5 text-ui-sm text-foreground-muted"
                           title={m.owner ? ownedTooltip(m.owner) : m.enabled ? "Disable this server" : "Enable this server"}
                         >
-                          <Checkbox
+                          <Switch
                             data-testid={`mcp-enabled-${m.id}`}
                             checked={m.enabled}
                             disabled={owned}
                             aria-label={`${m.name} enabled`}
-                            onCheckedChange={(on) => void handleToggleEnabled(m, on === true)}
+                            onCheckedChange={(on) => void handleToggleEnabled(m, on)}
                           />
                           {m.enabled ? "Enabled" : "Disabled"}
                         </label>
@@ -362,10 +362,10 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                           submitLabel={pending ? "Saving…" : "Save"}
                         />
                       )}
-                    </li>
+                    </SettingsListRow>
                   );
                 })}
-              </ul>
+              </SettingsList>
             )}
           </>
         )}
