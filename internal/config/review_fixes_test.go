@@ -110,3 +110,16 @@ func Test_config_set_refuses_under_a_merge_key(t *testing.T) {
 		t.Fatalf("config.yaml changed:\n%s", got)
 	}
 }
+
+// A config.yaml that cannot be read at all (here: a directory) is the same
+// error as an unparsable one, not the defaults (validator finding).
+func Test_config_effective_unreadable_path_is_an_error(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	if err := os.Mkdir(filepath.Join(home, "config.yaml"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Effective("plugins.enabled"); !errors.Is(err, ErrConfigUnreadable) {
+		t.Fatalf("Effective with an unreadable config.yaml = %v, want ErrConfigUnreadable", err)
+	}
+}
