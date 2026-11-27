@@ -12,7 +12,7 @@ import {
 } from "@/lib/nav-history";
 
 const task = (taskId: number): NavEntry => ({ view: "workspace", taskId });
-const settings: NavEntry = { view: "settings", taskId: null };
+const settings: NavEntry = { view: "inbox", taskId: null };
 
 describe("nav history model", () => {
   it("push appends and moves the cursor", () => {
@@ -34,7 +34,7 @@ describe("nav history model", () => {
     expect(pushEntry(once, task(1))).toBe(once);
     const withSettings = pushEntry(once, settings);
     expect(withSettings.entries).toEqual([task(1), settings]);
-    expect(pushEntry(withSettings, { view: "settings", taskId: null })).toBe(withSettings);
+    expect(pushEntry(withSettings, { view: "inbox", taskId: null })).toBe(withSettings);
   });
 
   it("history is capped at 50 entries", () => {

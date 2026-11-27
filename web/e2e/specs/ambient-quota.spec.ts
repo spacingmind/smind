@@ -151,8 +151,9 @@ async function loadReports(app: App) {
   await expect(page.getByTestId('usage-list')).toBeVisible()
   // The section opens as a detail page at narrow widths: that back button returns to the section list first.
   if (app.narrow) await page.getByTestId('settings-detail-back').click()
-  await page.getByTestId('settings-back-button').click()
-  await expect(page.getByTestId('settings-screen')).toHaveCount(0)
+  // The two-column modal has no back button: Escape closes it.
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('settings-dialog')).toHaveCount(0)
   await expect(page.getByTestId('composer')).toBeVisible()
   // Off the settings sidebar, whose hover state would sit over the timeline for the rest of the test.
   const vp = page.viewportSize()

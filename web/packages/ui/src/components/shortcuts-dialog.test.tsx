@@ -5,10 +5,10 @@ import { ShortcutRows } from "@/components/shortcuts-dialog";
 import { KeyboardProvider } from "@/keyboard/keyboard-provider";
 import { platformBindings, SECTION_TITLES, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 
-function renderRows(query?: string) {
+function renderRows(query?: string, readOnly?: boolean) {
   return render(
     <KeyboardProvider>
-      <ShortcutRows query={query} />
+      <ShortcutRows query={query} readOnly={readOnly} />
     </KeyboardProvider>,
   );
 }
@@ -23,6 +23,23 @@ afterEach(() => {
 });
 
 describe("ShortcutRows", () => {
+  it("ui_cleanup_b3_shortcuts_table_uses_container_query", () => {
+    const { container, unmount } = renderRows();
+    const table = container.querySelector("table")!;
+    expect(table.parentElement).toHaveClass("@container", "overflow-x-auto");
+    expect(screen.getAllByTestId("shortcut-row")[0].className).toContain("@max-[44rem]:grid");
+    for (const el of Array.from(container.querySelectorAll("table, table *"))) {
+      for (const cls of Array.from(el.classList)) {
+        expect(cls.startsWith("max-sm:")).toBe(false);
+      }
+    }
+    unmount();
+
+    const ro = renderRows(undefined, true);
+    expect(ro.container.querySelector("table")!.parentElement).not.toHaveClass("@container");
+    expect(screen.getAllByTestId("shortcut-row")[0].className).toContain("max-sm:grid");
+  });
+
   it("lists every registered binding", () => {
     renderRows();
     const rows = screen.getAllByTestId("shortcut-row");

@@ -18,22 +18,23 @@ async function frame(page: Page, testInfo: TestInfo, name: string) {
 
 const narrow = (testInfo: TestInfo) => (testInfo.project.use.viewport?.width ?? 1280) < 768
 
-test('PG-01 Settings opens beside the sidebar, which stays visible and usable', async ({ app }, testInfo) => {
+test('PG-01 Settings opens as a modal over the sidebar and workspace, which stay visible', async ({ app }, testInfo) => {
   const { page } = app
   await app.openApp()
   await app.openDrawer()
   await page.getByTestId('sidebar-settings-button').click()
-  const settings = page.getByTestId('settings-screen')
+  const settings = page.getByTestId('settings-dialog')
   await expect(settings).toBeVisible()
-  if (narrow(testInfo)) {
-    await expect(page.getByTestId('app-shell')).toHaveAttribute('inert', '')
-  } else {
-    const sidebar = page.getByTestId('sidebar-content')
-    await expect(sidebar).toBeVisible()
-    const [s, p] = await Promise.all([sidebar.boundingBox(), settings.boundingBox()])
-    expect(s && p && p.x >= s.x + s.width - 1).toBe(true) // the page starts where the sidebar ends
-    await page.getByTestId('sidebar-task-item').first().click()
-    await expect(settings).toHaveCount(0)
+  const box = await settings.boundingBox()
+  const vp = page.viewportSize()
+  expect(box && vp && box.x >= 0 && box.y >= 0 && box.x + box.width <= vp.width && box.y + box.height <= vp.height, 'the dialog is within the viewport').toBe(true)
+  // Narrow: the sidebar is a drawer that closes behind the dialog, so only the dialog is asserted there.
+  if (!narrow(testInfo)) {
+    await expect(page.getByTestId('sidebar-content')).toBeVisible()
+    const content = page.getByTestId('content-region')
+    await expect(content).toBeVisible()
+    await expect(content).not.toHaveAttribute('inert', '')
+    // Clicking the sidebar while Settings is open is blocked on purpose now: a modal blocks interaction outside it.
   }
 })
 
@@ -42,7 +43,7 @@ test('PG-02 the Settings frame, light and dark', async ({ app }, testInfo) => {
   await app.openApp()
   await app.openDrawer()
   await page.getByTestId('sidebar-settings-button').click()
-  await expect(page.getByTestId('settings-screen')).toBeVisible()
+  await expect(page.getByTestId('settings-dialog')).toBeVisible()
   await frame(page, testInfo, 'settings')
 })
 
