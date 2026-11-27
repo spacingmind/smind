@@ -69,7 +69,7 @@ describe("AppSidebar memo guard (PR-U1)", () => {
     // Opening the "New workspace" dialog changes AppSidebar's own state and
     // nothing a task row reads: no task row may re-render for it.
     const beforeDialog = rowRenders.n;
-    fireEvent.click(screen.getByTestId("sidebar-new-workspace-button"));
+    fireEvent.click(screen.getByTestId("sidebar-footer-add-workspace"));
     await flush();
     expect(rowRenders.n - beforeDialog).toBeLessThan(20); // only the handful of workspace/space rows, never 300
 

@@ -449,8 +449,8 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     // Ctrl+Q accelerator never dispatches (no menu bar is attached). The
     // renderer owns it instead and calls `desktop.quit()`. Ctrl+Q is XON
     // (resume output) in a terminal, so it is not claimed while the
-    // terminal pane has focus -- the user quits from the app menu or the
-    // tray there. macOS keeps Cmd+Q on the native app menu.
+    // terminal pane has focus -- the user quits from the command palette
+    // or the tray there. macOS keeps Cmd+Q on the native app menu.
     id: "app-quit",
     action: "app.quit",
     combo: "Ctrl+Q",
