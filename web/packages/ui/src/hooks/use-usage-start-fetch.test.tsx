@@ -75,6 +75,12 @@ describe("start fetch (ADR-0028 section 3 amendment)", () => {
     rerender({ daemon: second });
     await flush();
     unmount();
+    const again = mountStart(second, queryClient);
+    await flush();
+    await advance(TEN_MINUTES);
+    // Past the TTL a remount must still not repeat the app start's one fetch: only the one-shot
+    // guard stops it now (the claim's TTL window has passed).
+    again.unmount();
     mountStart(second, queryClient);
     await flush();
     await advance(TEN_MINUTES);
