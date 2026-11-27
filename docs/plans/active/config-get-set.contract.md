@@ -15,7 +15,7 @@ acs:
     covers: { tests: [Test_config_set_refuses_run_scoped_caller, Test_config_set_refuses_relay_caller, Test_config_set_refuses_non_loopback_login, Test_config_set_refused_for_plugin_session, Test_config_methods_not_in_run_scoped_or_mcp, Test_config_set_not_served_on_the_fleet_link, Test_config_set_refuses_proxied_loopback_login, Test_human_only_rpcs_drift, Test_human_only_table_names_config_set], frames: [] }
   - id: AC4
     text: "Only the five writable keys; read-only, secret, unknown, invalid and env-overridden are refused."
-    covers: { tests: [Test_config_set_refuses_key_outside_allowlist, Test_config_set_refuses_read_only_key, Test_config_set_refuses_secret_keys, Test_config_set_refuses_invalid_value, Test_config_set_refuses_env_overridden_key, Test_config_set_refuses_an_aliased_section, Test_config_effective_bool_spellings, Test_config_effective_unreadable_file_is_an_error, Test_config_get_unreadable_file_is_an_error_without_parser_text], frames: [] }
+    covers: { tests: [Test_config_set_refuses_key_outside_allowlist, Test_config_set_refuses_read_only_key, Test_config_set_refuses_secret_keys, Test_config_set_refuses_invalid_value, Test_config_set_refuses_env_overridden_key, Test_config_set_refuses_an_aliased_section, Test_config_set_refuses_under_a_merge_key, Test_config_effective_resolves_aliases_and_merge_keys, Test_config_set_error_carries_no_file_fragment, Test_config_effective_bool_spellings, Test_config_effective_unreadable_file_is_an_error, Test_config_get_unreadable_file_is_an_error_without_parser_text], frames: [] }
   - id: AC5
     text: "Comment-preserving atomic write, serialised, value re-read after write."
     covers: { tests: [Test_config_set_preserves_comments_and_unrelated_keys, Test_config_set_concurrent_calls_do_not_lose_updates, Test_config_set_result_is_reread_after_write, Test_config_concurrent_writers_do_not_lose_updates, Test_config_set_audit_chain_is_consistent_under_concurrency], frames: [] }
@@ -81,6 +81,9 @@ tests:
   - { name: Test_config_audit_caps_fields_and_keeps_generations, run: "go test ./internal/config -run '^Test_config_audit_caps_fields_and_keeps_generations$' -count=1", timeoutSec: 600 }
   - { name: Test_config_set_reports_an_audit_failure, run: "go test ./internal/wsapi -run '^Test_config_set_reports_an_audit_failure$' -count=1", timeoutSec: 600 }
   - { name: Test_config_get_unreadable_file_is_an_error_without_parser_text, run: "go test ./internal/wsapi -run '^Test_config_get_unreadable_file_is_an_error_without_parser_text$' -count=1", timeoutSec: 600 }
+  - { name: Test_config_effective_resolves_aliases_and_merge_keys, run: "go test ./internal/config -run '^Test_config_effective_resolves_aliases_and_merge_keys$' -count=1", timeoutSec: 600 }
+  - { name: Test_config_set_refuses_under_a_merge_key, run: "go test ./internal/config -run '^Test_config_set_refuses_under_a_merge_key$' -count=1", timeoutSec: 600 }
+  - { name: Test_config_set_error_carries_no_file_fragment, run: "go test ./internal/wsapi -run '^Test_config_set_error_carries_no_file_fragment$' -count=1", timeoutSec: 600 }
   - { name: hygiene_and_scope, run: "go test ./internal/hygiene/ -count=1 && test -z \"$(git diff origin/develop...HEAD --name-only -- web mobile)\" && test -z \"$(git diff origin/develop...HEAD --name-only -- internal/fleet ':!*_test.go')\" && ! grep -rn \"no RPC, agent or relay\" internal/config internal/wsapi", timeoutSec: 900 }
 mutations:
   - { id: M1, file: internal/wsapi/config_handlers.go, change: "the run-scoped guard is removed from config.set", expectFail: [Test_config_set_refuses_run_scoped_caller] }
@@ -100,6 +103,7 @@ mutations:
   - { id: MP2, file: internal/config/edit.go, change: "refuseAnchored is removed from Set", expectFail: [Test_config_set_refuses_an_aliased_section] }
   - { id: MP3, file: internal/config/allowlist.go, change: "Effective swallows a config.yaml read error and reports the default", expectFail: [Test_config_effective_unreadable_file_is_an_error] }
   - { id: MP4, file: internal/config/audit.go, change: "audit fields are not capped", expectFail: [Test_config_audit_caps_fields_and_keeps_generations] }
+  - { id: MP6, file: internal/config/edit.go, change: "the merge-key check is removed from refuseAnchored", expectFail: [Test_config_set_refuses_under_a_merge_key] }
 frames: []
 commands:
   - { id: C1, run: "go vet ./...", timeoutSec: 900 }
