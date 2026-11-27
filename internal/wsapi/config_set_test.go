@@ -88,11 +88,15 @@ func (e *configSetEnv) refused(t *testing.T, rc *requestContext, key string, val
 
 func Test_config_set_refuses_run_scoped_caller(t *testing.T) {
 	e := newConfigSetEnv(t)
-	e.refused(t, agentRC(), "plugins.enabled", true, "not available to agents")
+	// An agent run reaches the daemon over loopback, so the loopback guard alone
+	// must not be what refuses it: this isolates the run-scoped guard.
+	e.refused(t, &requestContext{local: true, runScoped: true, channel: ChannelLoopback}, "plugins.enabled", true, "not available to agents")
 }
 
 func Test_config_set_refuses_relay_caller(t *testing.T) {
 	e := newConfigSetEnv(t)
+	// local=false with a loopback channel isolates the relay guard.
+	e.refused(t, &requestContext{local: false, deviceID: "dev-1", channel: ChannelLoopback}, "plugins.enabled", true, "not over the relay")
 	e.refused(t, relayRC(), "plugins.enabled", true, "not over the relay")
 }
 
@@ -112,6 +116,9 @@ func Test_config_set_refused_for_plugin_session(t *testing.T) {
 		res, rerr := sess.Request(context.Background(), m, json.RawMessage(`{"key":"plugins.enabled","value":true}`))
 		if rerr == nil || res != nil {
 			t.Errorf("%s resolved for a plugin session: %v", m, res)
+		} else if !strings.Contains(rerr.Message, "never available to plugins") {
+			// The never-prefix must be what refuses it, not "unknown method".
+			t.Errorf("%s refused for the wrong reason: %q", m, rerr.Message)
 		}
 		if n := calls[m]; n != nil && *n != 0 {
 			t.Errorf("%s: its handler ran", m)

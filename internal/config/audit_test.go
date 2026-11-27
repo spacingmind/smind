@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -79,5 +80,36 @@ func Test_config_audit_never_contains_a_secret(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "redacted") {
 		t.Error("expected <redacted> marker")
+	}
+}
+
+// Test_config_concurrent_writers_do_not_lose_updates drives config.Set from
+// many goroutines without any RPC in front: the mutex inside mutate is what
+// serialises every in-process writer (config.set, set-password, the default
+// model RPC), so no change may be lost.
+func Test_config_concurrent_writers_do_not_lose_updates(t *testing.T) {
+	t.Setenv("SMIND_HOME", t.TempDir())
+	keys := []string{"automations.enabled", "automations.paused", "plugins.enabled", "fleet.enabled", "learning.enabled"}
+	for round := 0; round < 20; round++ {
+		var wg sync.WaitGroup
+		want := "true"
+		if round%2 == 1 {
+			want = "false"
+		}
+		for _, k := range keys {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := Set(k, want); err != nil {
+					t.Errorf("Set(%s): %v", k, err)
+				}
+			}()
+		}
+		wg.Wait()
+		for _, k := range keys {
+			if v, err := Get(k); err != nil || v != want {
+				t.Fatalf("round %d: %s = %q (%v), want %s: an update was lost", round, k, v, err, want)
+			}
+		}
 	}
 }
