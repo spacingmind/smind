@@ -2,6 +2,7 @@ import { QueryClient, QueryClientContext, useMutation } from "@tanstack/react-qu
 import { useContext, useEffect } from "react";
 
 import {
+  claimTouch,
   DETACHED_QUERY_CLIENT,
   heldData,
   lastTouchAt,
@@ -10,6 +11,7 @@ import {
 } from "@/hooks/use-usage-reports";
 import { DEFAULT_TTL_SECONDS, usageMutationKeys } from "@/lib/account-usage/query";
 import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
+import { ConnectionClosedError } from "@/lib/ws-client";
 
 /**
  * The one `account.usage` request of an app start (ADR-0028 section 3, amendment 2026-11-27): a single
@@ -17,9 +19,11 @@ import { useDaemonConnection } from "@/lib/query/daemon-query-provider";
  * the ambient quota notice has something to read.
  *
  * It is one per QueryClient (a page load; a reconnect to the same daemon keeps the client and so does
- * not repeat it), single-flight, skipped when the cache is already warm, and it waits for a visible and
- * focused window like every touch. No interval, no retry, no re-send after the answer, never `refresh`
- * or `cached`. The daemon's per-account TTL, floor and single-flight stay the real guarantee.
+ * not repeat it), single-flight, skipped when the cache is already warm or a touch was claimed inside
+ * the TTL, and it waits for a visible and focused window like every touch. No interval, no re-send
+ * after the answer, never `refresh` or `cached`; the only retry is a touch that never left the machine
+ * (`ConnectionClosedError`), which the next connection of the same app start may send. The daemon's
+ * per-account TTL, floor and single-flight stay the real guarantee.
  */
 const started = new WeakSet<QueryClient>();
 
@@ -36,8 +40,9 @@ export function useUsageStartFetch(): void {
     const held = heldData(queryClient);
     const ttlMs = (held?.ttlSeconds ?? DEFAULT_TTL_SECONDS) * 1000;
     const last = lastTouchAt(queryClient);
-    if (held !== undefined && last !== null && Date.now() - last < ttlMs) {
-      // A warm cache means a fetch already happened this app start.
+    if (last !== null && Date.now() - last < ttlMs) {
+      // A touch was sent or claimed inside the TTL (a usage surface that mounted with us, a warm
+      // cache), whether or not the cache holds data yet: this app start already has its request.
       started.add(queryClient);
       return;
     }
@@ -46,8 +51,24 @@ export function useUsageStartFetch(): void {
 
     const send = () => {
       if (started.has(queryClient)) return;
+      // A surface's touch may have claimed the TTL since this effect decided to wait for an active
+      // window: the app start has its one request, from that sender.
+      const lastNow = lastTouchAt(queryClient);
+      if (lastNow !== null && Date.now() - lastNow < ttlMs) {
+        started.add(queryClient);
+        return;
+      }
       started.add(queryClient);
-      mutate();
+      // Claim the touch before the request leaves, so a surface mounting in the same tick (the
+      // sidebar summary) sees it through lastTouchAt and sends nothing.
+      claimTouch(queryClient);
+      // A request that never left (the socket was already closed) lets the next connection of the
+      // same app start send the one request; any other failure does not retry.
+      mutate(undefined, {
+        onError: (err) => {
+          if (err instanceof ConnectionClosedError) started.delete(queryClient);
+        },
+      });
     };
     if (windowIsActive()) {
       send();

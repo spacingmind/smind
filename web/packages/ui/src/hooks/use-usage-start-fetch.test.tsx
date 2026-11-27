@@ -1,14 +1,15 @@
 import { act } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useUsageReports } from "@/hooks/use-usage-reports";
 import { useUsageStartFetch } from "@/hooks/use-usage-start-fetch";
 import { createQueryClient } from "@/lib/query/query-client";
 import { queryKeys } from "@/lib/query-keys";
-import { RpcError } from "@/lib/ws-client";
+import { ConnectionClosedError, RpcError } from "@/lib/ws-client";
 import type { UsageQueryData } from "@/lib/account-usage/types";
 import { claudeAccount, codexAccount, usageResult } from "@/test/account-usage-fixtures";
-import { renderHookWithDaemon } from "@/test/render-with-daemon";
+import { renderHookWithDaemon, renderWithDaemon } from "@/test/render-with-daemon";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 const TEN_MINUTES = 10 * 60_000;
@@ -231,5 +232,116 @@ describe("start fetch (ADR-0028 section 3 amendment)", () => {
     expect(daemon.count("touch")).toBe(1);
     expect(daemon.count("cached")).toBe(0);
     expect(daemon.count("refresh")).toBe(0);
+  });
+
+  it("quota_start_fetch_and_a_touching_surface_mounted_together_send_one_touch_in_either_order", async () => {
+    function StartFetchFirst() {
+      useUsageStartFetch();
+      useUsageReports({ touch: true });
+      return null;
+    }
+    function SurfaceFirst() {
+      useUsageReports({ touch: true });
+      useUsageStartFetch();
+      return null;
+    }
+    function FooterSummary() {
+      useUsageReports({ touch: true });
+      return null;
+    }
+    function StartFetch() {
+      useUsageStartFetch();
+      return null;
+    }
+    // The app's own shape: the sidebar summary is a child of the shell that sends the start fetch,
+    // so the footer's effects run first.
+    function FooterThenStartFetch() {
+      return (
+        <>
+          <FooterSummary />
+          <StartFetch />
+        </>
+      );
+    }
+    const variants: [string, () => ReactElement | null][] = [
+      ["the start fetch hook is called first", StartFetchFirst],
+      ["the touching surface hook is called first", SurfaceFirst],
+      ["the footer component is mounted first", FooterThenStartFetch],
+    ];
+    for (const [order, Component] of variants) {
+      // Mounted with an active window: whichever sender runs second must see the first one's
+      // claim and send nothing.
+      visibility = "visible";
+      focused = true;
+      const active = new FakeUsageDaemon([claudeAccount()]);
+      renderWithDaemon(<Component />, active, { queryClient: createQueryClient() });
+      await flush();
+      expect(active.requests, order).toEqual([{ mode: "touch" }]);
+      await advance(60_000);
+      expect(active.count("touch"), order).toBe(1);
+
+      // Mounted while the window is hidden, then activated: whichever listener fires first on
+      // the activation, the two senders still share the one touch.
+      visibility = "hidden";
+      focused = false;
+      const hidden = new FakeUsageDaemon([claudeAccount()]);
+      renderWithDaemon(<Component />, hidden, { queryClient: createQueryClient() });
+      await flush();
+      expect(hidden.count("touch"), order).toBe(0);
+      visibility = "visible";
+      focused = true;
+      act(() => {
+        document.dispatchEvent(new Event("visibilitychange"));
+        window.dispatchEvent(new Event("focus"));
+      });
+      await flush();
+      await advance(60_000);
+      expect(hidden.count("touch"), order).toBe(1);
+      expect(hidden.count("refresh"), order).toBe(0);
+    }
+  });
+
+  it("quota_start_fetch_is_retried_only_if_the_first_never_left", async () => {
+    // A touch that never left the machine (the socket was already closed): the next connection of
+    // the same app start still sends the one request, and only that one.
+    const neverLeft = new FakeUsageDaemon([claudeAccount()]);
+    neverLeft.failWith = new ConnectionClosedError("wsclient: connection closed");
+    const reconnected = new FakeUsageDaemon([claudeAccount()]);
+    const first = mountStart(neverLeft);
+    await flush();
+    expect(neverLeft.requests).toHaveLength(1);
+
+    first.rerender({ daemon: reconnected });
+    await flush();
+    expect(reconnected.requests).toEqual([{ mode: "touch" }]);
+
+    await advance(TEN_MINUTES);
+    first.rerender();
+    first.unmount();
+    const remounted = mountStart(reconnected, first.queryClient);
+    await flush();
+    await advance(TEN_MINUTES);
+    remounted.rerender();
+    await flush();
+    expect(neverLeft.requests).toHaveLength(1);
+    expect(reconnected.requests).toHaveLength(1);
+
+    // Any other failure leaves the one-shot mark set: no second request, ever.
+    const failing = new FakeUsageDaemon([claudeAccount()]);
+    failing.failWith = new Error("boom");
+    const next = new FakeUsageDaemon([claudeAccount()]);
+    const errored = mountStart(failing);
+    await flush();
+    expect(failing.requests).toHaveLength(1);
+
+    errored.rerender({ daemon: next });
+    await flush();
+    await advance(TEN_MINUTES);
+    errored.unmount();
+    mountStart(next, errored.queryClient);
+    await flush();
+    await advance(TEN_MINUTES);
+    expect(failing.requests).toHaveLength(1);
+    expect(next.requests).toHaveLength(0);
   });
 });
