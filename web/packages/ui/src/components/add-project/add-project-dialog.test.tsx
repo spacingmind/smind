@@ -117,7 +117,8 @@ describe("Add project host step", () => {
     renderWithDaemon(<HostStep />, d);
     await flush();
 
-    expect(screen.getByTestId("add-project-host-chip")).toHaveTextContent("On: This Mac");
+    expect(screen.getByTestId("add-project-host-chip")).toHaveTextContent("This Mac")
+    expect(screen.getByTestId("add-project-host-chip")).toHaveTextContent("127.0.0.1:7700");
     expect(screen.queryByTestId("add-project-hosts")).toBeNull();
   });
 
@@ -127,7 +128,7 @@ describe("Add project host step", () => {
     renderWithDaemon(<HostStep />, d);
     await flush();
 
-    expect(screen.getByTestId("add-project-host-chip")).toHaveTextContent(`On: ${window.location.host}`);
+    expect(screen.getByTestId("add-project-host-chip")).toHaveTextContent(`This server${window.location.host}`);
     expect(screen.queryByTestId("add-project-hosts")).toBeNull();
   });
 
@@ -147,11 +148,11 @@ describe("Add project host step", () => {
     const mac = screen.getByTestId("add-project-host-fleet-h1abc");
     const nas = screen.getByTestId("add-project-host-fleet-h2nas");
     expect(mac).toHaveTextContent("mac");
-    expect(mac).toHaveTextContent("Not available yet: fleet hosts cannot add projects from here.");
+    expect(mac).toHaveTextContent("Adding projects on fleet hosts isn't supported yet");
     expect(mac).toHaveAttribute("aria-disabled", "true");
     // No alias: the host's own label is the name.
     expect(nas).toHaveTextContent("Nas");
-    expect(nas).toHaveTextContent("Not available yet");
+    expect(nas).toHaveTextContent("isn't supported yet");
     // Pending and revoked hosts are never listed.
     expect(screen.queryByTestId("add-project-host-fleet-h3pen")).toBeNull();
     expect(screen.queryByTestId("add-project-host-fleet-h4rev")).toBeNull();
@@ -184,12 +185,15 @@ describe("Add project host step", () => {
     const office = screen.getByTestId("add-project-host-saved-conn-office");
     const basement = screen.getByTestId("add-project-host-saved-conn-basement");
     expect(office).toHaveTextContent("Office daemon");
-    expect(office).toHaveTextContent("Switch the connection in Settings → Connections");
+    expect(office).toHaveTextContent("Switch it in Settings → Connections");
     expect(basement).toHaveTextContent("Basement server");
-    expect(basement).toHaveTextContent("Switch the connection in Settings → Connections");
+    expect(basement).toHaveTextContent("Switch it in Settings → Connections");
     // The current connection is the selected row, not one of the saved ones.
     expect(screen.getByTestId("add-project-host-current")).toHaveTextContent("This Mac");
-    expect(screen.getByTestId("add-project-host-current")).toHaveTextContent("This connection");
+    expect(screen.getByTestId("add-project-host-current")).toHaveTextContent("Selected");
+    expect(screen.getByTestId("add-project-host-current")).toHaveAttribute("aria-current", "true");
+    expect(office).toHaveTextContent("office:7700");
+    expect(office).not.toHaveAttribute("aria-current");
     // Plain rows, never buttons.
     expect(office.tagName).toBe("DIV");
     expect(office.querySelector("button")).toBeNull();
@@ -486,13 +490,17 @@ describe("Add project open a folder", () => {
     renderDialog();
     await flush();
     const dialog = screen.getByTestId("add-project-dialog");
-    expect(dialog).toHaveTextContent("sMind works on git repositories. Choose a folder that already is one.");
+    expect(dialog).toHaveTextContent("This folder must be a git repository.");
     expect(dialog.textContent).not.toContain("--");
     expect(dialog.textContent?.toLowerCase()).not.toContain("worktree");
     // the host chip is a pill with the server icon, shrink-wrapped, not a full-width input-like bar
     const chip = screen.getByTestId("add-project-host-chip");
     expect(chip).toHaveClass("rounded-full", "w-fit", "justify-self-start");
     expect(chip.querySelector("svg")).not.toBeNull();
+    // the friendly name comes first, the address after it, muted
+    expect(chip.querySelectorAll("span")[0]).toHaveTextContent("This Mac");
+    expect(chip.querySelectorAll("span")[1]).toHaveTextContent("127.0.0.1:7700");
+    expect(chip.querySelectorAll("span")[1]).toHaveClass("text-foreground-muted");
   });
 
   it("add_project_tilde_is_expanded", async () => {

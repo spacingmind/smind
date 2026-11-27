@@ -13,23 +13,35 @@ export function HostStep() {
   const hosts = useProjectHosts();
 
   if (hosts.single) {
+    // One host: a compact read-only label (an icon, the friendly name, the address muted).
     return (
       <p
         data-testid="add-project-host-chip"
         className="inline-flex w-fit max-w-full items-center gap-1.5 justify-self-start rounded-full border border-border bg-muted px-2.5 py-1 text-ui-sm text-foreground"
       >
         <Icons.host aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
-        <span className="min-w-0 truncate">On: {hosts.current.name}</span>
+        <span className="min-w-0 truncate font-medium">{hosts.current.name}</span>
+        {hosts.current.address && <span className="min-w-0 truncate text-foreground-muted">{hosts.current.address}</span>}
       </p>
     );
   }
 
   return (
     <div data-testid="add-project-hosts" className="overflow-hidden rounded-xl border border-border bg-card">
-      <div data-testid="add-project-host-current" className="flex items-center gap-2 px-3 py-2.5">
-        <Icons.host className="size-4 shrink-0 text-foreground-muted" />
+      <div
+        data-testid="add-project-host-current"
+        aria-current="true"
+        className="flex items-center gap-2 bg-accent px-3 py-2.5"
+      >
+        <Icons.host className="size-4 shrink-0 text-foreground" />
         <span className="min-w-0 truncate text-ui-base font-medium text-foreground">{hosts.current.name}</span>
-        <span className="ml-auto shrink-0 text-ui-sm text-foreground-muted">This connection</span>
+        {hosts.current.address && (
+          <span className="min-w-0 truncate text-ui-sm text-foreground-muted">{hosts.current.address}</span>
+        )}
+        <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-ui-sm font-medium text-foreground">
+          <Icons.check aria-hidden className="size-3.5" />
+          Selected
+        </span>
       </div>
       {hosts.saved.map((saved) => (
         <div
@@ -39,7 +51,8 @@ export function HostStep() {
         >
           <Icons.host className="size-4 shrink-0" />
           <span className="min-w-0 truncate text-ui-base">{saved.label}</span>
-          <span className="ml-auto shrink-0 text-ui-sm">Switch the connection in Settings → Connections</span>
+          {saved.address && <span className="min-w-0 truncate text-ui-sm">{saved.address}</span>}
+          <span className="ml-auto shrink-0 text-ui-sm">Switch it in Settings → Connections</span>
         </div>
       ))}
       {hosts.fleet.map((host) => (
@@ -47,7 +60,7 @@ export function HostStep() {
           key={host.hostId}
           data-testid={`add-project-host-fleet-${host.hostId}`}
           aria-disabled="true"
-          className="flex items-center gap-2 border-t border-border px-3 py-2.5 text-foreground-muted"
+          className="flex items-center gap-2 border-t border-border px-3 py-2.5 text-foreground-muted opacity-80"
         >
           <Icons.host className="size-4 shrink-0" />
           <span className="min-w-0 truncate text-ui-base">{host.name}</span>

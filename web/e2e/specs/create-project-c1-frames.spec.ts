@@ -171,7 +171,7 @@ test('one-host: the dialog just opened with the host chip and the empty path', a
   await app.openApp()
   await openDialog(app)
   if (!process.env.C1_FRAMES_DIR) return
-  await expect(page.getByTestId('add-project-host-chip')).toHaveText(/^On: /)
+  await expect(page.getByTestId('add-project-host-chip')).toHaveText(/^This server/)
   await expect(page.getByTestId('add-project-method-open')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByTestId('add-project-path-input')).toHaveValue('')
   await shot(page, testInfo, 'one-host')

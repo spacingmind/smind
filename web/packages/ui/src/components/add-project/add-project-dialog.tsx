@@ -109,7 +109,7 @@ export function AddProjectDialog(props: {
           <DialogHeader>
             <DialogTitle>Add project</DialogTitle>
             <DialogDescription>
-              sMind works on git repositories. Choose a folder that already is one.
+              This folder must be a git repository.
             </DialogDescription>
           </DialogHeader>
           <AddProjectBody

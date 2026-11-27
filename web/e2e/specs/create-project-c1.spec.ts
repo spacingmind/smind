@@ -90,7 +90,7 @@ test('UC-C1-01 opens from the sidebar with the host chip and the live method', a
   await app.openApp()
   await openDialog(app)
 
-  await expect(page.getByTestId('add-project-host-chip')).toHaveText(/^On: /)
+  await expect(page.getByTestId('add-project-host-chip')).toHaveText(/^This server/)
   await expect(page.getByTestId('add-project-method-open')).toHaveAttribute('aria-pressed', 'true')
   for (const id of ['add-project-method-clone', 'add-project-method-new', 'add-project-method-session']) {
     const card = page.getByTestId(id)

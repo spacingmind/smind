@@ -32,7 +32,7 @@ Size M, **web UI only, NO new RPC** (`fs.listDir`, `workspace.create`, `workspac
 ## Acceptance criteria
 
 - AC1 The "Add project" modal replaces the single form; all six entry points open it.
-- AC2 Step 1: one host gives a chip "On: <name>" only; several give rows: the current one selected, saved connections listed and not switchable, fleet hosts disabled with "Not available yet".
+- AC2 Step 1: one host gives a compact chip "<friendly name> <address>" only; several give rows: the current one selected, saved connections listed and not switchable, fleet hosts disabled with "Adding projects on fleet hosts isn't supported yet".
 - AC3 Step 2: only "Open a folder" is live; the other three are disabled with "Coming soon".
 - AC4 Recents are per host, persisted, keep removed projects, and "remove from recents" never deletes a project.
 - AC5 A known non-git path shows "Not a git repository" before submit, with no git-init action and a clear next step; a missing folder says so.

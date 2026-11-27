@@ -18,6 +18,8 @@ import { desktop, isDesktop, type Connection } from "@/lib/platform";
 export interface SavedProjectHost {
   id: string;
   label: string;
+  /** The connection's address (host:port), muted next to the name; empty when it has none to show. */
+  address: string;
   current: boolean;
 }
 
@@ -31,7 +33,7 @@ export interface FleetProjectHost {
 export interface ProjectHosts {
   /** The per-host recents key (C1 D4): the desktop connection id, or the page origin on the web. */
   hostKey: string;
-  current: { name: string };
+  current: { name: string; address: string };
   saved: SavedProjectHost[];
   fleet: FleetProjectHost[];
   /** No other saved connection and no approved fleet host: the step collapses to the one chip. */
@@ -39,6 +41,15 @@ export interface ProjectHosts {
 }
 
 const connectionsKey = ["desktop.connections"] as const;
+
+/** `host:port` of a connection's base URL; empty when it is not a plain URL (a relay link). */
+function addressOf(baseUrl: string): string {
+  try {
+    return new URL(baseUrl).host;
+  } catch {
+    return "";
+  }
+}
 
 interface ConnectionsData {
   current: Connection;
@@ -59,7 +70,7 @@ export function useProjectHosts(): ProjectHosts {
       const current = await desktop.getCurrentConnection();
       const saved = (await desktop.listConnections())
         .filter((c) => c.id !== current.id)
-        .map((c) => ({ id: c.id, label: c.label, current: false }));
+        .map((c) => ({ id: c.id, label: c.label, address: addressOf(c.baseUrl), current: false }));
       return { current, saved };
     },
   });
@@ -71,14 +82,18 @@ export function useProjectHosts(): ProjectHosts {
     if (!list || list.off) return [];
     return list.hosts
       .filter((h) => h.state === "approved")
-      .map((h) => ({ hostId: h.hostId, name: h.alias || h.label, reason: "Not available yet: fleet hosts cannot add projects from here." }));
+      .map((h) => ({ hostId: h.hostId, name: h.alias || h.label, reason: "Adding projects on fleet hosts isn't supported yet" }));
   }, [fleetList.data]);
 
   const data = isDesktop ? connections.data ?? null : null;
   const saved = data?.saved ?? [];
   return {
     hostKey: data ? data.current.id : window.location.origin,
-    current: { name: data ? data.current.label : window.location.host },
+    // A friendly name first ("This Mac", or the saved connection's name); the
+    // address is secondary. The web build names the page's own server.
+    current: data
+      ? { name: data.current.label, address: addressOf(data.current.baseUrl) }
+      : { name: "This server", address: window.location.host },
     saved,
     fleet,
     single: saved.length === 0 && fleet.length === 0,
