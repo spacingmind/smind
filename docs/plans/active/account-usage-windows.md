@@ -322,7 +322,7 @@ Web: the reference's Usage UX ported (PR-D1 Settings + modal, PR-E chat hover ca
   window is visible and focused** (timer paused when hidden or blurred; on
   becoming visible a touch is sent only if the last report is older than the
   TTL); with the footer item off and no modal or Settings → Usage open the web UI
-  sends no `touch` (the default state sends none at all); opening the modal or
+  sends no `touch` except ONE per app start (ADR-0028 amended 2026-11-27: the quota start fetch, single-flight, skipped when the cache is warm, never repeated); opening the modal or
   Settings → Usage sends one `touch`; the chat hover card sends only
   `mode:"cached"` (AC56); the client never sends `refresh` except from a
   button press.
