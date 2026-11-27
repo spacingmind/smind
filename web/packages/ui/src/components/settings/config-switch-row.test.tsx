@@ -159,6 +159,9 @@ describe("ConfigSwitchRow", () => {
     const dialog = await screen.findByTestId("row-dialog");
     expect(pause.sets()).toHaveLength(1);
     expect(within(dialog).getByRole("button", { name: "Resume" })).toBeInTheDocument();
+    // the resume dialog says resume, not the pause sentence of the daemon table
+    expect(dialog).toHaveTextContent("Resume automations");
+    expect(dialog).not.toHaveTextContent("Pausing the engine");
   });
 
   it("config_restart_notice_for_fleet_and_learning", async () => {

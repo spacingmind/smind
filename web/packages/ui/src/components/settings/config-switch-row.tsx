@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Switch } from "@/components/ui/switch";
 import { useConfigKey, useConfigSet } from "@/hooks/use-config";
-import { CONFIG_CONFIRM, isWritableConfigKey, type WritableConfigKey } from "@/lib/config-keys";
+import { CONFIG_CONFIRM, RESUME_CONFIRM, isWritableConfigKey, type WritableConfigKey } from "@/lib/config-keys";
 import { daemonSentence } from "@/lib/daemon-sentence";
 import { isDesktop } from "@/lib/platform";
 
@@ -180,8 +180,8 @@ function Row({ configKey, label, description, testId }: { configKey: WritableCon
           setConfirming(open);
           if (!open) set.reset();
         }}
-        title={label}
-        description={CONFIG_CONFIRM[configKey]}
+        title={isPause ? "Resume automations" : label}
+        description={isPause ? RESUME_CONFIRM : CONFIG_CONFIRM[configKey]}
         confirmLabel={isPause ? "Resume" : "Turn on"}
         pending={busy}
         error={set.error ? messageOf(set.error) : null}

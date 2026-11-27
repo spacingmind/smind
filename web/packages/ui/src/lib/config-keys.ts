@@ -16,6 +16,9 @@ export function isWritableConfigKey(k: string): k is WritableConfigKey {
   return (WRITABLE_CONFIG_KEYS as readonly string[]).includes(k);
 }
 
+/** What the resume confirm says (the daemon table's sentence for automations.paused describes pausing, which needs no confirm). */
+export const RESUME_CONFIRM = "Resuming lets the engine fire again: it polls schedules and starts runs without you asking.";
+
 /** The one sentence shown before a key is turned on (or resumed), copied from the daemon's table; a test keeps them equal. */
 export const CONFIG_CONFIRM: Record<WritableConfigKey, string> = {
   "automations.enabled": "Turning automations on arms the engine: it polls schedules and fires runs without you asking.",
