@@ -134,7 +134,24 @@ export function windowIsActive(): boolean {
   return document.visibilityState === "visible" && document.hasFocus();
 }
 
-/** When the last `touch` went out on this connection, or null. */
+/**
+ * The touch claims (D3b): a touch sender records one synchronously, before the mutation's own state
+ * exists, so a second sender in the same app start (the sidebar summary mounting with the start fetch)
+ * sees the first one's touch immediately and sends nothing, whichever ran first.
+ */
+const touchClaims = new WeakMap<QueryClient, number>();
+
+/** Claims the next touch: counts as a touch from now on, before the request even leaves. */
+export function claimTouch(queryClient: QueryClient): void {
+  touchClaims.set(queryClient, Date.now());
+}
+
+/** Gives a claim back: the request never left, so the one touch is still to be sent. */
+export function releaseTouchClaim(queryClient: QueryClient): void {
+  touchClaims.delete(queryClient);
+}
+
+/** When the last `touch` went out on this connection (sent or claimed), or null. */
 export function lastTouchAt(queryClient: QueryClient): number | null {
   let last: number | null = null;
   for (const mutation of queryClient.getMutationCache().findAll({ mutationKey: usageMutationKeys.touch })) {
@@ -144,6 +161,8 @@ export function lastTouchAt(queryClient: QueryClient): number | null {
     const at = mutation.state.submittedAt;
     if (at > 0 && (last === null || at > last)) last = at;
   }
+  const claimed = touchClaims.get(queryClient);
+  if (claimed !== undefined && (last === null || claimed > last)) last = claimed;
   return last;
 }
 
@@ -164,6 +183,9 @@ export function usageTouchMutationOptions(client: WsClient | null, queryClient: 
       queryClient.setQueryData<UsageQueryData>(queryKeys.accountUsage(), (held) => usageDataFrom(result, held));
     },
     onError: (err: Error) => {
+      // The request never left (the socket was already closed), so its claim must not hold the one
+      // touch of this app start back: the next connection may still send it.
+      if (err instanceof ConnectionClosedError) releaseTouchClaim(queryClient);
       if (isUnknownMethod(err)) {
         queryClient.setQueryData<UsageQueryData>(queryKeys.accountUsage(), {
           supportsUsage: false,
@@ -362,9 +384,12 @@ export function useUsageReports({
     const { snapshot: s, touchMutate, hasClient } = latest.current;
     if (!hasClient || !s.supportsUsage || (!s.enabled && s.phase === "ready")) return false;
     if (msUntilTouch() > 0) return false;
+    // Claim first, synchronously: another sender (the start fetch) deciding in the same tick must
+    // see this touch even though the mutation's state does not exist yet.
+    claimTouch(queryClient);
     touchMutate();
     return true;
-  }, [msUntilTouch]);
+  }, [msUntilTouch, queryClient]);
 
   const cadenceClient = useRef<typeof client>(null);
   useEffect(() => {
