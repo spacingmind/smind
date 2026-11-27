@@ -139,6 +139,72 @@ test('UC6-01 mobile push on the real daemon: no relay bridge, no device is hones
   expect(pageErrors).toEqual([])
 })
 
+// UC6-02 (B6 D4 / AC7): one push-registered phone and a sent test. STUB: the e2e daemon has no relay bridge, so
+// no phone is ever paired or push-registered there; the proxy answers relay.device.list and push.test the way a
+// daemon with one registered phone would, everything else is forwarded to the real daemon. The device's public key
+// is deliberately a distinctive string: the group must never render it (the wire carries no secret, none is echoed).
+const pushDevice = {
+  device_id: 'b6push00000000001',
+  device_pub: 'SECRETKEYBYTES',
+  label: 'Pixel',
+  first_seen: '2026-11-01T09:00:00Z',
+  last_seen: '2026-11-26T09:00:00Z',
+  state: 'approved',
+  connected: true,
+  push: true,
+}
+
+/** Answers the push surface with one registered device; flip `sent` between clicks to change what push.test says. */
+async function stubMobilePush(page: Page) {
+  const state = { sent: true }
+  await page.routeWebSocket(/\/ws/, (ws) => {
+    const server = ws.connectToServer()
+    server.onMessage((m) => ws.send(m))
+    ws.onMessage((m) => {
+      let msg: { id?: string | number; method?: string }
+      try {
+        msg = JSON.parse(String(m))
+      } catch {
+        return server.send(m)
+      }
+      if (msg.method === 'relay.device.list') {
+        return ws.send(JSON.stringify({ id: msg.id, result: { devices: [pushDevice], window: null } }))
+      }
+      if (msg.method === 'push.test') {
+        return ws.send(
+          JSON.stringify({
+            id: msg.id,
+            result: {
+              results: [{ deviceId: pushDevice.device_id, sent: state.sent, error: state.sent ? undefined : 'send_failed' }],
+            },
+          }),
+        )
+      }
+      server.send(m)
+    })
+  })
+  return state
+}
+
+test('UC6-02 mobile push with a registered device (stub)', async ({ app }) => {
+  const { page } = app
+  const stub = await stubMobilePush(page)
+  await app.openApp()
+  await openSettings(page, 'notifications')
+  await expect(page.getByTestId('mobile-push-group')).toBeVisible()
+  await expect(page.getByTestId('push-count')).toHaveText('1 with push on')
+
+  await page.getByTestId('push-test').click()
+  await expect(page.getByTestId(`push-result-state-${pushDevice.device_id}`)).toHaveText('Sent')
+  await expect(page.locator('body')).not.toContainText('SECRETKEYBYTES')
+
+  stub.sent = false
+  await page.getByTestId('push-test').click()
+  await expect(page.getByTestId(`push-result-state-${pushDevice.device_id}`)).toHaveText(
+    'The push service did not accept the notification.',
+  )
+})
+
 test('UC6-04 relay client: Disable works, Enable and Resume are refused with a sentence', async ({ app }) => {
   const { page } = app
   const pageErrors: string[] = []
