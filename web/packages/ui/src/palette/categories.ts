@@ -41,7 +41,7 @@ export function iconForGroup(group: string): IconName {
 }
 
 export const PALETTE_CATEGORY_ICON: Record<PaletteCategory, IconName> = {
-  all: "menu",
+  all: "search",
   tasks: "chat",
   actions: "play",
   files: "file",

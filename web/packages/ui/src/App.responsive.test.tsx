@@ -320,7 +320,7 @@ describe("App compact header (app-header-and-tabs)", () => {
     expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
   });
 
-  it("AH-AC13 compact header shows toggle, title, task menu and terminal; editor pill and help are container-hidden", async () => {
+  it("AH-AC13 compact header shows toggle, title, task menu and terminal; editor pill is container-hidden", async () => {
     await mountCompactWithTask();
     const header = screen.getByTestId("app-header");
     expect(header.className).toContain("@container/app-header");
@@ -330,10 +330,8 @@ describe("App compact header (app-header-and-tabs)", () => {
     expect(within(header).getByTestId("app-header-task-menu")).toBeInTheDocument();
     expect(within(header).getByTestId("app-header-terminal")).toBeInTheDocument();
 
-    // jsdom has no layout, so assert the container-query classes that hide them narrow.
-    const helpClasses = within(header).getByTestId("app-header-help").className.split(/\s+/);
-    expect(helpClasses).toContain("hidden");
-    expect(helpClasses).toContain("@min-[40rem]/app-header:inline-flex");
+    // The header's keyboard icon is gone (ui-cleanup-b1 H2): `?` opens the overlay.
+    expect(within(header).queryByTestId("app-header-help")).not.toBeInTheDocument();
     // Never rendered at all in a browser build (no local editors).
     expect(within(header).queryByTestId("open-in-editor")).not.toBeInTheDocument();
     // The terminal button is not behind the container query.

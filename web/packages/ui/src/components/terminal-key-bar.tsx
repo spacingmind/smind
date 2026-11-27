@@ -157,7 +157,7 @@ export function TerminalKeyBar({
           onClick={onToggleKeyboard}
           {...keepFocus}
         >
-          <Icons.shortcuts className="size-4" />
+          <Icons.keyboard className="size-4" />
         </button>
       );
     }

@@ -969,7 +969,7 @@ describe("expansion persistence (S8)", () => {
     // ...while a live one (ws:1) is honoured; creating a workspace forces its id open.
     fireEvent.click(screen.getByTestId("sidebar-workspace-row"));
     expect(stored()).toEqual(["ws:1"]);
-    fireEvent.click(screen.getByTestId("sidebar-new-workspace-button"));
+    fireEvent.click(screen.getByTestId("sidebar-footer-add-workspace"));
     fireEvent.change(await screen.findByLabelText("Path"), { target: { value: "/tmp/new" } });
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
     const create = await waitFor(() => client.nth("workspace.create"));

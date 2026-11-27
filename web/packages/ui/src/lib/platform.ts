@@ -254,7 +254,7 @@ export interface DesktopApi {
   windowOpenTask(taskId: number): Promise<string>;
   /** Subscribes to native context-menu selections (`context-menu-action`: the open id and the chosen item id). */
   onContextMenuAction(cb: (selection: { open: number; id: string }) => void): Promise<() => void>;
-  /** Runs a native-only app-menu item (`app_menu_action`) -- what the header app menu uses on Windows/Linux, where the native menu bar isn't drawn. */
+  /** Runs a native-only app-menu item (`app_menu_action`) -- what the command palette's desktop entries use, since the undecorated Windows/Linux window has no menu bar. */
   menuAction(id: NativeMenuActionId): Promise<void>;
   /** ADR-0013 part D2: install/update/restart/take-over the app-managed local daemon. */
   daemonStatus(): Promise<DaemonStatus>;
