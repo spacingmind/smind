@@ -9,7 +9,7 @@ acs:
     covers: { tests: [quota_start_fetch_sends_one_touch_at_app_start, quota_start_fetch_never_sends_refresh_or_cached], frames: [] }
   - id: AC2
     text: "Not repeated by re-render, remount, the notice, a reconnect or a usage surface within the TTL."
-    covers: { tests: [quota_start_fetch_is_not_repeated_on_remount_rerender_or_reconnect, quota_start_fetch_does_not_make_a_usage_surface_send_a_second_touch_within_the_ttl, ambient_quota_adds_no_touch_or_refresh_calls], frames: [] }
+    covers: { tests: [quota_start_fetch_is_not_repeated_on_remount_rerender_or_reconnect, quota_start_fetch_does_not_make_a_usage_surface_send_a_second_touch_within_the_ttl, quota_start_fetch_and_a_touching_surface_mounted_together_send_one_touch_in_either_order, quota_start_fetch_is_retried_only_if_the_first_never_left, ambient_quota_adds_no_touch_or_refresh_calls], frames: [] }
   - id: AC3
     text: "Not sent with a warm cache, a touch in flight, or after usage is disabled or unsupported."
     covers: { tests: [quota_start_fetch_skipped_when_the_cache_is_warm, quota_start_fetch_skipped_while_a_touch_is_in_flight, quota_start_fetch_stops_when_usage_is_disabled_or_unsupported], frames: [] }
@@ -37,6 +37,8 @@ tests:
   - { name: quota_start_fetch_is_one_request_for_all_accounts, run: "cd web/packages/ui && bunx vitest run src/hooks/use-usage-start-fetch.test.tsx -t quota_start_fetch_is_one_request_for_all_accounts", timeoutSec: 900 }
   - { name: quota_start_fetch_stops_when_usage_is_disabled_or_unsupported, run: "cd web/packages/ui && bunx vitest run src/hooks/use-usage-start-fetch.test.tsx -t quota_start_fetch_stops_when_usage_is_disabled_or_unsupported", timeoutSec: 900 }
   - { name: quota_start_fetch_never_sends_refresh_or_cached, run: "cd web/packages/ui && bunx vitest run src/hooks/use-usage-start-fetch.test.tsx -t quota_start_fetch_never_sends_refresh_or_cached", timeoutSec: 900 }
+  - { name: quota_start_fetch_and_a_touching_surface_mounted_together_send_one_touch_in_either_order, run: "cd web/packages/ui && bunx vitest run src/hooks/use-usage-start-fetch.test.tsx -t quota_start_fetch_and_a_touching_surface_mounted_together_send_one_touch_in_either_order", timeoutSec: 900 }
+  - { name: quota_start_fetch_is_retried_only_if_the_first_never_left, run: "cd web/packages/ui && bunx vitest run src/hooks/use-usage-start-fetch.test.tsx -t quota_start_fetch_is_retried_only_if_the_first_never_left", timeoutSec: 900 }
   - { name: quota_start_fetch_does_not_make_a_usage_surface_send_a_second_touch_within_the_ttl, run: "cd web/packages/ui && bunx vitest run src/hooks/use-usage-start-fetch.test.tsx -t quota_start_fetch_does_not_make_a_usage_surface_send_a_second_touch_within_the_ttl", timeoutSec: 900 }
   - { name: ambient_quota_text_names_the_provider, run: "cd web/packages/ui && bunx vitest run src/lib/ambient-quota.test.ts -t ambient_quota_text_names_the_provider", timeoutSec: 900 }
   - { name: ambient_quota_text_names_provider_and_account, run: "cd web/packages/ui && bunx vitest run src/lib/ambient-quota.test.ts -t ambient_quota_text_names_provider_and_account", timeoutSec: 900 }
