@@ -4,11 +4,11 @@ import { BrowserAllowlistEditor } from "@/components/settings/browser-allowlist-
 import { BrowserReachList } from "@/components/settings/browser-reach-list";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { SettingsEmptyCard, SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
+import { SettingsWorkspacePicker } from "@/components/settings/settings-workspace-picker";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { LoadingRows } from "@/components/ui/loading-rows";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { useBrowserSettings, useClearBrowserData, useSetBrowserSettings } from "@/hooks/use-browser-settings";
@@ -75,25 +75,17 @@ function BrowserSection() {
 
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-browser">
-      <Select
-        value={String(workspace.ID)}
-        onValueChange={(v) => {
-          setChosen(Number(v));
+      <SettingsWorkspacePicker
+        workspaces={workspaces.map((w) => ({ id: w.ID, title: w.Title }))}
+        value={workspace.ID}
+        onChange={(id) => {
+          setChosen(id);
           setSwitchError(null);
           set.reset();
         }}
-      >
-        <SelectTrigger aria-label="Workspace" data-testid="browser-workspace-select" className="w-full max-w-xs">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {workspaces.map((w) => (
-            <SelectItem key={w.ID} value={String(w.ID)}>
-              {w.Title}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+        label="Workspace"
+        testId="browser-workspace-select"
+      />
 
       {view.isPending && <LoadingRows />}
       {view.error && !data && (
