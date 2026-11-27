@@ -171,6 +171,7 @@ export function SettingsScreen({
   events = null,
   onNavigateBack,
   initialSectionId,
+  variant = "page",
 }: {
   client: WsClient | null;
   /** The app's shared events.subscribe surface, forwarded to each section's render context -- optional (defaults null) so existing callers/tests that don't care about live updates need no change. */
@@ -179,7 +180,10 @@ export function SettingsScreen({
   onNavigateBack: () => void;
   /** Which section a fresh mount opens to, if it exists in the registry -- `shortcuts.help` (AC5) deep-links to "shortcuts" this way. Defaults to the first registered section, same as before this prop existed. */
   initialSectionId?: string;
+  /** "page" is the full-pane screen the app renders today. "modal" (UI cleanup B3 D8) is the chrome-less variant SettingsDialog mounts: no back row, no window controls, no title-bar drag region, no traffic-light inset -- the dialog's own X (and the narrow back arrows) close it. */
+  variant?: "page" | "modal";
 }) {
+  const modal = variant === "modal";
   const sections = listSettingsSections();
   const [activeId, setActiveId] = useState<string | null>(
     () => sections.find((s) => s.id === initialSectionId)?.id ?? sections[0]?.id ?? null,
@@ -210,18 +214,26 @@ export function SettingsScreen({
   // (bubble phase, so inner handlers get first crack). A dialog inside an
   // inert subtree (e.g. the hidden shell behind this screen) is not live
   // and does not count.
+  // In the modal variant the screen itself lives inside SettingsDialog,
+  // whose Radix layer consumes the native default of every Escape (so
+  // Radix does not also dismiss) before this bubble-phase handler runs --
+  // so the defaultPrevented check is dropped there, and the settings
+  // dialog itself (plus anything nested inside it) never counts as a
+  // blocking live dialog either: an inner Radix surface is portalled
+  // outside the dialog root, so it still blocks, while the dialog's own
+  // layer must not block the escape this handler is about to own.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      if (e.defaultPrevented) return;
+      if (!modal && e.defaultPrevented) return;
       const openDialogs = document.querySelectorAll('[role="dialog"],[role="alertdialog"],[role="menu"],[role="listbox"]');
-      if (Array.from(openDialogs).some((el) => !el.closest("[inert]"))) return;
+      if (Array.from(openDialogs).some((el) => !el.closest("[inert]") && el.closest('[data-testid="settings-dialog"]') === null)) return;
       if (narrow && view === "detail") setView("list");
       else onNavigateBack();
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [narrow, view, onNavigateBack]);
+  }, [modal, narrow, view, onNavigateBack]);
 
   const active = sections.find((s) => s.id === activeId) ?? null;
   // Every layout puts the section's name in its header, so a section's own
@@ -231,14 +243,14 @@ export function SettingsScreen({
       {active ? active.render({ client, events, closeSettings: onNavigateBack }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
     </SectionTitleInHeaderProvider>
   );
-  const dragRegion = isDesktop ? "deep" : undefined;
+  const dragRegion = isDesktop && !modal ? "deep" : undefined;
   const leftInset = usePageLeftInset();
   const sidebarKept = usePageSidebarKept();
-  const headerStyle = leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined;
+  const headerStyle = !modal && leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined;
 
   if (narrow && view === "list") {
     return (
-      <div className="flex h-full min-h-0 w-full flex-col bg-background" data-testid="settings-screen">
+      <div className="flex h-full min-h-0 w-full flex-col bg-background" data-testid="settings-screen" data-variant={variant}>
         <header
           className="flex h-12 shrink-0 items-center gap-2 border-b p-2"
           data-testid="settings-screen-header"
@@ -256,7 +268,7 @@ export function SettingsScreen({
           </Button>
           <h1 className="truncate text-ui-base font-medium">Settings</h1>
           <div className="ml-auto" />
-          <DesktopWindowControls />
+          {!modal && <DesktopWindowControls />}
         </header>
         <nav aria-label="Settings sections" className="min-h-0 flex-1 overflow-y-auto p-2">
           <SettingsNav
@@ -275,7 +287,7 @@ export function SettingsScreen({
 
   if (narrow && view === "detail") {
     return (
-      <div className="flex h-full min-h-0 w-full flex-col bg-background" data-testid="settings-screen">
+      <div className="flex h-full min-h-0 w-full flex-col bg-background" data-testid="settings-screen" data-variant={variant}>
         <header
           className="flex h-12 shrink-0 items-center gap-2 border-b p-2"
           data-testid="settings-screen-header"
@@ -295,7 +307,7 @@ export function SettingsScreen({
           </Button>
           <h1 className="truncate text-ui-base font-medium">{active?.label}</h1>
           <div className="ml-auto" />
-          <DesktopWindowControls />
+          {!modal && <DesktopWindowControls />}
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto" data-testid="settings-content">
           <div className="w-full p-4">
@@ -333,7 +345,13 @@ export function SettingsScreen({
   );
 
   return (
-    <div ref={screenRef} className="flex h-full min-h-0 w-full" data-testid="settings-screen" data-nav={compact ? "rail" : "full"}>
+    <div
+      ref={screenRef}
+      className="flex h-full min-h-0 w-full"
+      data-testid="settings-screen"
+      data-variant={variant}
+      data-nav={compact ? "rail" : "full"}
+    >
       <aside
         className={cn("flex shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground", compact ? "w-12" : "w-64")}
         data-settings-sidebar
@@ -342,8 +360,14 @@ export function SettingsScreen({
         {/* Desktop build: an empty h-12 strip owns the title-bar drag and the
             macOS traffic lights, the back row sits under it. Browser: no title
             bar to clear, so the back row takes that h-12 row itself and lines
-            up with the content header across the divider. */}
-        {isDesktop && !sidebarKept ? (
+            up with the content header across the divider. Modal (B3 D8): no
+            back row at all -- the dialog's X closes -- so the same h-12 strip
+            becomes the screen's own "Settings" heading. */}
+        {modal ? (
+          <div className={cn("flex h-12 shrink-0 items-center", compact ? "justify-center px-1" : "px-2")} data-testid="settings-sidebar-top">
+            {compact ? null : <h2 className="truncate text-ui-base font-medium">Settings</h2>}
+          </div>
+        ) : isDesktop && !sidebarKept ? (
           <>
             <div className="h-12 shrink-0" data-testid="settings-sidebar-top" data-tauri-drag-region={dragRegion} />
             <div className={cn("shrink-0 pb-1", compact ? "flex justify-center px-1" : "px-2")}>{compact ? backToAppRail : backToApp}</div>
@@ -373,7 +397,19 @@ export function SettingsScreen({
             data-tauri-drag-region={dragRegion}
           >
             <div className="ml-auto" />
-            <DesktopWindowControls />
+            {modal ? (
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label="Close settings"
+                data-testid="settings-close-button"
+                onClick={onNavigateBack}
+              >
+                <Icons.close className="size-4" />
+              </Button>
+            ) : (
+              <DesktopWindowControls />
+            )}
           </header>
           <main className="min-h-0 flex-1 overflow-y-auto" data-testid="settings-content">
             <div className={SETTINGS_COLUMN_CLASS}>
