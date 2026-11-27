@@ -16,9 +16,10 @@ export function HostStep() {
     return (
       <p
         data-testid="add-project-host-chip"
-        className="inline-flex items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-ui-sm text-foreground-muted"
+        className="inline-flex w-fit max-w-full items-center gap-1.5 justify-self-start rounded-full border border-border bg-muted px-2.5 py-1 text-ui-sm text-foreground"
       >
-        On: {hosts.current.name}
+        <Icons.host aria-hidden className="size-3.5 shrink-0 text-foreground-muted" />
+        <span className="min-w-0 truncate">On: {hosts.current.name}</span>
       </p>
     );
   }
@@ -50,7 +51,7 @@ export function HostStep() {
         >
           <Icons.host className="size-4 shrink-0" />
           <span className="min-w-0 truncate text-ui-base">{host.name}</span>
-          <span className="ml-auto shrink-0 text-ui-sm">{host.reason}</span>
+          <span className="ml-auto max-w-[60%] text-right text-ui-sm">{host.reason}</span>
         </div>
       ))}
     </div>

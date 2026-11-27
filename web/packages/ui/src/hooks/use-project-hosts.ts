@@ -71,7 +71,7 @@ export function useProjectHosts(): ProjectHosts {
     if (!list || list.off) return [];
     return list.hosts
       .filter((h) => h.state === "approved")
-      .map((h) => ({ hostId: h.hostId, name: h.alias || h.label, reason: "Not available yet" }));
+      .map((h) => ({ hostId: h.hostId, name: h.alias || h.label, reason: "Not available yet: fleet hosts cannot add projects from here." }));
   }, [fleetList.data]);
 
   const data = isDesktop ? connections.data ?? null : null;

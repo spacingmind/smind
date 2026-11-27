@@ -109,7 +109,7 @@ export function AddProjectDialog(props: {
           <DialogHeader>
             <DialogTitle>Add project</DialogTitle>
             <DialogDescription>
-              Must be an existing git repository -- tasks are created as worktrees branched off it.
+              sMind works on git repositories. Choose a folder that already is one.
             </DialogDescription>
           </DialogHeader>
           <AddProjectBody

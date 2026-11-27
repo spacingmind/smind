@@ -147,7 +147,7 @@ describe("Add project host step", () => {
     const mac = screen.getByTestId("add-project-host-fleet-h1abc");
     const nas = screen.getByTestId("add-project-host-fleet-h2nas");
     expect(mac).toHaveTextContent("mac");
-    expect(mac).toHaveTextContent("Not available yet");
+    expect(mac).toHaveTextContent("Not available yet: fleet hosts cannot add projects from here.");
     expect(mac).toHaveAttribute("aria-disabled", "true");
     // No alias: the host's own label is the name.
     expect(nas).toHaveTextContent("Nas");
@@ -478,6 +478,21 @@ describe("Add project open a folder", () => {
     });
     const create = await waitFor(() => client.nth("workspace.create", 0));
     expect(create.params).toEqual({ path: "/home/u/code/y" });
+  });
+
+  it("add_project_copy_is_plain_and_the_host_chip_is_a_chip", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("copy");
+    renderDialog();
+    await flush();
+    const dialog = screen.getByTestId("add-project-dialog");
+    expect(dialog).toHaveTextContent("sMind works on git repositories. Choose a folder that already is one.");
+    expect(dialog.textContent).not.toContain("--");
+    expect(dialog.textContent?.toLowerCase()).not.toContain("worktree");
+    // the host chip is a pill with the server icon, shrink-wrapped, not a full-width input-like bar
+    const chip = screen.getByTestId("add-project-host-chip");
+    expect(chip).toHaveClass("rounded-full", "w-fit", "justify-self-start");
+    expect(chip.querySelector("svg")).not.toBeNull();
   });
 
   it("add_project_tilde_is_expanded", async () => {
