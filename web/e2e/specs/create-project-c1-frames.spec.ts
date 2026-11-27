@@ -200,11 +200,11 @@ test('fleet-rows: the current host plus a disabled fleet row (stubbed)', async (
   const host = await page.evaluate(() => window.location.host)
   await expect(page.getByTestId('add-project-host-chip')).toHaveCount(0)
   await expect(page.getByTestId('add-project-host-current')).toContainText(host)
-  await expect(page.getByTestId('add-project-host-current')).toContainText('This connection')
+  await expect(page.getByTestId('add-project-host-current')).toContainText('Selected')
   const fleet = page.getByTestId('add-project-host-fleet-hbuildbox')
   await expect(fleet).toHaveAttribute('aria-disabled', 'true')
   await expect(fleet).toContainText('build-box')
-  await expect(fleet).toContainText('Not available yet')
+  await expect(fleet).toContainText("isn't supported yet")
   await shot(page, testInfo, 'fleet-rows-stub')
 })
 
