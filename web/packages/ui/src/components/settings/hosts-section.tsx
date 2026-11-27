@@ -20,6 +20,7 @@ import { useLastDefined } from "@/hooks/use-last-defined";
 import { useWorkspaceTree } from "@/hooks/use-workspace-tree";
 import { REVERSE_GRANT_COPY } from "@/lib/fleet-types";
 import { Icons } from "@/lib/icons";
+import { useConfigKey } from "@/hooks/use-config";
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -103,7 +104,8 @@ function HostsSection(_props: SettingsSectionContext) {
       <section className="flex flex-col gap-2">
         <SettingsSectionTitle title="Hosts" actions={headerActions} />
 
-        {data && !data.off && <FleetSwitch />}
+        {data && <FleetSwitch />}
+        {data && <FleetStateLine running={!data.off} />}
         {!data ? (
           query.isError ? (
             <div className="flex items-center gap-2">
@@ -115,17 +117,7 @@ function HostsSection(_props: SettingsSectionContext) {
           ) : (
             <LoadingRows />
           )
-        ) : data.off ? (
-          <SettingsEmptyCard
-            testId="hosts-off"
-            title="Fleet is off"
-            actions={
-              <div className="w-full text-left">
-                <FleetSwitch />
-              </div>
-            }
-          />
-        ) : data.hosts.length === 0 ? (
+        ) : data.off ? null : data.hosts.length === 0 ? (
           <SettingsEmptyCard
             testId="hosts-empty"
             title="No hosts paired"
@@ -279,13 +271,36 @@ function HostsSection(_props: SettingsSectionContext) {
 registerSettingsSection({
   id: "hosts",
   label: "Hosts",
-  description: "Other smind hosts paired with this one.",
+  description: "Other sMind hosts paired with this one.",
   order: 140,
   icon: <Icons.host aria-hidden className="size-3.5" />,
   render: (ctx) => <HostsSection {...ctx} />,
 });
 
-/** The one fleet switch, in the off card and above the host list; the restart notice comes from the row. */
+/**
+ * One line saying where the fleet stands, from two facts: whether the daemon answers fleet.host.list
+ * (`running`) and whether the config file says on. They differ between a switch change and the next restart.
+ * Nothing is shown while the config is loading or failed: never a guess.
+ */
+function FleetStateLine({ running }: { running: boolean }) {
+  const { view } = useConfigKey("fleet.enabled");
+  if (!view) return null;
+  const configOn = view.value === "true";
+  const text = running
+    ? configOn
+      ? "Fleet is running."
+      : "Fleet turns off after the daemon restarts."
+    : configOn
+      ? "Fleet turns on after the daemon restarts."
+      : "Fleet is off.";
+  return (
+    <p data-testid="hosts-fleet-state" className="text-ui-sm text-foreground-muted">
+      {text}
+    </p>
+  );
+}
+
+/** The one fleet switch, a normal card at the top of the page; the restart notice comes from the row. */
 function FleetSwitch() {
   return (
     <SettingsGroup>

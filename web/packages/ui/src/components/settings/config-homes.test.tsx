@@ -190,10 +190,9 @@ describe("config homes: plugins, fleet, learning", () => {
     d.daemon.off = true;
     const section = listSettingsSections().find((s) => s.id === "hosts")!;
     renderWithDaemon(<>{section.render({ client: d.daemon.client, events: d.daemon.events })}</>, d.daemon);
-    const off = await screen.findByTestId("hosts-off");
     await waitFor(() => expect(screen.getByTestId("config-fleet-enabled-switch")).toBeInTheDocument());
-    expect(off).toContainElement(screen.getByTestId("config-fleet-enabled-switch"));
-    expect(off).toHaveTextContent("Takes effect after the daemon restarts");
+    expect(screen.queryByTestId("hosts-off")).toBeNull();
+    expect(screen.getByTestId("settings-section-hosts")).toHaveTextContent("Takes effect after the daemon restarts");
     expect(screen.getByTestId("settings-section-hosts")).not.toHaveTextContent("config.yaml");
   });
 

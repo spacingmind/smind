@@ -39,7 +39,87 @@ function allText(): string {
     .join("\n");
 }
 
+/** Answers config.get with fleet.enabled = `on` on top of the fleet daemon's own methods. */
+function withFleetConfig(d: FleetDaemon, on: boolean): FleetDaemon {
+  const holder = d.client as unknown as { call: (m: string, p?: unknown) => Promise<unknown> };
+  const inner = holder.call.bind(holder);
+  holder.call = async (method, params) => {
+    if (method === "config.get") {
+      return {
+        keys: [{ key: "fleet.enabled", value: on ? "true" : "false", default: "false", source: "file", restart: true, writable: true }],
+      };
+    }
+    return inner(method, params);
+  };
+  return d;
+}
+
 describe("settings-hosts section", () => {
+  it("hosts_fleet_switch_is_a_normal_card_at_the_top", async () => {
+    for (const mode of ["off", "empty", "list"] as const) {
+      const d = withFleetConfig(new FleetDaemon(), mode !== "off");
+      d.off = mode === "off";
+      d.hosts = mode === "list" ? [fleetHost()] : [];
+      const view = await renderSection(d);
+      const sw = await screen.findByTestId("config-fleet-enabled-switch");
+      expect(screen.queryByTestId("hosts-off")).toBeNull();
+      expect(sw.closest('[data-testid="hosts-empty"]')).toBeNull();
+      const after = screen.queryByTestId("hosts-empty") ?? screen.queryByTestId("hosts-list");
+      if (mode === "off") expect(after).toBeNull();
+      else expect(sw.compareDocumentPosition(after!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  it("hosts_state_line_off", async () => {
+    const d = withFleetConfig(new FleetDaemon(), false);
+    d.off = true;
+    await renderSection(d);
+    expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet is off.");
+  });
+
+  it("hosts_state_line_pending_restart_after_turning_on", async () => {
+    const d = withFleetConfig(new FleetDaemon(), true);
+    d.off = true;
+    await renderSection(d);
+    expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet turns on after the daemon restarts.");
+    expect(allText()).not.toContain("Fleet is off");
+  });
+
+  it("hosts_state_line_pending_restart_after_turning_off", async () => {
+    const d = withFleetConfig(new FleetDaemon(), false);
+    d.hosts = [fleetHost()];
+    await renderSection(d);
+    expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet turns off after the daemon restarts.");
+  });
+
+  it("hosts_state_line_running", async () => {
+    const d = withFleetConfig(new FleetDaemon(), true);
+    d.hosts = [fleetHost()];
+    await renderSection(d);
+    expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet is running.");
+  });
+
+  it("hosts_empty_card_only_when_running_with_no_hosts", async () => {
+    const off = withFleetConfig(new FleetDaemon(), false);
+    off.off = true;
+    const v1 = await renderSection(off);
+    await screen.findByTestId("hosts-fleet-state");
+    expect(screen.queryByTestId("hosts-empty")).toBeNull();
+    v1.unmount();
+
+    const pending = withFleetConfig(new FleetDaemon(), true);
+    pending.off = true;
+    const v2 = await renderSection(pending);
+    await screen.findByTestId("hosts-fleet-state");
+    expect(screen.queryByTestId("hosts-empty")).toBeNull();
+    v2.unmount();
+
+    const running = withFleetConfig(new FleetDaemon(), true);
+    await renderSection(running);
+    expect(await screen.findByTestId("hosts-empty")).toBeInTheDocument();
+  });
+
   it("ui_cleanup_b2_hosts_row_is_responsive", async () => {
     const d = new FleetDaemon();
     d.hosts = [fleetHost()];
@@ -113,9 +193,8 @@ describe("settings-hosts section", () => {
     d.off = true;
     await renderSection(d);
 
-    const off = screen.getByTestId("hosts-off");
-    expect(off).toHaveTextContent("Fleet is off");
-    expect(off).not.toHaveTextContent("config.yaml");
+    expect(screen.queryByTestId("hosts-off")).toBeNull();
+    expect(screen.getByTestId("settings-section-hosts")).not.toHaveTextContent("config.yaml");
     // no rows, so none of the row actions exist in any form
     expect(document.querySelectorAll('[data-testid^="host-row-"]')).toHaveLength(0);
     expect(screen.queryByRole("button", { name: "Revoke" })).toBeNull();
