@@ -993,6 +993,8 @@ daemon to apply" or apply live where trivially possible (decision 8). `smind ser
 keeps taking no flags. This gives `service install` and the Docker image one documented
 way to change `server.port`/`server.listen`/`server.hostnames` without per-OS unit edits.
 
+> *Amended by ADR-0062 (2026-11-27): the editable key list grows (see ADR-0062 section 3), the same edit is reachable as the human-only, loopback-only `config.set` RPC, and inside an agent run `smind config set` and `smind config unset` are refused (the CLI human-only table; `smind config get` stays allowed). A scratch daemon started by an agent sets its port with `SMIND_LISTEN`, not `config set`.*
+
 **Reference pattern — ported.** The reference removed `--port/--listen/--relay/--hostnames` from
 `daemon start` and rejects them with "use `daemon config set <path> <value>`, then
 restart" (`local-daemon.ts:82-110`), and provides `daemon config get/set/unset` and
