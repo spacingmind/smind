@@ -8,7 +8,7 @@ import { useLastDefined } from "@/hooks/use-last-defined";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { RolePackBanner } from "@/components/settings/role-pack-banner";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
-import { SettingsEmptyCard } from "@/components/settings/settings-layout";
+import { SettingsEmptyCard, SettingsList, SettingsListRow } from "@/components/settings/settings-layout";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-error";
 
@@ -233,9 +233,9 @@ function ProfilesSection(_props: SettingsSectionContext) {
               />
             )}
             {(profiles.length > 0 || openCard === "new") && (
-              <ul className="overflow-hidden rounded-xl border border-border bg-card [&>*+*]:border-t [&>*+*]:border-border">
+              <SettingsList>
                 {openCard === "new" && (
-                  <li data-testid="profile-new-form" className="rounded-lg px-2 py-1.5">
+                  <SettingsListRow data-testid="profile-new-form">
                     <ProfileForm
                       idPrefix="profile-form"
                       form={form}
@@ -249,7 +249,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                       providersLoading={!providersSettled}
                       otherProfiles={profiles}
                     />
-                  </li>
+                  </SettingsListRow>
                 )}
                 {profiles.map((p) => {
                   const isDefault = defaultAgentId === String(p.ID);
@@ -257,7 +257,7 @@ function ProfilesSection(_props: SettingsSectionContext) {
                   // A plugin-owned agent is read-only for every caller: manage it in Settings -> Plugins.
                   const owned = p.readOnly === true || !!p.owner;
                   return (
-                    <li key={p.ID} data-testid={`profile-row-${p.ID}`} className="flex flex-col gap-2 rounded-lg px-2 py-1.5 hover:bg-hover">
+                    <SettingsListRow key={p.ID} data-testid={`profile-row-${p.ID}`} className="flex flex-col gap-2 hover:bg-hover">
                       <div className="flex items-center justify-between gap-2">
                         <Button
                           type="button"
@@ -308,10 +308,10 @@ function ProfilesSection(_props: SettingsSectionContext) {
                           otherProfiles={profiles.filter((o) => o.ID !== p.ID)}
                         />
                       )}
-                    </li>
+                    </SettingsListRow>
                   );
                 })}
-              </ul>
+              </SettingsList>
             )}
           </>
         )}
