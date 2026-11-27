@@ -58,6 +58,7 @@ GLM peers write the code from step briefs (A row + hook + keys + bridge + tests;
 - [x] spec + contract
 - [x] A, B, C
 - [x] review, mutations, validator, frames (web harness)
+- [ ] REAL-WINDOW frame pass (screen unlocked by the Human at the Steward's request): parked state if interrupted: branch `feat/config-switches-ui`, head `a6567cce9`, validationId 44 (pass, mergeReady), PR #992. Shot list: Automations off/confirm/on/paused/resumed (Settings + page), Plugins off/on, Hosts off + restart notice, Learning kill switch + restart notice, read-only row (web harness if unreachable), env-overridden disabled (daemon started once with SMIND_LEARNING=0), refusal; light/dark, 1280x800 and 800x520, inside the Settings modal. Audit app: `scripts/desktop-audit-build.sh`, CARGO_TARGET_DIR under `~/.smind/dogfood/ui-b5/`, deleted after.
 
 ## Validation
 
