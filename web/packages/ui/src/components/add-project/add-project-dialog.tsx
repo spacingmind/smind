@@ -94,7 +94,7 @@ export function AddProjectDialog(props: {
             "sm:max-w-[640px]",
             // The full-bleed sheet at small sizes, exactly as SettingsDialog
             // does it: drop the centring, size and radius.
-            "max-[860px]:inset-0 max-[860px]:left-0 max-[860px]:top-0 max-[860px]:h-auto max-[860px]:w-auto max-[860px]:max-w-none max-[860px]:translate-x-0 max-[860px]:translate-y-0 max-[860px]:rounded-none max-[860px]:border-0",
+            "max-[860px]:content-start max-[860px]:overflow-y-auto [@media(max-height:560px)]:content-start [@media(max-height:560px)]:overflow-y-auto max-[860px]:inset-0 max-[860px]:left-0 max-[860px]:top-0 max-[860px]:h-auto max-[860px]:w-auto max-[860px]:max-w-none max-[860px]:translate-x-0 max-[860px]:translate-y-0 max-[860px]:rounded-none max-[860px]:border-0",
             "[@media(max-height:560px)]:inset-0 [@media(max-height:560px)]:left-0 [@media(max-height:560px)]:top-0 [@media(max-height:560px)]:h-auto [@media(max-height:560px)]:w-auto [@media(max-height:560px)]:max-w-none [@media(max-height:560px)]:translate-x-0 [@media(max-height:560px)]:translate-y-0 [@media(max-height:560px)]:rounded-none [@media(max-height:560px)]:border-0",
             lights && "max-[860px]:pt-[38px] [@media(max-height:560px)]:pt-[38px]",
           )}

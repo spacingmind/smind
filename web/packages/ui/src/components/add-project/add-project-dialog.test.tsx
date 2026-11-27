@@ -681,6 +681,9 @@ describe("Add project dialog small sizes", () => {
     const small = renderDialog();
     await flush();
     expect(screen.getByTestId("add-project-dialog")).toHaveAttribute("data-sheet", "true");
+    // the sheet packs its content at the top and scrolls: a stretched grid left a 50px gap under the description in the real window
+    expect(screen.getByTestId("add-project-dialog").className).toContain("max-[860px]:content-start");
+    expect(screen.getByTestId("add-project-dialog").className).toContain("max-[860px]:overflow-y-auto");
     small.onOpenChange.mockClear();
 
     setViewport(1280, 800);
