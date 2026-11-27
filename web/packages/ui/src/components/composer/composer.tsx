@@ -24,6 +24,7 @@ import { encodeAttachment } from "@/lib/attachments/encode";
 import { isDraftFile, useComposerAttachmentsStore, useContextChips, type DraftAttachment } from "@/stores/composer-attachments-store";
 import { cn } from "@/lib/utils";
 
+import { AmbientQuotaNotice } from "@/components/composer/ambient-quota-notice";
 import { ComposerStatusChips } from "@/components/composer/composer-status-chips";
 import { QueuedPrompts } from "@/components/composer/queued-prompts";
 import { resolveNextPermissionMode } from "@/components/composer/permission-mode-cycle";
@@ -562,6 +563,7 @@ export function Composer({
   return (
     <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl @[1100px]/chat:max-w-4xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
       <QueuedPrompts items={queuedItems} onCancel={onCancelQueued} />
+      <AmbientQuotaNotice provider={provider} />
 
       {/*
        * The input card (Item 5): one rounded surface whose top is the
