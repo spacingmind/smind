@@ -35,9 +35,10 @@ function useSheetLayout(): boolean {
   const isSheet = () => window.innerWidth <= SHEET_MAX_WIDTH || window.innerHeight <= SHEET_MAX_HEIGHT;
   const [sheet, setSheet] = useState(isSheet);
   useEffect(() => {
-    window.addEventListener("resize", isSheet);
+    const onResize = () => setSheet(isSheet());
+    window.addEventListener("resize", onResize);
     setSheet(isSheet());
-    return () => window.removeEventListener("resize", isSheet);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
   return sheet;
 }
