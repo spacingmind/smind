@@ -3,8 +3,11 @@
 // `@/lib/platform` is mocked per scenario (module-load constants) and the
 // section re-imported fresh, same as daemon-section.test.tsx.
 import { act } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { FakeUsageDaemon } from "@/test/usage-test-client";
+import { renderWithDaemon } from "@/test/render-with-daemon";
 
 function baseSettings(overrides: Record<string, unknown> = {}) {
   return {
@@ -44,6 +47,8 @@ async function renderSection(opts: { desktop?: boolean; settings?: Record<string
     }),
     notifyTest: vi.fn(() => Promise.resolve()),
     attentionFocusReport: vi.fn(() => Promise.resolve()),
+    // The Mobile push group's connection check: this desktop app is on its local daemon.
+    getCurrentConnection: vi.fn(() => Promise.resolve({ id: "local", kind: "local", label: "Local", baseUrl: "http://127.0.0.1:4648" })),
   };
   vi.doMock("@/lib/platform", () => ({
     isDesktop: build,
@@ -53,7 +58,17 @@ async function renderSection(opts: { desktop?: boolean; settings?: Record<string
   await import("@/components/settings/notifications-section");
   const section = listSettingsSections().find((s) => s.id === "notifications");
   if (!section) throw new Error("notifications section did not register");
-  render(<>{section.render({ client: null })}</>);
+  // The section ends with the Mobile push group: its one `relay.device.list` read needs a daemon
+  // connection (and a QueryClient), so the section renders inside the daemon harness. The fake
+  // daemon has no relay bridge of its own; it answers the list with no devices and no window.
+  const daemon = new FakeUsageDaemon([]);
+  const holder = daemon.client as unknown as { call: (m: string, p?: unknown) => Promise<unknown> };
+  const inner = holder.call.bind(holder);
+  holder.call = async (method, params) => {
+    if (method === "relay.device.list") return { devices: [], window: null };
+    return inner(method, params);
+  };
+  renderWithDaemon(<>{section.render({ client: null })}</>, daemon);
   await flush();
   return api;
 }
