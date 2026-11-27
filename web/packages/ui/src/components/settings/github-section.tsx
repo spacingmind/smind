@@ -3,10 +3,11 @@ import { useEffect, useId, useState, type FormEvent } from "react";
 import { describePrError, type PrErrorView } from "@/components/git/pr-error";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
-import { SettingsGroup } from "@/components/settings/settings-layout";
+import { SettingsGroup, SettingsRow, SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { FormError } from "@/components/ui/form-error";
 import { Input } from "@/components/ui/input";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
@@ -36,24 +37,26 @@ function isLocalDaemon(): boolean {
 
 function HostRow({ host, onLogout }: { host: ForgeHostStatus; onLogout: (host: string) => void }) {
   return (
-    <li className="flex items-center gap-3 px-3 py-2" data-testid={`github-host-${host.host}`}>
-      <Icons.success aria-hidden className="size-4 shrink-0 text-success" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-ui-base text-foreground">
-          Signed in to <span className="font-medium">{host.host}</span> as <span className="font-medium">{host.login}</span>
-        </p>
-        <p className="truncate text-ui-sm text-muted-foreground">
-          {host.scopes.length > 0 ? `Scopes: ${host.scopes.join(", ")}` : "Scopes: not reported"} · {host.protocol || "https"} ·{" "}
-          {SOURCE_WORD[host.source]}
-        </p>
-      </div>
-      {/* A token from the environment can't be removed by gh auth logout, so there is nothing to confirm. */}
-      {host.source !== "env" && (
-        <Button type="button" variant="outline" size="sm" data-testid={`github-logout-${host.host}`} onClick={() => onLogout(host.host)}>
-          Log out
-        </Button>
-      )}
-    </li>
+    <SettingsRow
+      testId={`github-host-${host.host}`}
+      label={
+        <span className="flex min-w-0 items-center gap-2">
+          <Icons.success aria-hidden className="size-4 shrink-0 text-success" />
+          <span className="truncate">
+            Signed in to <span className="font-medium">{host.host}</span> as <span className="font-medium">{host.login}</span>
+          </span>
+        </span>
+      }
+      description={`${host.scopes.length > 0 ? `Scopes: ${host.scopes.join(", ")}` : "Scopes: not reported"} · ${host.protocol || "https"} · ${SOURCE_WORD[host.source]}`}
+      control={
+        // A token from the environment can't be removed by gh auth logout, so there is nothing to confirm.
+        host.source !== "env" && (
+          <Button type="button" variant="outline" size="sm" data-testid={`github-logout-${host.host}`} onClick={() => onLogout(host.host)}>
+            Log out
+          </Button>
+        )
+      }
+    />
   );
 }
 
@@ -105,11 +108,8 @@ function GithubSection() {
 
   const target = loggingOut;
   return (
-    <div className="flex flex-col gap-4" data-testid="settings-section-github">
-      <SettingsSectionTitle
-        title="GitHub"
-        description="Pull requests, issues and pushes use the GitHub CLI (gh) on the machine that runs the daemon."
-      />
+    <div className="flex flex-col gap-6" data-testid="settings-section-github">
+      <SettingsSectionTitle title="GitHub" />
 
       {status.isPending ? (
         <LoadingRows rows={2} />
@@ -124,16 +124,17 @@ function GithubSection() {
               description="The GitHub CLI (`gh`) isn't installed on the daemon host. Install it there, then reopen this page."
             />
           ) : signedInHosts.length > 0 ? (
-            <ul className="divide-y divide-border rounded-xl border bg-card" data-testid="github-hosts">
+            <SettingsGroup testId="github-hosts" title="Signed-in hosts">
               {signedInHosts.map((h) => (
                 <HostRow key={h.host} host={h} onLogout={setLoggingOut} />
               ))}
-            </ul>
+            </SettingsGroup>
           ) : (
-            <div className="rounded-xl border bg-card px-3 py-2" data-testid="github-signed-out">
-              <p className="text-ui-base text-foreground">Not signed in</p>
-              <p className="text-ui-sm text-muted-foreground">Paste a GitHub token below to sign the daemon host in.</p>
-            </div>
+            <SettingsEmptyCard
+              testId="github-signed-out"
+              title="Not signed in"
+              description="Paste a GitHub token below to sign the daemon host in."
+            />
           )}
           {installed && data.cli.version && (
             <p className="text-ui-sm text-muted-foreground" data-testid="github-cli-version">
@@ -201,11 +202,7 @@ function GithubSection() {
                   </p>
                 )}
               </div>
-              {error && (
-                <p role="alert" className="text-ui-base text-destructive" data-testid="github-token-error">
-                  {error.message}
-                </p>
-              )}
+              {error && <FormError message={error.message} testId="github-token-error" />}
             </form>
           </SettingsGroup>
 
@@ -253,7 +250,7 @@ function GithubSection() {
 registerSettingsSection({
   id: FORGE_SETTINGS_SECTION_ID,
   label: "GitHub",
-  description: "Connection to GitHub for pull requests.",
+  description: "Pull requests, issues and pushes use the GitHub CLI (gh) on the machine that runs the daemon.",
   order: 130,
   icon: <Icons.forge aria-hidden className="size-3.5" />,
   render: () => <GithubSection />,
