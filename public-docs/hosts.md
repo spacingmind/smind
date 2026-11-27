@@ -282,10 +282,8 @@ ports. Nothing here touches your real `~/.smind`.
 export A=$(mktemp -d) B=$(mktemp -d)
 printf 'fleet:\n  enabled: true\n' > $A/config.yaml
 printf 'fleet:\n  enabled: true\n' > $B/config.yaml
-SMIND_HOME=$A smind config set server.port 4701
-SMIND_HOME=$B smind config set server.port 4702
-SMIND_HOME=$A smind serve &        # the receiver
-SMIND_HOME=$B smind serve &        # the initiator
+SMIND_HOME=$A SMIND_LISTEN=127.0.0.1:4701 smind serve &   # the receiver
+SMIND_HOME=$B SMIND_LISTEN=127.0.0.1:4702 smind serve &   # the initiator
 ```
 
 Pair them. A loopback address needs no `--allow-cleartext`:
