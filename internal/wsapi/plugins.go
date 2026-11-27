@@ -19,8 +19,10 @@ import (
 // (rc.local false), exactly like the other administrative handlers. A nil
 // request context fails closed.
 //
-// The global switch (plugins.enabled in config.yaml) has no RPC at all: only a
-// human editing the file turns plugins on.
+// The global switch (plugins.enabled) is writable through config.set
+// (ADR-0062: human-only, loopback-only, audited; `smind config set` is the same
+// edit) and is still read live on every call. Agents, plugin sessions, relay
+// sessions and non-loopback logins are refused.
 
 // pluginMutating lists the methods the local-only guard wraps; a test walks it.
 var pluginMutating = []string{

@@ -23,7 +23,10 @@ import (
 // automations.allowRemoteManage. None of these methods is in RunScopedMethods,
 // and the MCP server exposes no automation tool.
 //
-// The global switches (automations.enabled / paused) have no RPC at all.
+// The global switches (automations.enabled / paused) are writable through
+// config.set (ADR-0062: human-only, loopback-only, audited; `smind config set`
+// is the same edit) and are still read live on every engine tick. Agents,
+// plugin sessions, relay sessions and non-loopback logins are refused.
 
 // automationMutating lists the methods the human-local guard wraps; a test
 // walks it.

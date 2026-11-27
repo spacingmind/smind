@@ -2,9 +2,11 @@ package config
 
 import "fmt"
 
-// FleetConfig is the fleet section (ADR-0048). It is off by default and only
-// a human edit of config.yaml turns it on: no RPC, agent or relay session
-// can change it. With fleet.enabled false the daemon's behaviour is
+// FleetConfig is the fleet section (ADR-0048). It is off by default.
+// Enabled is writable through config.set (ADR-0062: human-only, loopback-only,
+// audited; `smind config set` is the same edit) and is read once at daemon
+// start, so a change applies after a restart. Agents, plugin sessions, relay
+// sessions and non-loopback logins are refused. With fleet.enabled false the daemon's behaviour is
 // byte-for-byte today's -- nothing dials out and no fleet state is kept.
 // Validate runs even when the section is off, so a typo in a value nobody
 // has switched on yet still surfaces at load time.
