@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ConfigSwitchRow } from "@/components/settings/config-switch-row";
@@ -58,6 +58,11 @@ describe("ConfigSwitchRow", () => {
     await ready();
     expect(screen.getByTestId("row-switch")).toHaveAttribute("aria-checked", "false");
     expect(screen.queryByTestId("row-read-only")).toBeNull();
+    // and the same key, not writable for this connection: no switch at all
+    cleanup();
+    mount(daemonWith([view("plugins.enabled", { writable: false })]), "plugins.enabled");
+    await waitFor(() => expect(screen.getByTestId("row-read-only")).toBeInTheDocument());
+    expect(screen.queryByTestId("row-switch")).toBeNull();
   });
 
   it("config_read_only_copy_when_not_writable", async () => {
