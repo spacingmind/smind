@@ -205,6 +205,44 @@ test('UC6-02 mobile push with a registered device (stub)', async ({ app }) => {
   )
 })
 
+// UC6-03 (B6 D4 / AC7): relay.device.* is local-only, so a relay-like connection gets `forbidden` and the group
+// turns read-only instead of erroring. STUB: the e2e daemon has no relay bridge, so a relay session cannot be
+// started for real; the proxy answers relay.device.list the way the daemon would from one, everything else is
+// forwarded to the real daemon.
+async function stubRelayRefusal(page: Page) {
+  await page.routeWebSocket(/\/ws/, (ws) => {
+    const server = ws.connectToServer()
+    server.onMessage((m) => ws.send(m))
+    ws.onMessage((m) => {
+      let msg: { id?: string | number; method?: string }
+      try {
+        msg = JSON.parse(String(m))
+      } catch {
+        return server.send(m)
+      }
+      if (msg.method === 'relay.device.list') {
+        return ws.send(
+          JSON.stringify({
+            id: msg.id,
+            error: { message: 'relay.device.list: forbidden: relay.device.* is not available over the relay', code: 'forbidden' },
+          }),
+        )
+      }
+      server.send(m)
+    })
+  })
+}
+
+test('UC6-03 mobile push over a relay-like connection is read-only (stub)', async ({ app }) => {
+  const { page } = app
+  await stubRelayRefusal(page)
+  await app.openApp()
+  await openSettings(page, 'notifications')
+  await expect(page.getByTestId('mobile-push-group')).toBeVisible()
+  await expect(page.getByTestId('push-read-only')).toHaveText("Send test notifications from the daemon's machine.")
+  await expect(page.getByTestId('push-test')).toHaveCount(0)
+})
+
 test('UC6-04 relay client: Disable works, Enable and Resume are refused with a sentence', async ({ app }) => {
   const { page } = app
   const pageErrors: string[] = []
