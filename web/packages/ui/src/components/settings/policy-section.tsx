@@ -77,8 +77,8 @@ function PolicySection(_ctx: SettingsSectionContext) {
           <SettingsGroup title="Policy file">
             <SettingsRow
               label="File"
-              control={
-                <span data-testid="policy-path" className="font-mono text-ui-sm text-foreground-muted">
+              description={
+                <span data-testid="policy-path" className="block min-w-0 font-mono text-ui-sm break-all text-foreground-muted">
                   {status.data?.path || EM_DASH}
                 </span>
               }

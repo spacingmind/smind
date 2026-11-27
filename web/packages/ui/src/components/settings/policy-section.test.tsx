@@ -189,6 +189,22 @@ describe("policy-section", () => {
     expect(within(rules).getByText("allow-git-status").className).toContain("whitespace-nowrap");
   });
 
+  it("ui_cleanup_b2_policy_file_row_wraps_long_path", async () => {
+    mobile.value = false;
+    const longPath = "/very/long/path".repeat(14);
+    const client = renderSection();
+    client.nth("policy.get").resolve(policyStatus({ path: longPath }));
+    client.nth("policy.audit").resolve({ rows: [], next: 0 });
+    await flush();
+
+    const path = screen.getByTestId("policy-path");
+    expect(path.className).toContain("break-all");
+    expect(path.className).toContain("min-w-0");
+    expect(path.className).toContain("font-mono");
+    expect(path.closest(".shrink-0")).toBeNull();
+    expect(path).toHaveTextContent(longPath);
+  });
+
   it("ui_cleanup_b2_policy_uses_shared_primitives", async () => {
     mobile.value = false;
     const section = listSettingsSections().find((s) => s.id === "permission-policy");
