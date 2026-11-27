@@ -59,7 +59,16 @@ async function shot(page: Page, testInfo: TestInfo, name: string) {
   if (!dir) return
   fs.mkdirSync(dir, { recursive: true })
   await settled(page)
-  await page.screenshot({ path: path.join(dir, `${name}-${testInfo.project.name}.png`) })
+  const wide = (page.viewportSize()?.width ?? 0) >= 1280
+  await page.screenshot({ path: path.join(dir, `${name}-${testInfo.project.name}${wide ? '-1280x800' : ''}.png`) })
+  if (!wide) return
+  // The same state at 800x520 (the smallest desktop window), inside the same Settings modal.
+  const size = page.viewportSize()!
+  await page.setViewportSize({ width: 800, height: 520 })
+  await settled(page)
+  await page.screenshot({ path: path.join(dir, `${name}-${testInfo.project.name}-800x520.png`) })
+  await page.setViewportSize(size)
+  await settled(page)
 }
 
 const sw = (page: Page, id: string) => page.getByTestId(`${id}-switch`)
@@ -117,6 +126,7 @@ test('UC5-01 automations switch end to end on the real daemon', async ({ app }, 
   await openSettings(page, 'automations')
   const id = 'config-automations-enabled'
   await expect(sw(page, id)).toHaveAttribute('aria-checked', 'false')
+  await shot(page, testInfo, 'UC5-01-off')
 
   const confirm = await turnOn(page, id)
   await expect(page.getByTestId(`${id}-dialog`)).toContainText(/\S/)
@@ -142,6 +152,7 @@ test('UC5-02 plugins on the real daemon', async ({ app }, testInfo) => {
   await openSettings(page, 'plugins')
   const id = 'config-plugins-enabled'
   await expect(sw(page, id)).toHaveAttribute('aria-checked', 'false')
+  await shot(page, testInfo, 'UC5-02-off')
   await (await turnOn(page, id)).click()
   await expect(sw(page, id)).toHaveAttribute('aria-checked', 'true')
   await expect.poll(() => readConfig(file)).toContain('plugins:')
@@ -184,6 +195,7 @@ test('UC5-04 learning kill switch on the real daemon', async ({ app }, testInfo)
   await (await turnOn(page, id)).click()
   await expect(sw(page, id)).toHaveAttribute('aria-checked', 'true')
   await expect.poll(() => readConfig(file)).toMatch(/enabled: true/)
+  await shot(page, testInfo, 'UC5-04-on-again')
 })
 
 test('UC5-05 pause and resume on the real daemon', async ({ app }, testInfo) => {
@@ -205,6 +217,7 @@ test('UC5-05 pause and resume on the real daemon', async ({ app }, testInfo) => 
   await page.getByTestId(`${paused}-dialog-confirm`).click()
   await expect.poll(() => readConfig(file)).toMatch(/paused: false/)
   await expect(page.getByTestId('automations-paused')).toHaveCount(0)
+  await shot(page, testInfo, 'UC5-05-resumed')
 })
 
 test('UC5-06 relay-style read-only', async ({ app }, testInfo) => {

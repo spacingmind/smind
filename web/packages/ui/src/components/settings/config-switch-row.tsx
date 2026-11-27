@@ -8,6 +8,7 @@ import { Switch } from "@/components/ui/switch";
 import { useConfigKey, useConfigSet } from "@/hooks/use-config";
 import { CONFIG_CONFIRM, isWritableConfigKey, type WritableConfigKey } from "@/lib/config-keys";
 import { daemonSentence } from "@/lib/daemon-sentence";
+import { isDesktop } from "@/lib/platform";
 
 const RESTART_NOTE = "Takes effect after the daemon restarts.";
 
@@ -98,8 +99,9 @@ function Row({ configKey, label, description, testId }: { configKey: WritableCon
       {saved ? `Saved. ${RESTART_NOTE}` : RESTART_NOTE}
     </p>
   ) : null;
+  // The Daemon section (and its restart) exists only in the desktop app, so the button does too.
   const openDaemon =
-    saved && view.restart ? (
+    saved && view.restart && isDesktop ? (
       <Button
         type="button"
         variant="ghost"
@@ -120,26 +122,30 @@ function Row({ configKey, label, description, testId }: { configKey: WritableCon
 
   if (!view.writable && !envLocked) {
     return (
-      <SettingsRow
-        label={label}
-        description={description}
-        testId={testId}
-        control={
-          <span data-testid={`${testId}-state`} className="text-ui-sm text-foreground-muted">
-            {on ? onWord : offWord}
-          </span>
-        }
-      >
-        <p data-testid={`${testId}-read-only`} className="text-ui-sm text-foreground-muted">
-          Change this on the daemon&apos;s machine.
-        </p>
-        {restartLine}
-      </SettingsRow>
+      <div data-testid={`${testId}-wrap`}>
+        <SettingsRow
+          label={label}
+          description={description}
+          testId={testId}
+          control={
+            <span data-testid={`${testId}-state`} className="text-ui-sm text-foreground-muted">
+              {on ? onWord : offWord}
+            </span>
+          }
+        />
+        <div className="flex flex-col gap-1 px-4 pb-3">
+          <p data-testid={`${testId}-read-only`} className="text-ui-sm text-foreground-muted">
+            Change this on the daemon&apos;s machine.
+          </p>
+          {restartLine}
+        </div>
+      </div>
     );
   }
 
+  const hasNotes = Boolean(restartLine || openDaemon || (set.error && !confirming));
   return (
-    <>
+    <div data-testid={`${testId}-wrap`}>
       <SettingsRow
         label={label}
         description={description}
@@ -161,10 +167,13 @@ function Row({ configKey, label, description, testId }: { configKey: WritableCon
             />
           </div>
         }
-      >
-        {notes}
-        {set.error && !confirming && <Alert variant="error" testId={`${testId}-error`} description={messageOf(set.error)} />}
-      </SettingsRow>
+      />
+      {hasNotes && (
+        <div className="flex flex-col items-start gap-1 px-4 pb-3">
+          {notes}
+          {set.error && !confirming && <Alert variant="error" testId={`${testId}-error`} description={messageOf(set.error)} />}
+        </div>
+      )}
       <ConfirmDialog
         open={confirming}
         onOpenChange={(open) => {
@@ -184,6 +193,6 @@ function Row({ configKey, label, description, testId }: { configKey: WritableCon
           });
         }}
       />
-    </>
+    </div>
   );
 }

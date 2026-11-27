@@ -51,7 +51,19 @@ afterEach(() => {
   delete process.env.SMIND_LEARNING;
 });
 
+let desktopFlag = false;
+vi.mock("@/lib/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/platform")>()),
+  get isDesktop() {
+    return desktopFlag;
+  },
+}));
+
 describe("ConfigSwitchRow", () => {
+  afterEach(() => {
+    desktopFlag = false;
+  });
+
   it("config_switch_shown_only_when_writable", async () => {
     const d = daemonWith([view("plugins.enabled", { writable: true })]);
     mount(d, "plugins.enabled");
@@ -198,6 +210,7 @@ describe("ConfigSwitchRow", () => {
   });
 
   it("config_saved_restart_notice_opens_daemon_settings", async () => {
+    desktopFlag = true;
     const d = daemonWith([view("fleet.enabled", { restart: true })]);
     mount(d, "fleet.enabled");
     await ready();
@@ -209,6 +222,16 @@ describe("ConfigSwitchRow", () => {
     fireEvent.click(screen.getByTestId("row-open-daemon"));
     window.removeEventListener("smind:open-settings", seen);
     expect((seen.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "daemon" });
+  });
+
+  it("config_open_daemon_settings_is_offered_only_on_desktop", async () => {
+    const d = daemonWith([view("fleet.enabled", { writable: true, restart: true })]);
+    mount(d, "fleet.enabled");
+    await ready();
+    fireEvent.click(screen.getByTestId("row-switch"));
+    fireEvent.click(within(await screen.findByTestId("row-dialog")).getByRole("button", { name: "Turn on" }));
+    await waitFor(() => expect(screen.getByTestId("row-restart")).toHaveTextContent("Saved."));
+    expect(screen.queryByTestId("row-open-daemon")).toBeNull();
   });
 
   it("config_get_error_shows_a_read_only_sentence", async () => {
