@@ -167,7 +167,7 @@ A new package `internal/automation` in the house style:
   template (ADR-0019): `default`, `plan`, `acceptEdits` or `auto` for claude-native, codex's own modes, ACP `autoAccept` stays human-set. smind adds
   no approval of its own, no allow-list, and **no automation may set or imply `autoAccept`/`full-access`**; `automation.create`/`update` reject a
   template whose mode is `autoAccept=true` or `full-access`/`bypassPermissions` unless a human sets `automations.allowUnattendedModes: true` in
-  `config.yaml` (default false, no RPC). A permission request raised by an automation task goes to the usual `permission.pending` event and push
+  `config.yaml` (default false; the switch has a human-only, loopback-only RPC since ADR-0062, otherwise no RPC). A permission request raised by an automation task goes to the usual `permission.pending` event and push
   (ADR-0040) and waits for a human exactly like any other task; a task that sits in `waiting_permission` counts as *running* for the single-flight
   cap, so a stuck prompt blocks further firings instead of piling up.
 - The **seat policy** applies on top: the automation's Lead can launch Peers only within `orchestration.maxDepth`, the per-tree guard and the tree
@@ -194,6 +194,8 @@ sessions included (a phone can *see* its automations and pause one, see below). 
 4. **Global switch**: `automations.enabled` in `config.yaml`, **default false**, read on every tick like `plugins.enabled` (a human edit applies without
    restart; an unreadable or invalid file is OFF). There is no RPC to change it. `automations.paused: true` is a second, softer global switch (the engine
    keeps running and polling state but records every signal as `paused` and never fires), so a human can stop all firings without losing cursors.
+
+> *Amended by ADR-0062 (2026-11-27): `automations.enabled` and `automations.paused` are writable through `config.set` (human-only, loopback-only, audited), so "There is no RPC to change it" no longer holds for a person on the daemon's machine; `allowUnattendedModes`, `maxBudgetUsd` and `allowRemoteManage` stay file-only and are readable through `config.get`.*
 5. **Template validation** at create/update: the profile exists and is not an orchestrating seat unless the template says so (the Lead profile is the
    pilot's), the workspace exists, the mode is allowed (§4), the prompt template is ≤ 8 KiB with only the documented placeholders, cron is ≥ 5 min.
    Validation is repeated at fire time (a profile deleted since creation is a `failed` firing, not a crash).
@@ -457,6 +459,7 @@ Each is one real decision; the **Recommendation** is what binds if you accept "a
     - (b) Default true.
     - (c) A UI toggle.
     *Recommendation:* **(a).** Same shape as `plugins.enabled`: no RPC can arm unattended agents.
+> *Amended by ADR-0062 (2026-11-27): the unattended-modes opt-in is still not writable over any RPC; `plugins.enabled` is the comparison only for the on/off switch.*
 
 ## Human answers (2026-10-27)
 

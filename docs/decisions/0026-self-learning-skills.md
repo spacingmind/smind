@@ -432,6 +432,8 @@ Per skill, in `learned_skills`:
   **delivery** instantly, and a per-workspace "forget everything"
   (hard-delete all rows and snapshots for that workspace).
 
+> *Amended by ADR-0062 (2026-11-27): the Settings toggle is `config.set learning.enabled` (human-only, loopback-only); the environment variable still wins and the toggle then says so. The switch is read at startup today, so a change applies after a restart unless the implementation re-reads it per decision, in which case "instantly" holds.*
+
 ### 9. Privacy and safety
 
 - **What leaves the machine:** only the reflector/curator model calls, to the

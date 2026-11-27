@@ -2,10 +2,7 @@
 
 ## Status
 
-**Proposed — 2026-11-27.** Nothing is built for this record. The Human decided the direction on 2026-11-27 (H3): **yes** to a `config.get` / `config.set` pair, **ADR first**, human-only,
-local-only (the relay and remote links refuse it), an allowlist of keys, and never an agent. What is still open is the allowlist itself and six smaller choices, collected in
-[Questions for the Human](#questions-for-the-human); the table in [section 3](#3-the-allowlist) is a proposal, not a decision. When the Human accepts it, the amendment notes in
-[section 4](#4-what-this-amends-and-the-exact-wording) are applied in the first implementation PR.
+**Accepted — 2026-11-27.** The Human accepted the direction (H3: yes to a `config.get` / `config.set` pair, ADR first, human-only, local-only, an allowlist, never an agent) and decided the allowlist and the six choices inside it on 2026-11-27; they are recorded under [Human decisions](#human-decisions-2026-11-27) and applied in the text below. Nothing is built yet: the implementation is B4a (daemon, HIGH-RISK), then B5 (UI). The wording amendments to ADR-0042, 0044, 0048, 0026 and 0031 are applied in this same change (a dated note in each).
 
 Builds on [ADR-0031](0031-homelab-cli-distribution.md) D10 (`smind config get|set|unset`, the comment-preserving edit this record reuses),
 [ADR-0056](0056-human-only-rpc-principal.md) (who "the human" is on the socket), and the guards of [ADR-0042](0042-plugin-system.md) (plugins), [ADR-0044](0044-automations.md)
@@ -78,14 +75,32 @@ Runtime behaviour of each switch, read from the code (this decides "takes effect
 - **Audit:** every attempt that reaches the handler appends one line to an append-only, owner-only file in the daemon home (rotated by size): time, key, old value, new value, outcome
   (`ok` or the refusal reason), and the connection's channel. No secrets exist in the allowlist, so values are logged as they are. Refusals by the guard (agent, relay, plugin) are logged
   with the caller class, because an agent probing this method is worth seeing. On success the daemon emits a `config.updated {key}` event so open UIs refetch.
-- **CLI parity:** `smind config set|get` gains the same keys (`fleet.enabled`, `plugins.enabled`, `learning.enabled`, `automations.paused` are missing from `knownKeys` today). The CLI path
-  is unchanged in power: it is the same `config.Set`. See [Questions for the Human](#questions-for-the-human) Q6 about making the CLI refuse these keys inside an agent run.
+- **CLI parity:** `smind config set|get` gains the same keys (`fleet.enabled`, `plugins.enabled`, `learning.enabled`, `automations.paused` are missing from `knownKeys` today): the same
+  `config.Set`, so the same validation. Who may run it inside an agent run is section 2b.
+
+### 2b. The CLI inside an agent run (decided, Q6)
+
+Today `smind config set` is not in the human-only CLI table (`internal/permpolicy/humanonly.go`), so an agent in a shell can run it. That gap is closed in B4a, from the one table the CLI and the
+floor already share:
+
+- A row `{path: [config], verbs: [set, unset], keyFilter: agentSafeKeys}` is added to `humanOnlyCLI`. The table gains a **key filter**: a `config set|unset <key>` is human-only unless `<key>` is on
+  `agentSafeKeys`. **`agentSafeKeys` is empty today**: no `config set` or `config unset` of any key is agent-safe (every key in `knownKeys` is either one of the five writable switches, a read-only or
+  never-exposed key of section 3, `server.*`, or `providers.<id>.defaultModel`, which steers routing and spend and is changed through its own RPC that an agent cannot call either). A future agent-safe key is
+  one explicit entry with a reason and a test, not a change of the rule.
+- Allowed in an agent run (the near misses, listed so nothing is guessed): `smind config get [path]` (read-only; the secret key prints `<set>`), `smind config` with no verb or `--help`. Everything else
+  under `config set|unset` is refused by the CLI itself ("inside an agent run, run by a person") and denied by the floor's no-self-approve rule when an agent's shell command names it.
+- The floor row uses `bare: false`: it matches only when the command names the smind binary (a renamed copy is still caught by the CLI's own agent-run refusal), because `config set` is also a verb of
+  other tools (`npm config set`) that an agent may run legitimately.
+- A scratch daemon an agent starts for a test keeps working without `config set`: the port and listen address come from `SMIND_LISTEN` (and the home from `SMIND_HOME`), which are environment, not config.
+  The dogfood recipes use that.
+- **The ADR-0056 limit is stated, not claimed closed:** a same-user process can still edit `config.yaml` directly, or run a copy of the binary the floor and the agent-run marker do not see. The CLI row and the
+  floor rule narrow the easy path (the CLI is the agent's own tool); they do not make the file private.
 
 ### 3. The allowlist
 
 One table drives `config.get`, `config.set`, the CLI and the UI. Everything not listed is invisible to both RPCs (the generic "edit any key" door is rejected below).
 
-**Proposed writable (`config.set` and `config.get`):**
+**Writable (`config.set` and `config.get`), decided 2026-11-27:**
 
 | Key | Type | Default | Takes effect | What it does | Risk | Over the relay (`get`) |
 |---|---|---|---|---|---|---|
@@ -95,11 +110,11 @@ One table drives `config.get`, `config.set`, the CLI and the UI. Everything not 
 | `fleet.enabled` | bool | false | **restart** | the fleet layer starts; `fleet.*` methods register | opens links to peer hosts (each still needs pairing and approval) | read |
 | `learning.enabled` | bool | true | **restart** as wired today (B4a either re-reads it per decision, making it live, or labels it restart); the environment wins | global kill switch of the learning subsystem | turning it **off** is a brake; turning it on re-enables collection (per-workspace opt-in still decides) | read |
 
-**Proposed read-only: `config.get` only, never `config.set` over any RPC** (a human edits the file or uses the CLI; the UI shows the value and "change this in config.yaml"):
+**Read-only: `config.get` only, never `config.set` over any RPC** (a human edits the file or uses the CLI; the UI shows the value and "change this in config.yaml"):
 
 | Key | Why it is not writable over RPC | Over the relay (`get`) |
 |---|---|---|
-| `browser.disabled` | the kill switch whose point is that **no RPC can change it** (ADR-0061); a person at the machine has the file and the CLI. Recommended read-only; see Q3 | read |
+| `browser.disabled` | the kill switch whose point is that **no RPC can change it** (ADR-0061); a person at the machine has the file and the CLI. Read-only by the Human's decision (Q3) | read |
 | `automations.allowUnattendedModes`, `automations.maxBudgetUsd`, `automations.allowRemoteManage` | each raises what an unattended agent may do or who may manage automations: a privilege lever, not a convenience switch | read |
 | `plugins.allowRemoteManage` | widens who may manage plugins | read |
 | `relay.legacyDevices`, `relay.maxDevices` | security-lowering (`legacyDevices`) or a pairing ceiling | read |
@@ -113,9 +128,9 @@ environment variable's value (only whether a key is overridden, and the variable
 
 ### 4. What this amends, and the exact wording
 
-These sentences say "no RPC, by design / edit config.yaml". Each gets a dated amendment note appended **at the end of its section** (not a rewrite of the original text), applied in the
-first implementation PR once the Human accepts this ADR. Doc comments in `internal/config/{config,fleet}.go` and `internal/wsapi/{plugins,automations}.go` ("no RPC, agent or relay session
-can set it", "The global switches ... have no RPC at all") are corrected in the same PR.
+These sentences say "no RPC, by design / edit config.yaml". Each gets a dated amendment note appended **at the end of its section** (not a rewrite of the original text). **The notes are applied in the same change as this acceptance**
+(ADR-0042 three notes and the global-switch bullet, ADR-0044 two notes and one inline edit, ADR-0048, ADR-0026, ADR-0031 D10); the table records their text. Doc comments in `internal/config/{config,fleet}.go` and `internal/wsapi/{plugins,automations}.go` ("no RPC, agent or relay session
+can set it", "The global switches ... have no RPC at all") are corrected in the B4a commit that changes the code.
 
 | Where | Sentence today | Amendment note (proposed text) |
 |---|---|---|
@@ -127,7 +142,7 @@ can set it", "The global switches ... have no RPC at all") are corrected in the 
 | ADR-0044, line "`config.yaml` (default false, no RPC)" in the automation-spawned-task paragraph | "(default false, no RPC)" | "Amended by ADR-0062: the switch has a human-only, loopback-only RPC; it is still default false." |
 | ADR-0048, the feature-off paragraph and S2 | "Feature **off by default** (`fleet.enabled: false`; off = today's behaviour byte for byte, host key not created, no `fleet.*` method served)." (the code comment on `FleetConfig` adds "only a human edit of config.yaml turns it on") | "Amended by ADR-0062: `fleet.enabled` is writable through `config.set` (a restart applies it) and is added to the CLI key list. Off is still today's behaviour byte for byte." |
 | ADR-0026 (learning) | "a global kill switch (`learning.enabled` in `config.yaml`, `SMIND_LEARNING=0`, and a Settings toggle) that stops collection, jobs and **delivery** instantly" | "Amended by ADR-0062: the Settings toggle is `config.set learning.enabled`; the environment variable still wins and the toggle then says so. The switch is read at startup today, so a change applies after a restart unless the implementation re-reads it per decision, in which case 'instantly' holds." |
-| ADR-0061 | "no RPC can change it" (the kill switch) | none: `browser.disabled` stays read-only over RPC under the recommended answer to Q3; if the Human chooses otherwise, ADR-0061 gets an amendment note instead. |
+| ADR-0061 | "no RPC can change it" (the kill switch) | none: `browser.disabled` stays read-only over RPC by the Human's decision (Q3), so ADR-0061 needs no amendment note. |
 | ADR-0031 D10 | `smind config get|set|unset` | "Amended by ADR-0062: the key list grows (section 3) and the same edit is reachable as `config.set`." |
 
 ### 5. UI
@@ -156,8 +171,9 @@ Named, written with the implementation PRs (each must fail when the guard it nam
 
 ### 7. PR split
 
-- **B4a: daemon.** `config.get` / `config.set`, the allowlist table, the guard (including `HumanOnlyRPCs`, `pluginNeverPrefixes`, the floor table entry), audit, the `config.updated` event, CLI key
-  parity (`fleet.enabled` and the others), the amendment notes of section 4, and every test of section 6. Size M, security review required, validation contract with mutation checks (remove each guard).
+- **B4a: daemon (HIGH-RISK).** `config.get` / `config.set`, the allowlist table, the guard (including `HumanOnlyRPCs`, `pluginNeverPrefixes`, the floor table entry), audit, the `config.updated` event, CLI key
+  parity (`fleet.enabled` and the others), the CLI human-only row with its key filter (section 2b), the doc-comment corrections, and every test of section 6 plus `config_cli_set_refused_in_agent_run`,
+  `config_cli_get_allowed_in_agent_run`, `config_cli_key_filter_is_empty_by_default` and a floor test. Size M, security review required, two reviewers, validation contract with a mutation check for each guard.
 - **B5: UI.** `ConfigSwitchRow` and its four homes (Automations including Pause/Resume, Plugins, Hosts, Learning), with light and dark frames, a relay-style read-only frame and the restart notice.
   Size S to M, one UI PR open at a time. It starts only after B4a is merged.
 
@@ -170,13 +186,13 @@ Named, written with the implementation PRs (each must fail when the guard it nam
    surface. Revisit only if one switch needs behaviour `config.Set` cannot express (a restart the daemon performs itself, say).
 3. **Keep `config.yaml` as the only door.** Rejected by the Human on 2026-11-27: the cost is a hand-edit and a restart for the features the product is built around.
 4. **Writable over the relay for brakes** (`automations.paused`, `learning.enabled: false`), as `automation.disable` is today. Not proposed: one rule ("every `config.set` is loopback-only") is easier
-   to audit and to explain; a phone can disable an individual automation already. Listed as Q4.
+   to audit and to explain; a phone can disable an individual automation already. Decided against by the Human (Q4 and Q5).
 
 ## What we are NOT doing
 
 - No generic key editor, no wildcard, no batch set, no `unset` over RPC.
 - No agent, MCP, plugin, relay or fleet-link access to `config.set`, ever; and no new secret or per-boot proof of presence (that is ADR-0056's open question, not this record's).
-- No change to who the human is on the socket (ADR-0056), and no claim that this closes the same-user shell hole: a shell can still edit the file or run the CLI. This record adds no power over it.
+- No change to who the human is on the socket (ADR-0056), and no claim that this closes the same-user shell hole: a shell can still edit `config.yaml` directly. This record adds no power over it, and narrows only the CLI path (section 2b).
 - No UI for `browser.disabled`, `allowUnattendedModes`, `allowRemoteManage`, `legacyDevices`, the password, `pprof` or any ceiling; they stay file or CLI only.
 - No hot reload of `fleet.enabled`; it needs the restart it needs today and the UI says so.
 - No secrets in `config.get`, and no environment variable values.
@@ -186,23 +202,15 @@ Named, written with the implementation PRs (each must fail when the guard it nam
 - One guard, one audit file and one drift test cover every switch, and a new switch is a table row plus a test row, not a new RPC.
 - The Settings pages stop telling people to edit a file for the five switches; a remote or relay client sees the state and where to change it.
 - The amendment notes keep ADR-0042/0044/0048 honest: the old "no RPC" lines were true when written and are corrected rather than silently contradicted.
-- `fleet.enabled` and the other missing keys become settable from the CLI, which is a behaviour change for scripts only in the sense that a refusal becomes an accepted write.
+- `fleet.enabled` and the other missing keys become settable from the CLI by a person, which is a behaviour change for scripts only in the sense that a refusal becomes an accepted write.
+- Inside an agent run `smind config set|unset` stops working for every key (section 2b): the recipes that start a scratch daemon with `config set server.port` use `SMIND_LISTEN` instead, a breaking change for those recipes (no installed base: no migration, noted here and in the release notes).
 - The honest limit stays: a same-user process can already change these switches. If the Human later wants a presence proof for the arming switches (ADR-0056 option 1 or 2), it applies to `config.set`
   as one more human-only method, with no redesign.
 
-## Questions for the Human
+## Human decisions (2026-11-27)
 
-The allowlist (section 3) is the part still open; these are the choices inside it, each with a recommendation.
-
-1. **The writable set.** Proposed: `automations.enabled`, `automations.paused`, `plugins.enabled`, `fleet.enabled`, `learning.enabled`. Recommendation: accept; `learning.enabled` (a restart-applied brake, see the table) and `automations.paused`
-   are brakes, the other three arm something and are guarded by loopback-only plus a confirmation.
-2. **Who may READ.** Recommendation: any non-agent connection, including the relay, for the feature switches and limits; `server.*` loopback only (section 1). Alternative: loopback only for everything
-   (the phone then cannot show state).
-3. **`browser.disabled`.** Recommendation: **read-only over RPC** (kill switch that no wire can flip, ADR-0061). Alternative: writable for a loopback human, which lets the UI offer a one-click "stop all
-   agent browsers" brake but makes the kill switch reachable by anything that holds the daemon token on loopback.
-4. **Brakes over the relay.** Recommendation: no, one rule. Alternative: allow `automations.paused: true` and `learning.enabled: false` (only toward the safe value) over the relay, like `automation.disable`.
-5. **Loopback only, or any direct login.** Recommendation: loopback only for `config.set`, no `allowRemoteManage`-style escape hatch (the switches arm things; a LAN password login is not a person
-   at the machine). Alternative: reuse `humanLocalOnly`'s rule, which allows a non-loopback login when a config flag says so.
-6. **The CLI inside an agent run.** Today `smind config set` is not in the human-only CLI table, so an agent in a shell can run it. Recommendation: **not in this ADR** (it would also stop
-   orchestrating agents from setting `server.port` in a scratch daemon), noted as a known gap with ADR-0056. Alternative: make `config set` human-only for the five writable keys only (needs a key filter the
-   table does not have today; a small extension in B4a).
+1. **Q1, the writable set: accepted.** `automations.enabled`, `automations.paused`, `plugins.enabled`, `fleet.enabled` (restart), `learning.enabled` (restart as wired today, or re-read per decision: B4a chooses and labels it honestly in the `restart` flag and the UI).
+2. **Q2, who may read: accepted as recommended.** Any non-agent client, relay included, for the switch and limit keys; the `server.*` keys only over loopback.
+3. **Q3, `browser.disabled`: stays read-only over RPC** (the kill switch no wire can flip, ADR-0061; no ADR-0061 amendment).
+4. **Q4 and Q5, `config.set` is loopback-only with no relay brake exception and no `allowRemoteManage`-style escape hatch.** A phone pauses automations through the existing per-automation pause and resume RPCs (UI in B6), not through `config.set`.
+5. **Q6, close the CLI gap in B4a:** in an agent run `smind config set|unset` is refused for every key (the key filter exists and `agentSafeKeys` is empty), `smind config get` stays allowed, the floor rule names it, and the same-user limit of ADR-0056 is stated, not claimed closed (section 2b).
