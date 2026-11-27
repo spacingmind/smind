@@ -36,21 +36,8 @@ import { Icons } from "@/lib/icons";
 /** Tailwind `p-2`, which an inline `paddingLeft` replaces (see AppHeader). */
 const BASE_PADDING_PX = 8;
 
-/** Sections whose content is wide (tables, card grids) -- their page gets max-w-3xl instead of the narrow max-w-[510px] reading column. The ids of the usage/plugins/automations/profiles(=agents)/providers/mcp-servers/connections/shortcuts sections. */
-const WIDE_SECTION_IDS = new Set([
-  "usage",
-  "plugins",
-  "automations",
-  "agents",
-  "providers",
-  "mcp-servers",
-  "connections",
-  "shortcuts",
-  "permission-policy",
-]);
-
-/** Sections whose tables need even more room than max-w-3xl gives at 1280 -- their page gets max-w-5xl. */
-const EXTRA_WIDE_SECTION_IDS = new Set(["shortcuts"]);
+/** The one content column every Settings section renders in (UI cleanup B2 D1): 48rem, so wide tables and long monospace rows keep room and the column never shifts between tabs. */
+export const SETTINGS_COLUMN_CLASS = "mx-auto w-full max-w-3xl px-6 pb-12 pt-4";
 
 /** Below this width of the settings screen itself (not the window: the app sidebar sits beside it) the section nav shrinks to an icon rail, so the content column keeps room to read. 256 (nav) + 464 (content). */
 export const COMPACT_NAV_BELOW_PX = 720;
@@ -389,16 +376,7 @@ export function SettingsScreen({
             <DesktopWindowControls />
           </header>
           <main className="min-h-0 flex-1 overflow-y-auto" data-testid="settings-content">
-            <div
-              className={cn(
-                "mx-auto w-full px-6 pb-12 pt-4",
-                active?.id && EXTRA_WIDE_SECTION_IDS.has(active.id)
-                  ? "max-w-5xl"
-                  : active?.id && WIDE_SECTION_IDS.has(active.id)
-                    ? "max-w-3xl"
-                    : "max-w-[510px]",
-              )}
-            >
+            <div className={SETTINGS_COLUMN_CLASS}>
               <h1
                 data-testid="settings-page-title"
                 className="text-ui-settings-title font-semibold tracking-tight text-foreground"

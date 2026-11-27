@@ -608,4 +608,20 @@ describe("SettingsScreen layout", () => {
       expect(item.querySelector("svg")).not.toBeNull();
     }
   });
+
+  it("ui_cleanup_b2_one_column_width_for_every_section", () => {
+    renderScreen();
+
+    // Sections that had each of the three old width classes: general was
+    // the narrow 510px reading column, usage the wide 3xl, shortcuts the
+    // extra-wide 5xl -- plus the rest of the tab set.
+    for (const id of ["general", "usage", "shortcuts", "saved-grants", "browser", "hosts"]) {
+      fireEvent.click(screen.getByTestId(`settings-nav-${id}`));
+      const column = within(screen.getByTestId("settings-content")).getByTestId("settings-page-title").parentElement;
+      expect(column).not.toBeNull();
+      expect(column?.className).toContain("max-w-3xl");
+      expect(column?.className).not.toContain("max-w-[510px]");
+      expect(column?.className).not.toContain("max-w-5xl");
+    }
+  });
 });
