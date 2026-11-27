@@ -1,5 +1,5 @@
 import { type Page } from '@playwright/test'
-import { expect, test } from '../fixtures/test'
+import { expect, test, waitForRpc } from '../fixtures/test'
 
 // B6 (docs/plans/active/ui-cleanup-b6.md, D5 / AC8): a relay session may brake an automation (`automation.disable`)
 // and nothing else that mutates; `automation.enable` and `automation.resume` are human + local only and answer
@@ -104,6 +104,40 @@ async function openSettings(page: Page, sectionId: string) {
   await page.evaluate((id) => window.dispatchEvent(new CustomEvent('smind:open-settings', { detail: { sectionId: id } })), sectionId)
   await expect(page.getByTestId('settings-dialog')).toBeVisible()
 }
+
+// UC6-01 (B6 D4 / AC9): NO stub -- the group talks to the real e2e daemon, which runs no relay bridge, so no phone
+// is ever paired or push-registered there. Whatever it answers for relay.device.list / push.test, the group must
+// show the matching honest state: a count (or "Not known on this daemon." if the list is refused), and either the
+// "no device" copy or the push_disabled sentence -- never an error banner, never a raw "push.test:" prefix.
+test('UC6-01 mobile push on the real daemon: no relay bridge, no device is honest', async ({ app }) => {
+  const { page } = app
+  const pageErrors: string[] = []
+  page.on('pageerror', (e) => pageErrors.push(e.message))
+  await app.openApp()
+  const listAnswer = waitForRpc(page, 'relay.device.list')
+  await openSettings(page, 'notifications')
+  await expect(page.getByTestId('mobile-push-group')).toBeVisible()
+  const list = await listAnswer
+  if (list.error) {
+    await expect(page.getByTestId('push-count')).toHaveText('Not known on this daemon.')
+  } else {
+    const devices = (list.result as { devices?: { push?: boolean }[] }).devices ?? []
+    const withPush = devices.filter((d) => d.push === true).length
+    await expect(page.getByTestId('push-count')).toHaveText(`${withPush} with push on`)
+  }
+
+  const testAnswer = waitForRpc(page, 'push.test')
+  await page.getByTestId('push-test').click()
+  const answer = await testAnswer
+  if (answer.error) {
+    await expect(page.getByTestId('push-error')).toContainText('disabled')
+  } else {
+    await expect(page.getByTestId('push-no-device')).toBeVisible()
+  }
+
+  await expect(page.getByTestId('mobile-push-group')).not.toContainText('push.test:')
+  expect(pageErrors).toEqual([])
+})
 
 test('UC6-04 relay client: Disable works, Enable and Resume are refused with a sentence', async ({ app }) => {
   const { page } = app
