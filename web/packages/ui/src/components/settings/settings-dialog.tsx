@@ -1,7 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 
-import { listSettingsSections } from "@/components/settings/settings-registry";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { Dialog, DialogOverlay, DialogPortal, DialogTitle } from "@/components/ui/dialog";
 import { useWindowState } from "@/hooks/use-window-state";
@@ -72,7 +71,7 @@ export function SettingsDialog({
           data-lights={lights}
           aria-describedby={undefined}
           className={cn(
-            "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 flex h-[min(680px,90vh)] w-[min(960px,90vw)] flex-col overflow-hidden rounded-2xl border bg-background shadow-lg duration-(--duration-menu) data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+            "fixed outline-none focus:outline-none focus-visible:outline-none left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 flex h-[min(680px,90vh)] w-[min(960px,90vw)] flex-col overflow-hidden rounded-2xl border bg-background shadow-lg duration-(--duration-menu) data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
             // D2: at the minimum window (anything at or below 860px wide or
             // 560px tall) the dialog drops its centring, size and radius and
             // becomes a full-bleed sheet.
@@ -84,12 +83,11 @@ export function SettingsDialog({
           )}
           onOpenAutoFocus={(e) => {
             e.preventDefault();
-            // Focus the requested section's nav item (D4) -- the first section
-            // for a plain open -- falling back to the content itself.
-            const sections = listSettingsSections();
-            const id = sections.some((s) => s.id === initialSectionId) ? initialSectionId : sections[0]?.id;
-            const target = id ? contentRef.current?.querySelector<HTMLElement>(`[data-testid="settings-nav-${id}"]`) : null;
-            (target ?? contentRef.current)?.focus();
+            // Focus the container, not a nav item: a programmatic focus on a
+            // button counts as keyboard modality and draws a focus ring. The
+            // requested section is shown by the nav item's aria-current style;
+            // the first Tab moves into the nav with the normal ring.
+            contentRef.current?.focus();
           }}
           onEscapeKeyDown={(e) => e.preventDefault()}
           onCloseAutoFocus={(e) => {

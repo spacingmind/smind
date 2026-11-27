@@ -132,17 +132,43 @@ describe("SettingsDialog", () => {
     expect(screen.queryByTestId("settings-dialog")).not.toBeInTheDocument();
   });
 
-  it("ui_cleanup_b3_focus_starts_on_the_requested_section", async () => {
+  it("ui_cleanup_b3_requested_section_is_selected_on_open", async () => {
     const requested = renderWithClientProp(<Harness initialSectionId="shortcuts" />);
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
     await settle();
-    expect(document.activeElement).toBe(screen.getByTestId("settings-nav-shortcuts"));
+    expect(screen.getByTestId("settings-nav-shortcuts")).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("settings-dialog")).toContainElement(screen.getByTestId("settings-section-shortcuts"));
     requested.unmount();
 
     renderWithClientProp(<Harness />);
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
     await settle();
-    expect(document.activeElement).toBe(screen.getByTestId("settings-nav-general"));
+    expect(screen.getByTestId("settings-nav-general")).toHaveAttribute("aria-current", "true");
+  });
+
+  it("ui_cleanup_b3_no_focus_ring_on_open", async () => {
+    await openDialog();
+
+    const dialog = screen.getByTestId("settings-dialog");
+    expect(document.activeElement).toBe(dialog);
+    expect(dialog.className).toContain("outline-none");
+    expect(document.activeElement?.getAttribute("data-testid") ?? "").not.toMatch(/^settings-nav-/);
+  });
+
+  it("ui_cleanup_b3_tab_moves_focus_into_the_nav", async () => {
+    await openDialog();
+
+    // user-event is not a dependency here and jsdom does not move focus on
+    // Tab, so mirror it: the first element Tab reaches (Radix's own tabbable
+    // rules) is a nav button, which keeps the browser's focus-visible ring.
+    const dialog = screen.getByTestId("settings-dialog");
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    const next = tabbablesIn(dialog)[0]!;
+    next.focus();
+    expect(document.activeElement).toBe(next);
+    expect(next.getAttribute("data-testid") ?? "").toMatch(/^settings-nav-/);
+    expect(dialog).toContainElement(next);
+    expect(next.className).not.toContain("outline-none");
   });
 
   it("ui_cleanup_b3_focus_returns_to_the_opener", async () => {
