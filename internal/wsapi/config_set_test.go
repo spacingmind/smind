@@ -459,3 +459,35 @@ func Test_config_set_refuses_proxied_loopback_login(t *testing.T) {
 		t.Errorf("direct local config.get lacks server.* rows: %s", env.Result)
 	}
 }
+
+// A failed audit write must not be silent after the switch moved.
+func Test_config_set_reports_an_audit_failure(t *testing.T) {
+	e := newConfigSetEnv(t)
+	// A directory where the audit file should be makes every append fail.
+	if err := os.Mkdir(filepath.Join(e.home, "config-audit.jsonl"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.set(localRC(), "plugins.enabled", true)
+	if err == nil || !strings.Contains(err.Error(), "applied but could not be written to the audit log") {
+		t.Fatalf("config.set with a broken audit file = %v, want the applied-but-unaudited error", err)
+	}
+	if v, _ := config.Get("plugins.enabled"); v != "true" {
+		t.Fatalf("plugins.enabled = %q: the change should have been applied", v)
+	}
+}
+
+// config.get on an unparsable config.yaml says so, without the parser's text.
+func Test_config_get_unreadable_file_is_an_error_without_parser_text(t *testing.T) {
+	e := newConfigSetEnv(t)
+	if err := os.WriteFile(filepath.Join(e.home, "config.yaml"), []byte("learning: [SECRET-FRAGMENT\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"keys": []string{"learning.enabled"}})
+	_, err := e.api.hs["config.get"](context.Background(), localRC(), raw)
+	if err == nil || !strings.Contains(err.Error(), "could not be read or parsed") {
+		t.Fatalf("config.get on a broken file = %v", err)
+	}
+	if strings.Contains(err.Error(), "SECRET-FRAGMENT") {
+		t.Fatalf("the error carries the file's text: %v", err)
+	}
+}

@@ -171,6 +171,9 @@ func Set(path, value string) error {
 		node = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: v}
 	}
 	return mutate(func(root *yaml.Node) error {
+		if err := refuseAnchored(root, path); err != nil {
+			return err
+		}
 		setNode(root, strings.Split(path, "."), node)
 		return nil
 	})
@@ -183,6 +186,9 @@ func Unset(path string) error {
 		return err
 	}
 	return mutate(func(root *yaml.Node) error {
+		if err := refuseAnchored(root, path); err != nil {
+			return err
+		}
 		removeNode(root, strings.Split(path, "."))
 		return nil
 	})
@@ -292,6 +298,28 @@ func mapGet(m *yaml.Node, key string) (k, v *yaml.Node) {
 		}
 	}
 	return nil, nil
+}
+
+// refuseAnchored refuses an edit that would walk through, replace or remove a
+// YAML anchor or alias on the way to path: the rewrite would silently drop what
+// the alias shares (`automations: *x` becomes an empty section) or leave an
+// alias pointing at nothing. The person edits such a file by hand.
+func refuseAnchored(root *yaml.Node, path string) error {
+	cur := root
+	for _, p := range strings.Split(path, ".") {
+		if cur == nil || cur.Kind != yaml.MappingNode {
+			return nil
+		}
+		_, v := mapGet(cur, p)
+		if v == nil {
+			return nil
+		}
+		if v.Kind == yaml.AliasNode || v.Anchor != "" {
+			return fmt.Errorf("%s: config.yaml uses a YAML anchor or alias here; edit the file by hand", path)
+		}
+		cur = v
+	}
+	return nil
 }
 
 func find(root *yaml.Node, path []string) *yaml.Node {

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // AuditEntry is one line of config-audit.jsonl (ADR-0062): every config.set
@@ -27,6 +28,20 @@ const auditFileName = "config-audit.jsonl"
 // auditMaxBytes is the size at which the audit file rotates to .1.
 var auditMaxBytes int64 = 1 << 20
 
+// auditGenerations is how many rotated files (config-audit.jsonl.1 ...) are kept.
+const auditGenerations = 4
+
+// clip cuts s to at most n bytes on a rune boundary.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
+}
+
 var auditMu sync.Mutex
 
 var auditSecretRE = regexp.MustCompile(`(?i)password|token|secret|key-?material|keymaterial`)
@@ -41,6 +56,10 @@ func AppendAudit(e AuditEntry) error {
 	if auditSecretRE.MatchString(e.Key) {
 		e.Old, e.New = "<redacted>", "<redacted>"
 	}
+	// A caller can put anything in key, and a refusal is audited before any
+	// check, so every field is capped: one call cannot add megabytes.
+	e.Key, e.Old, e.New = clip(e.Key, 128), clip(e.Old, 256), clip(e.New, 256)
+	e.Outcome, e.Channel, e.Caller = clip(e.Outcome, 256), clip(e.Channel, 32), clip(e.Caller, 32)
 	line, err := json.Marshal(e)
 	if err != nil {
 		return err
@@ -55,6 +74,12 @@ func AppendAudit(e AuditEntry) error {
 	}
 	path := filepath.Join(dir, auditFileName)
 	if st, err := os.Stat(path); err == nil && st.Size() >= auditMaxBytes {
+		// Keep auditGenerations old files (.1 newest): a burst of refusals
+		// from a least-privileged caller must not evict the history of real
+		// changes within a handful of calls.
+		for g := auditGenerations; g > 1; g-- {
+			_ = os.Rename(fmt.Sprintf("%s.%d", path, g-1), fmt.Sprintf("%s.%d", path, g))
+		}
 		if err := os.Rename(path, path+".1"); err != nil {
 			return fmt.Errorf("config audit: rotate: %w", err)
 		}

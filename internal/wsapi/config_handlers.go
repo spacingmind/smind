@@ -3,6 +3,7 @@ package wsapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -78,7 +79,7 @@ func handleConfigGet() handlerFunc {
 		for _, ck := range rows {
 			ev, err := config.Effective(ck.Key)
 			if err != nil {
-				return nil, &rpcCodeError{code: codeInvalid, msg: "config.get: " + err.Error()}
+				return nil, configErr("config.get", err)
 			}
 			out = append(out, configKeyView{
 				Key:      ck.Key,
@@ -122,10 +123,25 @@ func configCaller(rc *requestContext) (channel, caller string) {
 	return string(rc.channel), "human"
 }
 
-func auditConfig(e config.AuditEntry) {
-	if err := config.AppendAudit(e); err != nil {
+// auditConfig appends one audit line; a failure is logged and returned so the
+// success path can say the change was applied but not audited.
+func auditConfig(e config.AuditEntry) error {
+	err := config.AppendAudit(e)
+	if err != nil {
 		log.Printf("config.set: audit write failed: %v", err)
 	}
+	return err
+}
+
+// configErr turns a config package error into the text a caller sees: the
+// parser's own words (which may carry a path or a YAML fragment) stay in the
+// daemon log.
+func configErr(method string, err error) *rpcCodeError {
+	if errors.Is(err, config.ErrConfigUnreadable) {
+		log.Printf("%s: %v", method, err)
+		return &rpcCodeError{code: codeInvalid, msg: method + ": " + config.ErrConfigUnreadable.Error() + "; fix it and try again"}
+	}
+	return &rpcCodeError{code: codeInvalid, msg: method + ": " + err.Error()}
 }
 
 func handleConfigSet(publish func(key string)) handlerFunc {
@@ -171,41 +187,50 @@ func handleConfigSet(publish func(key string)) handlerFunc {
 			return refuse("refused: invalid", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("config.set: %s wants true or false", params.Key)})
 		}
 
-		configSetMu.Lock()
-		old, err := config.Effective(params.Key)
-		if err != nil {
-			configSetMu.Unlock()
-			return refuse("refused: invalid: "+err.Error(), &rpcCodeError{code: codeInvalid, msg: "config.set: " + err.Error()})
+		// The locked section is a closure with a deferred unlock, so a panic in
+		// the write cannot leave every later config.set waiting forever.
+		var cur config.EffectiveValue
+		var auditErr error
+		res, rerr := func() (any, error) {
+			configSetMu.Lock()
+			defer configSetMu.Unlock()
+			old, err := config.Effective(params.Key)
+			if err != nil {
+				return refuse("refused: unreadable config.yaml", configErr("config.set", err))
+			}
+			entry.Old = old.Value
+			if old.Source == "env" {
+				return refuse("refused: env-overridden", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("overridden by %s, unset it first", old.Env)})
+			}
+			// Every writable row is a bool (the table says so).
+			if value != "true" && value != "false" {
+				return refuse("refused: invalid", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("config.set: %s wants true or false", params.Key)})
+			}
+			if err := config.Set(params.Key, value); err != nil {
+				return refuse("refused: invalid: "+err.Error(), configErr("config.set", err))
+			}
+			if configAfterWrite != nil {
+				configAfterWrite()
+			}
+			cur, err = config.Effective(params.Key)
+			if err != nil {
+				return refuse("refused: unreadable config.yaml after write", configErr("config.set", err))
+			}
+			entry.New = cur.Value
+			entry.Outcome = "ok"
+			auditErr = auditConfig(entry)
+			return nil, nil
+		}()
+		if rerr != nil || res != nil {
+			return res, rerr
 		}
-		entry.Old = old.Value
-		if old.Source == "env" {
-			configSetMu.Unlock()
-			return refuse("refused: env-overridden", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("overridden by %s, unset it first", old.Env)})
-		}
-		// Every writable row is a bool (the table says so).
-		if value != "true" && value != "false" {
-			configSetMu.Unlock()
-			return refuse("refused: invalid", &rpcCodeError{code: codeInvalid, msg: fmt.Sprintf("config.set: %s wants true or false", params.Key)})
-		}
-		if err := config.Set(params.Key, value); err != nil {
-			configSetMu.Unlock()
-			return refuse("refused: invalid: "+err.Error(), &rpcCodeError{code: codeInvalid, msg: "config.set: " + err.Error()})
-		}
-		if configAfterWrite != nil {
-			configAfterWrite()
-		}
-		cur, err := config.Effective(params.Key)
-		if err != nil {
-			configSetMu.Unlock()
-			return refuse("refused: invalid: "+err.Error(), &rpcCodeError{code: codeInvalid, msg: "config.set: " + err.Error()})
-		}
-		entry.New = cur.Value
-		entry.Outcome = "ok"
-		auditConfig(entry)
-		configSetMu.Unlock()
 
 		if publish != nil {
 			publish(params.Key)
+		}
+		if auditErr != nil {
+			// The switch moved; say so rather than pretend it did not.
+			return nil, &rpcCodeError{code: codeInvalid, msg: "config.set: the change was applied but could not be written to the audit log; see the daemon log"}
 		}
 		return map[string]any{"key": params.Key, "value": cur.Value, "restart": ck.Restart}, nil
 	}

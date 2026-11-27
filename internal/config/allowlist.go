@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -128,12 +129,33 @@ func Effective(key string) (EffectiveValue, error) {
 		return ev, nil
 	}
 	root, err := readDoc()
-	if err == nil {
-		if v, present := fileValue(root, key); present {
-			return EffectiveValue{Value: v, Source: "file"}, nil
+	if err != nil {
+		// An unreadable or unparsable config.yaml is not "the default": the
+		// loader fails closed on it, so reporting defaults here would show the
+		// opposite of what the daemon runs for the kill switches.
+		return EffectiveValue{}, fmt.Errorf("%w: %w", ErrConfigUnreadable, err)
+	}
+	if v, present := fileValue(root, key); present {
+		if ck.Kind == kindBool {
+			v = normalizeBool(v)
 		}
+		return EffectiveValue{Value: v, Source: "file"}, nil
 	}
 	return EffectiveValue{Value: ck.Default, Source: "default"}, nil
+}
+
+// ErrConfigUnreadable wraps a failure to read or parse config.yaml.
+var ErrConfigUnreadable = errors.New("config.yaml could not be read or parsed")
+
+// normalizeBool turns the YAML 1.1 spellings of a bool (yes, on, True, ...)
+// into true/false, the way the loader reads them; anything else is returned as
+// written.
+func normalizeBool(v string) string {
+	var b bool
+	if err := yaml.Unmarshal([]byte(v), &b); err != nil {
+		return v
+	}
+	return strconv.FormatBool(b)
 }
 
 // envEffective mirrors applyEnv for the rows with an Env entry, so Value is
