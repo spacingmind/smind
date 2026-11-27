@@ -51,7 +51,7 @@ func handleConfigGet() handlerFunc {
 				return nil, &rpcCodeError{code: codeInvalid, msg: "config.get: invalid params: " + err.Error()}
 			}
 		}
-		loopback := rc.local && rc.channel == ChannelLoopback
+		loopback := rc.atMachine()
 
 		var rows []config.ConfigKey
 		if len(params.Keys) == 0 {
@@ -116,7 +116,7 @@ func configCaller(rc *requestContext) (channel, caller string) {
 		return string(rc.channel), "run"
 	case !rc.local:
 		return string(rc.channel), "relay"
-	case rc.channel != ChannelLoopback:
+	case !rc.atMachine():
 		return string(rc.channel), "remote"
 	}
 	return string(rc.channel), "human"
@@ -142,8 +142,8 @@ func handleConfigSet(publish func(key string)) handlerFunc {
 			return refuse("refused: run-scoped", forbidden("config.set is not available to agents"))
 		case !rc.local:
 			return refuse("refused: relay", forbidden("config.set is only available on a direct connection, not over the relay"))
-		case rc.channel != ChannelLoopback:
-			return refuse("refused: non-loopback", forbidden("config.set needs a local (loopback) connection"))
+		case !rc.atMachine():
+			return refuse("refused: non-loopback", forbidden("config.set needs a direct local (loopback) connection, not one forwarded by a proxy"))
 		}
 
 		var params struct {

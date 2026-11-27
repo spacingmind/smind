@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -11,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 
 	"github.com/spacingmind/smind/internal/config"
 )
@@ -401,5 +405,57 @@ func Test_config_set_audit_chain_is_consistent_under_concurrency(t *testing.T) {
 		if lines[i].Old != lines[i-1].New {
 			t.Fatalf("audit line %d old = %q but line %d new = %q: a rival write slipped between read and write", i, lines[i].Old, i-1, lines[i-1].New)
 		}
+	}
+}
+
+// Test_config_set_refuses_proxied_loopback_login is the end-to-end check of
+// the guard over a real /ws upgrade: a same-host reverse proxy is a loopback
+// peer too, so a remote password login behind one must not pass for the person
+// at the machine (ADR-0031 D8, ADR-0062). Only the bare direct connection may
+// change a switch, and only it may read the server.* rows.
+func Test_config_set_refuses_proxied_loopback_login(t *testing.T) {
+	e := newConfigSetEnv(t)
+	srv := httptest.NewServer(e.api.Handler)
+	t.Cleanup(srv.Close)
+	dial := func(h http.Header) *websocket.Conn {
+		ws, _, err := websocket.DefaultDialer.Dial("ws"+srv.URL[len("http"):]+"/ws?token=tok", h)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		t.Cleanup(func() { ws.Close() })
+		return ws
+	}
+	call := func(ws *websocket.Conn, method string, params any) envelope {
+		sendRequest(t, ws, method, method, params)
+		return readEnvelopeFor(t, ws, method, 5*time.Second)
+	}
+	hasServerKeys := func(env envelope) bool { return strings.Contains(string(env.Result), `"server.listen"`) }
+
+	for name, h := range map[string]http.Header{
+		"forwarded-for":    {"X-Forwarded-For": {"203.0.113.9"}, "X-Forwarded-Proto": {"https"}},
+		"external-host":    {"Host": {"smind.example.com"}},
+		"proxy-and-host":   {"Host": {"smind.example.com"}, "X-Forwarded-For": {"203.0.113.9"}, "X-Forwarded-Proto": {"https"}},
+		"forwarded-header": {"Forwarded": {"for=203.0.113.9;proto=https"}},
+		"x-real-ip":        {"X-Real-Ip": {"203.0.113.9"}},
+	} {
+		before := string(e.file(t))
+		ws := dial(h)
+		if env := call(ws, "config.set", map[string]any{"key": "plugins.enabled", "value": true}); env.Error == nil {
+			t.Errorf("%s: config.set answered %s over a proxied connection", name, env.Result)
+		}
+		if env := call(ws, "config.get", nil); env.Error != nil || hasServerKeys(env) {
+			t.Errorf("%s: config.get = %+v, want an answer without server.* rows", name, env)
+		}
+		if string(e.file(t)) != before {
+			t.Errorf("%s: config.yaml changed", name)
+		}
+	}
+
+	ws := dial(nil)
+	if env := call(ws, "config.set", map[string]any{"key": "plugins.enabled", "value": true}); env.Error != nil {
+		t.Fatalf("direct local config.set refused: %+v", env.Error)
+	}
+	if env := call(ws, "config.get", nil); !hasServerKeys(env) {
+		t.Errorf("direct local config.get lacks server.* rows: %s", env.Result)
 	}
 }

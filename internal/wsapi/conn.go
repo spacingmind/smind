@@ -52,6 +52,19 @@ type requestContext struct {
 	deviceID string
 	// channel is how the connection reached the daemon; see conn.channel.
 	channel Channel
+	// strictLocal is true only for a loopback peer whose Host header names the
+	// machine and that carries no proxy marks (auth.IsTrueLoopback). A
+	// same-host reverse proxy is a loopback peer too (channel loopback), so
+	// channel alone cannot tell the person at the machine from a remote login
+	// behind a proxy; config.set and the server.* rows of config.get need this
+	// stricter fact (ADR-0062, ADR-0031 D8).
+	strictLocal bool
+}
+
+// atMachine reports a direct local connection by the person at the daemon's
+// machine: token-authenticated, loopback, not forwarded by a proxy.
+func (rc *requestContext) atMachine() bool {
+	return rc != nil && rc.local && rc.channel == ChannelLoopback && rc.strictLocal
 }
 
 // Emit sends a server -> client event carrying params, correlated to this
@@ -139,6 +152,9 @@ type conn struct {
 	// channel is the connection's transport class (loopback, tls, e2ee,
 	// plain); the zero value is treated as plain.
 	channel Channel
+
+	// strictLocal: see requestContext.strictLocal.
+	strictLocal bool
 
 	// focus, when non-nil, is the daemon-wide task.gitFocus registry; this
 	// connection's entry is dropped when serve returns.
@@ -278,7 +294,7 @@ func (c *conn) dispatch(connCtx context.Context, env envelope) {
 	}()
 
 	ident, scoped := c.identity()
-	rc := &requestContext{conn: c, id: env.ID, runScoped: scoped, ident: ident, local: c.local, deviceID: c.deviceID, channel: c.channel}
+	rc := &requestContext{conn: c, id: env.ID, runScoped: scoped, ident: ident, local: c.local, deviceID: c.deviceID, channel: c.channel, strictLocal: c.strictLocal}
 	if scoped {
 		if err := c.admit.admit(rc, env.Method, env.Params); err != nil {
 			c.sendError(env.ID, err)
