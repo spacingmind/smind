@@ -54,14 +54,8 @@ export function AutomationsPage({ onNavigateBack, closeSettings }: { onNavigateB
 
   const [readOnlyReason, setReadOnlyReason] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [rowError, setRowError] = useState<{
-    id: number;
-    message: string;
-  } | null>(null);
-  const [fireResult, setFireResult] = useState<{
-    id: number;
-    row: AutomationAuditRow;
-  } | null>(null);
+  const [rowError, setRowError] = useState<{ id: number; message: string } | null>(null);
+  const [fireResult, setFireResult] = useState<{ id: number; row: AutomationAuditRow } | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   /** Edit/create and history targets (the dialogs arrive with the form and the history view). */
   const [editing, setEditing] = useState<number | "new" | null>(null);
@@ -308,23 +302,7 @@ function StateBadge({ automation: a }: { automation: AutomationView }) {
 
 /** A compact on/off switch (role=switch), as the notifications section draws it. */
 /** `busy`: a request is in flight: not clickable, but not dimmed (a dim-then-undim flash on every flip). */
-function Switch({
-  checked,
-  label,
-  disabled,
-  busy,
-  title,
-  testId,
-  onClick,
-}: {
-  checked: boolean;
-  label: string;
-  disabled: boolean;
-  busy?: boolean;
-  title?: string;
-  testId: string;
-  onClick: () => void;
-}) {
+function Switch({ checked, label, disabled, busy, title, testId, onClick }: { checked: boolean; label: string; disabled: boolean; busy?: boolean; title?: string; testId: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -343,10 +321,7 @@ function Switch({
     >
       <span
         aria-hidden
-        className={cn(
-          "absolute top-0.5 left-0.5 size-3.5 rounded-full transition-transform",
-          checked ? "translate-x-4 bg-primary-foreground" : "translate-x-0 bg-foreground",
-        )}
+        className={cn("absolute top-0.5 left-0.5 size-3.5 rounded-full transition-transform", checked ? "translate-x-4 bg-primary-foreground" : "translate-x-0 bg-foreground")}
       />
     </button>
   );
@@ -443,40 +418,16 @@ function AutomationRow({
       )}
 
       <div className="flex flex-wrap items-center gap-1">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          data-testid={`automation-fire-${a.id}`}
-          disabled={disabled}
-          title={lockedReason ?? undefined}
-          onClick={onFire}
-        >
+        <Button type="button" variant="outline" size="sm" data-testid={`automation-fire-${a.id}`} disabled={disabled} title={lockedReason ?? undefined} onClick={onFire}>
           Fire now
         </Button>
         <Button type="button" variant="ghost" size="sm" data-testid={`automation-history-${a.id}`} onClick={onHistory}>
           History
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          data-testid={`automation-edit-${a.id}`}
-          disabled={disabled}
-          title={lockedReason ?? undefined}
-          onClick={onEdit}
-        >
+        <Button type="button" variant="ghost" size="sm" data-testid={`automation-edit-${a.id}`} disabled={disabled} title={lockedReason ?? undefined} onClick={onEdit}>
           Edit
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          data-testid={`automation-delete-${a.id}`}
-          disabled={disabled}
-          title={lockedReason ?? undefined}
-          onClick={onDelete}
-        >
+        <Button type="button" variant="ghost" size="sm" data-testid={`automation-delete-${a.id}`} disabled={disabled} title={lockedReason ?? undefined} onClick={onDelete}>
           Delete
         </Button>
       </div>
