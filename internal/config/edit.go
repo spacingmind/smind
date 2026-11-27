@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 
@@ -42,6 +43,10 @@ var knownKeys = map[string]keyInfo{
 	"server.hostnames":    {kindList, "extra Host header names, comma separated; a leading . matches subdomains"},
 	"server.passwordHash": {kindSecret, "set with `smind set-password`; shown only as <set>"},
 	"automations.enabled": {kindBool, "turn the automations engine on (cron schedules, CI failure signals); default false"},
+	"automations.paused":  {kindBool, "pause the engine: signals are recorded as paused and nothing fires; default false"},
+	"plugins.enabled":     {kindBool, "turn the plugin system on (each plugin still needs its consent); default false"},
+	"fleet.enabled":       {kindBool, "turn the fleet layer on (peer hosts; restart to apply); default false"},
+	"learning.enabled":    {kindBool, "the learning subsystem's global kill switch; default true, SMIND_LEARNING=0 wins"},
 }
 
 func init() {
@@ -166,6 +171,9 @@ func Set(path, value string) error {
 		node = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!bool", Value: v}
 	}
 	return mutate(func(root *yaml.Node) error {
+		if err := refuseAnchored(root, path); err != nil {
+			return err
+		}
 		setNode(root, strings.Split(path, "."), node)
 		return nil
 	})
@@ -178,6 +186,9 @@ func Unset(path string) error {
 		return err
 	}
 	return mutate(func(root *yaml.Node) error {
+		if err := refuseAnchored(root, path); err != nil {
+			return err
+		}
 		removeNode(root, strings.Split(path, "."))
 		return nil
 	})
@@ -219,7 +230,15 @@ func SetPasswordHash(hash string) error {
 // mutate reads config.yaml (an absent file is an empty document), applies fn,
 // refuses the change when the result would not load, and rewrites the file
 // atomically with owner-only permissions.
+//
+// editMu serialises the read-modify-write for every writer inside this
+// process (the config.set RPC, provider.setDefaultModel, set-password), so two
+// of them cannot lose each other's change (ADR-0062). A second process or an
+// editor is a separate writer the daemon cannot lock; the atomic rename keeps
+// the file whole.
 func mutate(fn func(root *yaml.Node) error) error {
+	editMu.Lock()
+	defer editMu.Unlock()
 	root, err := readDoc()
 	if err != nil {
 		return err
@@ -247,6 +266,8 @@ func mutate(fn func(root *yaml.Node) error) error {
 	}
 	return writeAtomic(Path(), buf.Bytes())
 }
+
+var editMu sync.Mutex
 
 func readDoc() (*yaml.Node, error) {
 	data, err := os.ReadFile(Path())
@@ -277,6 +298,31 @@ func mapGet(m *yaml.Node, key string) (k, v *yaml.Node) {
 		}
 	}
 	return nil, nil
+}
+
+// refuseAnchored refuses an edit that would walk through, replace or remove a
+// YAML anchor or alias on the way to path: the rewrite would silently drop what
+// the alias shares (`automations: *x` becomes an empty section) or leave an
+// alias pointing at nothing. The person edits such a file by hand.
+func refuseAnchored(root *yaml.Node, path string) error {
+	cur := root
+	for _, p := range strings.Split(path, ".") {
+		if cur == nil || cur.Kind != yaml.MappingNode {
+			return nil
+		}
+		if k, _ := mapGet(cur, "<<"); k != nil {
+			return fmt.Errorf("%s: config.yaml uses a YAML merge key here; edit the file by hand", path)
+		}
+		_, v := mapGet(cur, p)
+		if v == nil {
+			return nil
+		}
+		if v.Kind == yaml.AliasNode || v.Anchor != "" {
+			return fmt.Errorf("%s: config.yaml uses a YAML anchor or alias here; edit the file by hand", path)
+		}
+		cur = v
+	}
+	return nil
 }
 
 func find(root *yaml.Node, path []string) *yaml.Node {

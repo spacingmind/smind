@@ -86,6 +86,10 @@ const (
 	TopicQuestionResolved = "question.resolved"
 )
 
+// TopicConfigUpdated carries {"key": "..."}: config.set changed one allowlisted
+// key (ADR-0062), so clients refetch config.get. Published on success only.
+const TopicConfigUpdated = "config.updated"
+
 // providerUpdatedPayload is the payload of TopicProviderUpdated.
 type providerUpdatedPayload struct {
 	ID           string `json:"id"`
@@ -144,6 +148,7 @@ var knownTopics = map[string]bool{
 	TopicStewardUpdated:       true,
 	TopicInboxChanged:         true,
 	TopicForgeStatus:          true,
+	TopicConfigUpdated:        true,
 	TopicProviderUpdated:      true,
 	TopicFleetHostsChanged:    true,
 	TopicPluginUpdated:        true,

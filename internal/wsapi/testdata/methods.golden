@@ -31,6 +31,8 @@ chat.queueCancel
 chat.queueGet
 chat.queueList
 chat.rename
+config.get
+config.set
 daemon.info
 db.compact
 debug.memory

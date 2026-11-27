@@ -104,9 +104,11 @@ const (
 	EnvRunRebuildCacheMB = "SMIND_RUN_REBUILD_CACHE_MB"
 )
 
-// PluginsConfig is the global plugin switch (ADR-0042). It is off by default
-// and only a human edit of config.yaml turns it on: no RPC, agent or relay
-// session can set it.
+// PluginsConfig is the global plugin switch (ADR-0042). It is off by default.
+// Enabled is writable through config.set (ADR-0062: human-only, loopback-only,
+// audited; `smind config set` is the same edit) and is read live on every
+// call. Agents, plugin sessions, relay sessions and non-loopback logins are
+// refused.
 type PluginsConfig struct {
 	Enabled bool `yaml:"enabled"`
 	// AllowRemoteManage lets a direct non-loopback connection (a password
@@ -116,9 +118,12 @@ type PluginsConfig struct {
 	AllowRemoteManage bool `yaml:"allowRemoteManage"`
 }
 
-// AutomationsConfig is the global automation switch set (ADR-0044). Everything
-// here is a human edit of config.yaml: no RPC, agent or relay session can
-// change it. Automations are off by default.
+// AutomationsConfig is the global automation switch set (ADR-0044).
+// Automations are off by default. Enabled and Paused are writable through
+// config.set (ADR-0062: human-only, loopback-only, audited; `smind config set`
+// is the same edit) and are read live on every engine tick. The other keys stay
+// a human edit of config.yaml, and agents, plugin sessions, relay sessions and
+// non-loopback logins are refused.
 type AutomationsConfig struct {
 	// Enabled turns the engine on: with false nothing polls and nothing fires.
 	Enabled bool `yaml:"enabled"`

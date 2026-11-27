@@ -14,9 +14,11 @@ const cmdConfigUsage = `usage:
   smind config set <path> <value>  change a setting (comments in config.yaml are kept)
   smind config unset <path>        remove a setting, restoring its default
 
-settable paths: server.port, server.listen, server.hostnames, providers.<id>.defaultModel (id: claude-native, codex-native, glm, kimi),
+settable paths: server.port, server.listen, server.hostnames, fleet.enabled, plugins.enabled, learning.enabled, automations.paused,
+  providers.<id>.defaultModel (id: claude-native, codex-native, glm, kimi),
   (server.passwordHash: unset only; use smind set-password)
-changes apply when the daemon restarts (smind stop && smind serve)`
+changes apply when the daemon restarts (smind stop && smind serve)
+inside an agent run set and unset are refused (see ADR-0062)`
 
 // cmdConfig implements `smind config get|set|unset` (ADR-0031 D10): the one
 // documented way to change what `smind serve` used to take as launch flags.
@@ -28,6 +30,9 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
+	case "--help", "-h", "help":
+		fmt.Fprintln(stdout, cmdConfigUsage)
+		return 0
 	case "get":
 		return configGet(args[1:], stdout, stderr)
 	case "set":

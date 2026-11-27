@@ -14,6 +14,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/forge"
 	"github.com/spacingmind/smind/internal/gate"
@@ -196,25 +197,31 @@ func (a *API) SetAuthorizer(fn func(*http.Request) bool) { a.authorize = fn }
 // *client.DataConn, so a mobile-originated request gets the same answer a
 // browser tab's would.
 func (a *API) ServeTransport(ctx context.Context, tr Transport) {
-	a.serve(ctx, tr, false, RelayMaxMessage, "", ChannelE2EE)
+	a.serve(ctx, tr, false, RelayMaxMessage, "", ChannelE2EE, false)
 }
 
 // ServeDevice is ServeTransport for a relay session whose device proved its identity (device_hello): handlers see its device id in requestContext.deviceID.
 func (a *API) ServeDevice(ctx context.Context, tr Transport, deviceID string) {
-	a.serve(ctx, tr, false, RelayMaxMessage, deviceID, ChannelE2EE)
+	a.serve(ctx, tr, false, RelayMaxMessage, deviceID, ChannelE2EE, false)
 }
 
 // serveLocal is ServeTransport for the token-authenticated /ws connection:
 // the one surface allowed to administer the daemon itself (relay.device.*).
 func (a *API) serveLocal(ctx context.Context, tr Transport, ch Channel) {
-	a.serve(ctx, tr, true, DirectMaxMessage, "", ch)
+	a.serveLocalStrict(ctx, tr, ch, false)
 }
 
-func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage int, deviceID string, ch Channel) {
+// serveLocal never claims the proxy-aware fact (strictLocal false: the safe default); serveLocalStrict is serveLocal with the proxy-aware fact of requestContext.strictLocal.
+func (a *API) serveLocalStrict(ctx context.Context, tr Transport, ch Channel, strict bool) {
+	a.serve(ctx, tr, true, DirectMaxMessage, "", ch, strict)
+}
+
+func (a *API) serve(ctx context.Context, tr Transport, local bool, maxMessage int, deviceID string, ch Channel, strict bool) {
 	c := newConn(tr, a.hs)
 	c.local = local
 	c.deviceID = deviceID
 	c.channel = ch
+	c.strictLocal = strict
 	c.maxMessage = maxMessage
 	c.admit = a.admit
 	c.runs = a.Runs // run-scoped identity is set later by session.identify
@@ -320,6 +327,10 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 	hs["task.tree"] = handleTaskTree(db, reg, stalled)
 	pruner := runs.NewPruner(reg, db, retentionDays)
 	hs["runs.prune"] = handleRunsPrune(pruner)
+	hs["config.get"] = handleConfigGet()
+	hs["config.set"] = handleConfigSet(func(key string) {
+		bus.Publish(Event{Topic: TopicConfigUpdated, Payload: map[string]string{"key": key}})
+	})
 	hs["doctor.sessions"] = handleDoctorSessions(db, runner)
 	hs["db.compact"] = handleDBCompact(reg, db)
 	hs["provider.setDefaultModel"] = handleProviderSetDefaultModel(runner, bus)
@@ -547,7 +558,8 @@ func newAPI(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunne
 		// Gorilla answers an oversized message with close code 1009.
 		ws.SetReadLimit(DirectMaxMessage)
 
-		api.serveLocal(r.Context(), wsTransport{ws}, ChannelOf(r))
+		ch := ChannelOf(r)
+		api.serveLocalStrict(r.Context(), wsTransport{ws}, ch, ch == ChannelLoopback && auth.IsTrueLoopback(r))
 	})
 	return api, nil
 }
