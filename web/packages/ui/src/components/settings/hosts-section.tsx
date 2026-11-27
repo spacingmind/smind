@@ -7,7 +7,7 @@ import { EditLabelsDialog } from "@/components/hosts/edit-labels-dialog";
 import { HostRow } from "@/components/hosts/host-row";
 import { InviteHostDialog } from "@/components/hosts/invite-host-dialog";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
-import { ConfigSwitchRow } from "@/components/settings/config-switch-row";
+import { ConfigSwitchRow, OpenDaemonSettingsButton } from "@/components/settings/config-switch-row";
 import { SettingsEmptyCard, SettingsGroup } from "@/components/settings/settings-layout";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { Alert } from "@/components/ui/alert";
@@ -293,10 +293,14 @@ function FleetStateLine({ running }: { running: boolean }) {
     : configOn
       ? "Fleet turns on after the daemon restarts."
       : "Fleet is off.";
+  const pending = running !== configOn;
   return (
-    <p data-testid="hosts-fleet-state" className="text-ui-sm text-foreground-muted">
-      {text}
-    </p>
+    <div className="flex flex-col items-start gap-1">
+      <p data-testid="hosts-fleet-state" className="text-ui-sm text-foreground-muted">
+        {text}
+      </p>
+      {pending && <OpenDaemonSettingsButton testId="hosts-open-daemon" />}
+    </div>
   );
 }
 

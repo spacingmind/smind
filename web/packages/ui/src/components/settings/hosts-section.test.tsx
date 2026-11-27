@@ -1,11 +1,19 @@
 import { act } from "react";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/hosts-section";
 import { FleetDaemon, fleetHost } from "@/test/fleet-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
+
+let desktopFlag = false;
+vi.mock("@/lib/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/platform")>()),
+  get isDesktop() {
+    return desktopFlag;
+  },
+}));
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -91,6 +99,33 @@ describe("settings-hosts section", () => {
     d.hosts = [fleetHost()];
     await renderSection(d);
     expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet turns off after the daemon restarts.");
+  });
+
+  it("hosts_pending_restart_offers_open_daemon_settings_on_desktop_only", async () => {
+    try {
+      desktopFlag = true;
+      const d = withFleetConfig(new FleetDaemon(), true);
+      d.off = true;
+      const v = await renderSection(d);
+      const line = await screen.findByTestId("hosts-fleet-state");
+      const btn = screen.getByTestId("hosts-open-daemon");
+      expect(line.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const seen = vi.fn();
+      window.addEventListener("smind:open-settings", seen);
+      fireEvent.click(btn);
+      window.removeEventListener("smind:open-settings", seen);
+      expect((seen.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "daemon" });
+      v.unmount();
+
+      desktopFlag = false;
+      const d2 = withFleetConfig(new FleetDaemon(), true);
+      d2.off = true;
+      await renderSection(d2);
+      await screen.findByTestId("hosts-fleet-state");
+      expect(screen.queryByTestId("hosts-open-daemon")).toBeNull();
+    } finally {
+      desktopFlag = false;
+    }
   });
 
   it("hosts_state_line_running", async () => {

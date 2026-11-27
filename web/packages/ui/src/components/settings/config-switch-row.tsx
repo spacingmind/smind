@@ -9,12 +9,33 @@ import { useConfigKey, useConfigSet } from "@/hooks/use-config";
 import { CONFIG_CONFIRM, RESUME_CONFIRM, isWritableConfigKey, type WritableConfigKey } from "@/lib/config-keys";
 import { cn } from "@/lib/utils";
 import { daemonSentence } from "@/lib/daemon-sentence";
+import { Icons } from "@/lib/icons";
 import { isDesktop } from "@/lib/platform";
 
 const RESTART_NOTE = "Takes effect after the daemon restarts.";
 
 function messageOf(error: unknown): string {
   return daemonSentence(error instanceof Error ? error.message : String(error));
+}
+
+/**
+ * "Open Daemon settings", styled as a link. The Daemon section (and its restart) exists only in the desktop
+ * app, so the button renders there and nowhere else.
+ */
+export function OpenDaemonSettingsButton({ testId }: { testId: string }) {
+  if (!isDesktop) return null;
+  return (
+    <Button
+      type="button"
+      variant="link"
+      size="sm"
+      data-testid={testId}
+      onClick={() => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "daemon" } }))}
+    >
+      Open Daemon settings
+      <Icons.arrowRight aria-hidden />
+    </Button>
+  );
 }
 
 /**
@@ -106,18 +127,7 @@ function Row({ configKey, label, description, testId, flush }: { configKey: Writ
     </p>
   ) : null;
   // The Daemon section (and its restart) exists only in the desktop app, so the button does too.
-  const openDaemon =
-    saved && view.restart && isDesktop ? (
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        data-testid={`${testId}-open-daemon`}
-        onClick={() => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "daemon" } }))}
-      >
-        Open Daemon settings
-      </Button>
-    ) : null;
+  const openDaemon = saved && view.restart ? <OpenDaemonSettingsButton testId={`${testId}-open-daemon`} /> : null;
 
   const notes = (
     <>

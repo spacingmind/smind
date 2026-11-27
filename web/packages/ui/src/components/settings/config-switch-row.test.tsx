@@ -227,6 +227,18 @@ describe("ConfigSwitchRow", () => {
     expect((seen.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "daemon" });
   });
 
+  it("config_open_daemon_settings_looks_like_a_link", async () => {
+    desktopFlag = true;
+    const d = daemonWith([view("fleet.enabled", { restart: true })]);
+    mount(d, "fleet.enabled");
+    await ready();
+    fireEvent.click(screen.getByTestId("row-switch"));
+    fireEvent.click(within(await screen.findByTestId("row-dialog")).getByRole("button", { name: "Turn on" }));
+    const btn = await screen.findByRole("button", { name: "Open Daemon settings" });
+    expect(btn).toHaveAttribute("data-variant", "link");
+    expect(btn).toHaveClass("text-primary");
+  });
+
   it("config_open_daemon_settings_is_offered_only_on_desktop", async () => {
     const d = daemonWith([view("fleet.enabled", { writable: true, restart: true })]);
     mount(d, "fleet.enabled");
