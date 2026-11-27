@@ -11,6 +11,20 @@ import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { renderWithClientProp } from "@/test/render-with-daemon";
 
+// Mutable so the traffic-lights test can pretend to be the macOS desktop build.
+const platformState = vi.hoisted(() => ({ desktop: false, os: null as string | null }));
+vi.mock("@/lib/platform", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/platform")>();
+  const mocked = Object.create(null) as typeof actual;
+  for (const key of Object.keys(actual) as Array<keyof typeof actual>) {
+    Object.defineProperty(mocked, key, {
+      enumerable: true,
+      get: () => (key === "isDesktop" ? platformState.desktop : key === "desktopOS" ? (platformState.os ?? actual[key]) : actual[key]),
+    });
+  }
+  return mocked;
+});
+
 /** Flushes pending effects plus Radix's deferred work: the pointerdown-outside listener registers on a setTimeout(0), and focus restore on close runs on one. */
 async function settle(): Promise<void> {
   await act(async () => {
@@ -58,6 +72,8 @@ function tabbablesIn(root: HTMLElement): HTMLElement[] {
 }
 
 afterEach(() => {
+  platformState.desktop = false;
+  platformState.os = null;
   window.localStorage.clear();
   document.documentElement.className = "";
   document.documentElement.style.cssText = "";
@@ -221,8 +237,30 @@ describe("SettingsDialog small sizes", () => {
     // A web test has no traffic lights, so the sheet tops out at the window
     // edge; only the desktop macOS build offsets below the title bar.
     expect(content).toHaveAttribute("data-lights", "false");
-    expect(content.className).toContain("max-[860px]:top-0");
+    expect(content.className).toContain("top-0");
     expect(content.className).not.toContain("top-[38px]");
+  });
+
+  it("ui_cleanup_b3_sheet_clears_the_traffic_lights_inside_itself", async () => {
+    platformState.desktop = true;
+    platformState.os = "macos";
+    const view = await openDialog();
+
+    const content = screen.getByTestId("settings-dialog");
+    expect(content).toHaveAttribute("data-lights", "true");
+    expect(content.className).toContain("max-[860px]:pt-[38px]");
+    expect(content.className).toContain("[@media(max-height:560px)]:pt-[38px]");
+    expect(content.className).not.toContain("top-[38px]");
+    expect(screen.getByTestId("settings-dialog-drag")).toHaveAttribute("data-tauri-drag-region", "deep");
+    view.unmount();
+
+    platformState.desktop = false;
+    platformState.os = null;
+    await openDialog();
+    const web = screen.getByTestId("settings-dialog");
+    expect(web).toHaveAttribute("data-lights", "false");
+    expect(web.className).not.toContain("pt-[38px]");
+    expect(screen.queryByTestId("settings-dialog-drag")).not.toBeInTheDocument();
   });
 });
 

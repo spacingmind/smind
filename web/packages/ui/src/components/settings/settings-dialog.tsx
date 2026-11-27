@@ -77,9 +77,10 @@ export function SettingsDialog({
             // becomes a full-bleed sheet.
             "max-[860px]:inset-0 max-[860px]:left-0 max-[860px]:h-auto max-[860px]:w-auto max-[860px]:max-w-none max-[860px]:translate-x-0 max-[860px]:translate-y-0 max-[860px]:rounded-none max-[860px]:border-0",
             "[@media(max-height:560px)]:inset-0 [@media(max-height:560px)]:left-0 [@media(max-height:560px)]:h-auto [@media(max-height:560px)]:w-auto [@media(max-height:560px)]:max-w-none [@media(max-height:560px)]:translate-x-0 [@media(max-height:560px)]:translate-y-0 [@media(max-height:560px)]:rounded-none [@media(max-height:560px)]:border-0",
-            lights
-              ? "max-[860px]:top-[38px] [@media(max-height:560px)]:top-[38px]"
-              : "max-[860px]:top-0 [@media(max-height:560px)]:top-0",
+            // Full-bleed from the window top; the macOS traffic lights are
+            // cleared by padding INSIDE the sheet (a solid title band).
+            "max-[860px]:top-0 [@media(max-height:560px)]:top-0",
+            lights && "max-[860px]:pt-[38px] [@media(max-height:560px)]:pt-[38px]",
           )}
           onOpenAutoFocus={(e) => {
             e.preventDefault();
@@ -95,6 +96,14 @@ export function SettingsDialog({
             openerRef.current?.focus();
           }}
         >
+          {lights && (
+            <div
+              aria-hidden
+              data-testid="settings-dialog-drag"
+              data-tauri-drag-region="deep"
+              className="absolute inset-x-0 top-0 hidden h-[38px] max-[860px]:block [@media(max-height:560px)]:block"
+            />
+          )}
           <DialogTitle className="sr-only">Settings</DialogTitle>
           <SettingsScreen
             key={openNonce}
