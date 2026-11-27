@@ -5,10 +5,9 @@ import { UsageBody } from "@/components/account-usage/usage-body";
 import { UsageControls } from "@/components/account-usage/usage-controls";
 import { useUsageSurface } from "@/components/account-usage/use-usage-surface";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
-import { SettingsStatStrip } from "@/components/settings/settings-layout";
+import { SettingsEmptyCard, SettingsGroup, SettingsStatStrip } from "@/components/settings/settings-layout";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { StepGroup } from "@/components/ui/step-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -121,24 +120,6 @@ export function sumColumn(rows: UsageSummaryRow[], field: TokenField): number | 
 }
 
 /**
- * A block heading inside the Usage section. Not SettingsSectionTitle: under
- * the full-screen Settings screen that drops its title because the header
- * already names the section ("Usage"), which would leave "Plan usage" and
- * "Token usage" as two unlabeled blocks.
- */
-function BlockTitle({ title, description, actions }: { title: string; description: string; actions?: ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-      <div className="min-w-0">
-        <h3 className="text-ui-base font-medium text-foreground">{title}</h3>
-        <p className="text-ui-sm text-muted-foreground">{description}</p>
-      </div>
-      {actions}
-    </div>
-  );
-}
-
-/**
  * Settings -> Usage's "Plan usage" block (ADR-0028 PR-D1): each account's plan
  * windows, ported from Paseo's Usage settings section. It keeps its controls
  * (account filter, Refresh all, a visible Settings button) in its own body
@@ -151,12 +132,12 @@ function BlockTitle({ title, description, actions }: { title: string; descriptio
 function PlanUsageBlock() {
   const surface = useUsageSurface({ touch: true });
   return (
-    <section className="flex flex-col gap-3" data-testid="settings-plan-usage">
-      <BlockTitle
-        title="Plan usage"
-        description="Plan windows and reset times for each account"
-        actions={<UsageControls surface={surface} labelledSettings />}
-      />
+    <SettingsGroup
+      title="Plan usage"
+      description="Plan windows and reset times for each account"
+      actions={<UsageControls surface={surface} labelledSettings />}
+      testId="settings-plan-usage"
+    >
       <UsageBody
         view={surface.view}
         displayAs={surface.displayAs}
@@ -168,7 +149,7 @@ function PlanUsageBlock() {
         pinning={surface.pinning}
       />
       <ProviderPlanUsage touch />
-    </section>
+    </SettingsGroup>
   );
 }
 
@@ -308,25 +289,25 @@ function UsageSection({ client }: SettingsSectionContext) {
   }
 
   return (
-    <div className="flex flex-col gap-8" data-testid="settings-section-usage">
+    <div className="flex flex-col gap-6" data-testid="settings-section-usage">
       <PlanUsageBlock />
-      <section className="flex flex-col gap-3" data-testid="settings-token-usage">
-        <BlockTitle
-          title="Token usage"
-          description="Tokens and cost per run and proxy request"
-          actions={
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              data-testid="usage-refresh"
-              onClick={() => setRefreshTick((n) => n + 1)}
-            >
-              <Icons.refresh aria-hidden className="size-3.5" /> Refresh
-            </Button>
-          }
-        />
-        <div className="flex flex-wrap items-end gap-4 rounded-xl border border-border bg-card px-4 py-3">
+      <SettingsGroup
+        title="Token usage"
+        description="Tokens and cost per run and proxy request"
+        actions={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-testid="usage-refresh"
+            onClick={() => setRefreshTick((n) => n + 1)}
+          >
+            <Icons.refresh aria-hidden className="size-3.5" /> Refresh
+          </Button>
+        }
+        testId="settings-token-usage"
+      >
+        <div className="flex flex-wrap items-end gap-4 px-4 py-3">
           <div className="flex flex-col gap-1">
             <span className="text-ui-sm text-muted-foreground">Scope</span>
             <StepGroup groupLabel="usage-scope" options={SCOPE_OPTIONS} value={scope} onChange={changeScope} />
@@ -347,78 +328,79 @@ function UsageSection({ client }: SettingsSectionContext) {
             <StepGroup groupLabel="usage-range" options={RANGE_OPTIONS} value={range} onChange={setRange} />
           </div>
         </div>
-      </section>
+        {!loading && !error && (rows ?? []).length > 0 && (
+          <>
+            <SettingsStatStrip
+              testId="usage-stat-strip"
+              stats={[
+                { label: countHeader, value: (rows ?? []).reduce((n, r) => n + r.count, 0).toLocaleString("en-US") },
+                ...TOKEN_COLUMNS.map((col) => ({
+                  label: col.label,
+                  value: formatTokens(sumColumn(rows ?? [], col.field), "full"),
+                })),
+              ]}
+            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-ui-sm">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="px-3 py-2 font-normal">{GROUP_LABELS[groupBy]}</th>
+                    {scope === "all" && <th className="px-3 py-2 font-normal">Scope</th>}
+                    <th className="px-3 py-2 text-right font-normal">{countHeader}</th>
+                    {TOKEN_COLUMNS.map((col) => (
+                      <th key={col.field} className="px-3 py-2 text-right font-normal">
+                        {col.label}
+                      </th>
+                    ))}
+                    <th className="px-3 py-2 text-right font-normal">Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(rows ?? []).map((row) => (
+                    <tr key={`${row.scope}-${row.key}`} data-testid={`usage-row-${row.scope}-${row.key}`} className="border-t">
+                      <td className="px-3 py-2 text-foreground">{labelFor(row)}</td>
+                      {scope === "all" && (
+                        <td className="px-3 py-2 text-muted-foreground">
+                          <span className="rounded-full border border-border px-1.5 text-ui-sm text-muted-foreground">
+                            {row.scope}
+                          </span>
+                        </td>
+                      )}
+                      <td data-testid="usage-cell-count" className="px-3 py-2 text-right tabular-nums text-foreground">
+                        {row.count.toLocaleString("en-US")}
+                      </td>
+                      {TOKEN_COLUMNS.map((col) => (
+                        <td
+                          key={col.field}
+                          data-testid={`usage-cell-${col.field}`}
+                          className="px-3 py-2 text-right tabular-nums text-foreground"
+                        >
+                          {cell(row, col.field)}
+                        </td>
+                      ))}
+                      <td data-testid="usage-cell-costUsd" className="px-3 py-2 text-right tabular-nums text-foreground">
+                        {costCell(row)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </SettingsGroup>
 
       {loading ? (
         <InlineSpinner label="Loading usage…" />
       ) : error ? (
         <Alert variant="error" testId="usage-error" description={error} />
       ) : (rows ?? []).length === 0 ? (
-        <EmptyState
+        <SettingsEmptyCard
           testId="usage-empty"
           title="No usage recorded in this range"
           description="Runs report usage when their agent does; try a longer range."
         />
-      ) : (
-        <>
-          <SettingsStatStrip
-            testId="usage-stat-strip"
-            stats={[
-              { label: countHeader, value: (rows ?? []).reduce((n, r) => n + r.count, 0).toLocaleString("en-US") },
-              ...TOKEN_COLUMNS.map((col) => ({
-                label: col.label,
-                value: formatTokens(sumColumn(rows ?? [], col.field), "full"),
-              })),
-            ]}
-          />
-          <div className="overflow-x-auto rounded-xl border bg-card">
-            <table className="w-full text-ui-sm">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="px-3 py-2 font-normal">{GROUP_LABELS[groupBy]}</th>
-                  {scope === "all" && <th className="px-3 py-2 font-normal">Scope</th>}
-                  <th className="px-3 py-2 text-right font-normal">{countHeader}</th>
-                  {TOKEN_COLUMNS.map((col) => (
-                    <th key={col.field} className="px-3 py-2 text-right font-normal">
-                      {col.label}
-                    </th>
-                  ))}
-                  <th className="px-3 py-2 text-right font-normal">Cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(rows ?? []).map((row) => (
-                  <tr key={`${row.scope}-${row.key}`} data-testid={`usage-row-${row.scope}-${row.key}`} className="border-t">
-                    <td className="px-3 py-2 text-foreground">{labelFor(row)}</td>
-                    {scope === "all" && (
-                      <td className="px-3 py-2 text-muted-foreground">
-                        <span className="rounded-full border border-border px-1.5 text-ui-sm text-muted-foreground">
-                          {row.scope}
-                        </span>
-                      </td>
-                    )}
-                    <td data-testid="usage-cell-count" className="px-3 py-2 text-right tabular-nums text-foreground">
-                      {row.count.toLocaleString("en-US")}
-                    </td>
-                    {TOKEN_COLUMNS.map((col) => (
-                      <td
-                        key={col.field}
-                        data-testid={`usage-cell-${col.field}`}
-                        className="px-3 py-2 text-right tabular-nums text-foreground"
-                      >
-                        {cell(row, col.field)}
-                      </td>
-                    ))}
-                    <td data-testid="usage-cell-costUsd" className="px-3 py-2 text-right tabular-nums text-foreground">
-                      {costCell(row)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+      ) : null}
     </div>
   );
 }
