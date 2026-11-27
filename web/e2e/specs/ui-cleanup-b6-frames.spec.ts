@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { type Locator, type Page, type TestInfo } from '@playwright/test'
-import { expect, test } from '../fixtures/test'
+import { expect, test, waitForRpc } from '../fixtures/test'
 
 // B6 frames: one gallery shot per state of the desktop-only Settings -> Daemon and Notifications groups (B6 D1-D4:
 // Paired devices, Diagnostics, Mobile push), light and dark, at 1280x800 and at 800x520 (the settings sheet). A normal
@@ -250,6 +250,43 @@ async function stubDoctorSessionsError(page: Page) {
   })
 }
 
+/** One push-registered phone (UC6-02's fixture shape); the public key is a distinctive string because it must never be rendered. */
+const pushDevice: RelayDevice = {
+  device_id: 'b6push00000000001',
+  device_pub: 'SECRETKEYBYTES',
+  label: 'Pixel',
+  first_seen: iso(26 * 24 * HOUR),
+  last_seen: iso(5 * MINUTE),
+  state: 'approved',
+  connected: true,
+  push: true,
+}
+
+/** Answers the push surface with one registered device and a sent test; everything else is forwarded to the daemon. */
+async function stubMobilePush(page: Page) {
+  await page.routeWebSocket(/\/ws/, (ws) => {
+    const server = ws.connectToServer()
+    server.onMessage((m) => ws.send(m))
+    ws.onMessage((m) => {
+      let msg: { id?: string | number; method?: string }
+      try {
+        msg = JSON.parse(String(m))
+      } catch {
+        return server.send(m)
+      }
+      if (msg.method === 'relay.device.list') {
+        return ws.send(JSON.stringify({ id: msg.id, result: { devices: [pushDevice], window: null } }))
+      }
+      if (msg.method === 'push.test') {
+        return ws.send(
+          JSON.stringify({ id: msg.id, result: { results: [{ deviceId: pushDevice.device_id, sent: true }] } }),
+        )
+      }
+      server.send(m)
+    })
+  })
+}
+
 test('devices-empty: the group with no devices and the pairing window closed', async ({ app }, testInfo) => {
   const { page } = app
   // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
@@ -471,4 +508,82 @@ test('doctor-error: a failed probe is one sentence and the button stays usable',
   await expect(page.getByTestId('doctor-run')).toHaveText('Run checks')
   await expect(page.getByTestId('doctor-run')).toBeEnabled()
   await shot(page, testInfo, 'doctor-error', page.getByTestId('doctor-run'))
+})
+
+test('push-no-device: no phone registered and the real daemon answers the test click', async ({ app }, testInfo) => {
+  const { page } = app
+  // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
+  // STUB: none -- the real daemon has no relay bridge and no push registration, and whatever it answers for
+  // relay.device.list / push.test is the state being framed (UC6-01's honest-copy contract).
+  await installBridge(page)
+  await app.openApp()
+  await standInForVibrancy(page)
+  await openSettings(page, 'notifications')
+  await expect(page.getByTestId('settings-section-notifications')).toBeVisible()
+  if (!process.env.B6_FRAMES_DIR) return
+  await expect(page.getByTestId('push-count')).toHaveText('0 with push on')
+  const answer = waitForRpc(page, 'push.test')
+  await page.getByTestId('push-test').click()
+  const test = await answer
+  if (test.error) {
+    await expect(page.getByTestId('push-error')).toContainText('disabled')
+  } else {
+    await expect(page.getByTestId('push-no-device')).toBeVisible()
+  }
+  await shot(page, testInfo, 'push-no-device', page.getByTestId('mobile-push-group'))
+})
+
+test('push-with-device: one registered phone, before the test click', async ({ app }, testInfo) => {
+  const { page } = app
+  // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
+  // STUB: relay.device.list answers one push-registered phone locally; everything else is forwarded to the real daemon.
+  await stubMobilePush(page)
+  await installBridge(page)
+  await app.openApp()
+  await standInForVibrancy(page)
+  await openSettings(page, 'notifications')
+  await expect(page.getByTestId('settings-section-notifications')).toBeVisible()
+  if (!process.env.B6_FRAMES_DIR) return
+  await expect(page.getByTestId('push-count')).toHaveText('1 with push on')
+  await expect(page.getByTestId('push-test')).toHaveText('Send test notification')
+  await expect(page.getByTestId('push-results')).toHaveCount(0)
+  await shot(page, testInfo, 'push-with-device', page.getByTestId('mobile-push-group'))
+})
+
+test('push-test-sent: after the click, the one device answered Sent', async ({ app }, testInfo) => {
+  const { page } = app
+  // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
+  // STUB: relay.device.list answers one push-registered phone and push.test answers sent=true locally; everything
+  // else is forwarded to the real daemon.
+  await stubMobilePush(page)
+  await installBridge(page)
+  await app.openApp()
+  await standInForVibrancy(page)
+  await openSettings(page, 'notifications')
+  await expect(page.getByTestId('settings-section-notifications')).toBeVisible()
+  if (!process.env.B6_FRAMES_DIR) return
+  await page.getByTestId('push-test').click()
+  await expect(page.getByTestId('push-result-state-b6push00000000001')).toHaveText('Sent')
+  // The wire's public key bytes never reach the screen (B6 D4).
+  await expect(page.locator('body')).not.toContainText('SECRETKEYBYTES')
+  await shot(page, testInfo, 'push-test-sent', page.getByTestId('mobile-push-group'))
+})
+
+test('push-read-only: a relay-like refusal makes the group read-only', async ({ app }, testInfo) => {
+  const { page } = app
+  // WEB-HARNESS: desktop build in a browser with a mocked Tauri shell; relay.device.* / push.test stubbed where named.
+  // STUB: relay.device.list answers forbidden the way the daemon would from a relay session (UC6-03's shape);
+  // everything else is forwarded to the real daemon.
+  await stubRelayDeviceList(page, {
+    error: { message: 'relay.device.list: forbidden: relay.device.* is not available over the relay', code: 'forbidden' },
+  })
+  await installBridge(page)
+  await app.openApp()
+  await standInForVibrancy(page)
+  await openSettings(page, 'notifications')
+  await expect(page.getByTestId('settings-section-notifications')).toBeVisible()
+  if (!process.env.B6_FRAMES_DIR) return
+  await expect(page.getByTestId('push-read-only')).toHaveText("Send test notifications from the daemon's machine.")
+  await expect(page.getByTestId('push-test')).toHaveCount(0)
+  await shot(page, testInfo, 'push-read-only', page.getByTestId('mobile-push-group'))
 })
