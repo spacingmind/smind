@@ -4,8 +4,11 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { Dialog, DialogOverlay, DialogPortal, DialogTitle } from "@/components/ui/dialog";
+import { useWindowState } from "@/hooks/use-window-state";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import { desktopOS, isDesktop } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { hasTrafficLights } from "@/lib/window-chrome";
 import type { WsClient } from "@/lib/ws-client";
 
 /**
@@ -43,6 +46,12 @@ export function SettingsDialog({
 }) {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+  const { fullscreen } = useWindowState();
+  // macOS traffic lights float over the window's top-left; in sheet mode the
+  // sheet starts below that native title-bar band so it never covers them
+  // (D2). Windows/Linux draw their caption buttons inside the content, and a
+  // browser has no title bar, so only the lights need clearing.
+  const lights = isDesktop && hasTrafficLights(desktopOS, fullscreen);
 
   // The element to restore focus to on close (D4): whatever was focused when
   // the dialog opened -- the opener for a click, the previously focused
@@ -60,9 +69,18 @@ export function SettingsDialog({
           ref={contentRef}
           tabIndex={-1}
           data-testid="settings-dialog"
+          data-lights={lights}
           aria-describedby={undefined}
           className={cn(
             "fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 flex h-[min(680px,90vh)] w-[min(960px,90vw)] flex-col overflow-hidden rounded-2xl border bg-background shadow-lg duration-(--duration-menu) data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+            // D2: at the minimum window (anything at or below 860px wide or
+            // 560px tall) the dialog drops its centring, size and radius and
+            // becomes a full-bleed sheet.
+            "max-[860px]:inset-0 max-[860px]:left-0 max-[860px]:h-auto max-[860px]:w-auto max-[860px]:max-w-none max-[860px]:translate-x-0 max-[860px]:translate-y-0 max-[860px]:rounded-none max-[860px]:border-0",
+            "[@media(max-height:560px)]:inset-0 [@media(max-height:560px)]:left-0 [@media(max-height:560px)]:h-auto [@media(max-height:560px)]:w-auto [@media(max-height:560px)]:max-w-none [@media(max-height:560px)]:translate-x-0 [@media(max-height:560px)]:translate-y-0 [@media(max-height:560px)]:rounded-none [@media(max-height:560px)]:border-0",
+            lights
+              ? "max-[860px]:top-[38px] [@media(max-height:560px)]:top-[38px]"
+              : "max-[860px]:top-0 [@media(max-height:560px)]:top-0",
           )}
           onOpenAutoFocus={(e) => {
             e.preventDefault();

@@ -5,7 +5,7 @@
 // open markup.
 import { act, useState } from "react";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SettingsDialog } from "@/components/settings/settings-dialog";
 import { SettingsScreen } from "@/components/settings/settings-screen";
@@ -173,5 +173,94 @@ describe("SettingsDialog", () => {
     renderWithClientProp(<SettingsScreen client={null} onNavigateBack={() => {}} />);
     expect(screen.getByTestId("settings-screen")).toHaveAttribute("data-variant", "page");
     expect(screen.getByTestId("settings-back-button")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsDialog small sizes", () => {
+  it("ui_cleanup_b3_sheet_classes_at_small_sizes", async () => {
+    await openDialog();
+
+    // jsdom has no layout, so this pins the class contract: dialog sizes at
+    // desktop, full-bleed sheet below 860px wide and below 560px tall.
+    const content = screen.getByTestId("settings-dialog");
+    expect(content.className).toContain("w-[min(960px,90vw)]");
+    expect(content.className).toContain("h-[min(680px,90vh)]");
+    expect(content.className).toContain("rounded-2xl");
+    expect(content.className).toContain("max-[860px]:inset-0");
+    expect(content.className).toContain("max-[860px]:rounded-none");
+    expect(content.className).toContain("max-[860px]:border-0");
+    expect(content.className).toContain("[@media(max-height:560px)]:inset-0");
+    expect(content.className).toContain("[@media(max-height:560px)]:rounded-none");
+    expect(content.className).toContain("[@media(max-height:560px)]:border-0");
+    // A web test has no traffic lights, so the sheet tops out at the window
+    // edge; only the desktop macOS build offsets below the title bar.
+    expect(content).toHaveAttribute("data-lights", "false");
+    expect(content.className).toContain("max-[860px]:top-0");
+    expect(content.className).not.toContain("top-[38px]");
+  });
+});
+
+describe("SettingsDialog narrow", () => {
+  // Same shape as settings-screen.test.tsx: useIsMobile reads
+  // window.innerWidth inside an effect, so each render is followed by a
+  // flush to let it settle.
+  const originalMatchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 390 });
+    window.matchMedia = vi.fn().mockImplementation(
+      (query: string) =>
+        ({
+          matches: window.innerWidth < 768,
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList,
+    );
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1024 });
+  });
+
+  it("ui_cleanup_b3_narrow_keeps_list_to_detail", async () => {
+    await openDialog();
+
+    // The sheet keeps today's drill-down: the list page first, no desktop sidebar.
+    expect(screen.getByTestId("settings-nav-appearance")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-sidebar")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-nav-appearance"));
+    await settle();
+
+    expect(screen.queryByTestId("settings-nav-appearance")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-detail-back")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen-header")).toHaveTextContent("Appearance");
+  });
+
+  it("ui_cleanup_b3_narrow_esc_pops_to_the_list", async () => {
+    const onClose = vi.fn();
+    await openDialog(onClose);
+
+    fireEvent.click(screen.getByTestId("settings-nav-general"));
+    await settle();
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
+
+    // Escape in a detail page pops to the list, not out of the dialog.
+    fireEvent.keyDown(document, { key: "Escape" });
+    await settle();
+    expect(screen.getByTestId("settings-nav-general")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    // A second Escape closes the dialog.
+    fireEvent.keyDown(document, { key: "Escape" });
+    await settle();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
