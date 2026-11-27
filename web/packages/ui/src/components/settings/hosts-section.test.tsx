@@ -40,6 +40,20 @@ function allText(): string {
 }
 
 describe("settings-hosts section", () => {
+  it("ui_cleanup_b2_hosts_row_is_responsive", async () => {
+    const d = new FleetDaemon();
+    d.hosts = [fleetHost()];
+    await renderSection(d);
+
+    const rows = document.querySelectorAll('[data-slot="settings-row"]');
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of Array.from(rows)) {
+      const tokens = (row.getAttribute("class") ?? "").split(/\s+/).filter(Boolean);
+      // a bare flex-row forces the row wide at every size; sm:flex-row is the responsive default
+      expect(tokens, row.getAttribute("data-testid") ?? "").not.toContain("flex-row");
+    }
+  });
+
   it("TestHostsPage_RendersStates", async () => {
     const d = new FleetDaemon();
     d.hosts = [
