@@ -121,6 +121,11 @@ export function RelayDevicesGroup() {
             )
           }
         />
+        {actions.openWindow.error ? (
+          <div className="px-4 pb-3">
+            <FormError message={daemonSentence(actions.openWindow.error.message)} testId="relay-window-error" />
+          </div>
+        ) : null}
         {devices.length === 0 ? (
           <SettingsEmptyCard
             testId="relay-devices-empty"

@@ -70,7 +70,7 @@ function threeDevices(): RelayDevice[] {
  * makes the list fail the way a relay session (forbidden) or a bridgeless daemon (method not found) does.
  */
 function relayDevicesDaemon(
-  opts: { devices?: RelayDevice[]; window?: RelayDeviceWindow | null; listError?: Error } = {},
+  opts: { devices?: RelayDevice[]; window?: RelayDeviceWindow | null; listError?: Error; windowError?: Error } = {},
 ) {
   const devices = opts.devices ?? [];
   let window: RelayDeviceWindow | null = opts.window ?? null;
@@ -97,6 +97,7 @@ function relayDevicesDaemon(
       case "relay.device.rename":
         return patch((x) => ({ ...x, label: p.label as string }));
       case "relay.device.window":
+        if (opts.windowError) throw opts.windowError;
         window = { expires_at: "2026-11-27T11:10:00Z", remaining: 2 };
         return window;
     }
@@ -271,6 +272,24 @@ describe("settings relay devices group", () => {
       `Open until ${new Date("2026-11-27T11:10:00Z").toLocaleTimeString()}, 2 device(s) left`,
     );
     expect(screen.queryByTestId("relay-window-open")).toBeNull();
+  });
+
+  it("relay_devices_window_refusal_is_a_sentence", async () => {
+    const d = relayDevicesDaemon({
+      devices: threeDevices(),
+      windowError: new Error("relay.device.window: relay: the pairing window is closed"),
+    });
+    await renderGroup(d);
+
+    await click(screen.getByTestId("relay-window-open"));
+    const windows = d.calls.filter((c) => c.method === "relay.device.window");
+    expect(windows).toHaveLength(1);
+    expect(windows[0]!.params).toEqual({});
+
+    const error = screen.getByTestId("relay-window-error");
+    expect(error).toHaveTextContent("The pairing window is closed.");
+    expect(error.textContent).not.toContain("relay.device.window");
+    expect(screen.getByTestId("relay-window-open")).toBeEnabled();
   });
 
   it("relay_devices_relay_connection_is_read_only_and_makes_no_call", async () => {
