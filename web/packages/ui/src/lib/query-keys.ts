@@ -67,6 +67,8 @@ export const queryKeys = {
   pluginList: () => ["plugin.list"] as const,
   /** `fleet.host.list` (ADR-0048): every connected host and its link state; live via the `fleet.hosts.changed` event. */
   fleetHosts: () => ["fleet.host.list"] as const,
+  /** `relay.device.list` (B6 D1): the relay-paired devices and the open pairing window; read once, never polled. */
+  relayDevices: () => ["relay.device.list"] as const,
   /** One host's fleet audit rows (`fleet.host.audit`); read-only, fetched when its Activity row is opened. */
   fleetHostAudit: (hostId: string) => ["fleet.host.audit", hostId] as const,
   /** `automation.list` (ADR-0044): the daemon switches and every automation; live via `automation.fired/paused/updated`. */

@@ -1,6 +1,11 @@
 import { act } from "react";
+import type { ReactElement } from "react";
 import { cleanup, render, screen, fireEvent } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { DaemonQueryProvider } from "@/lib/query/daemon-query-provider";
+import { createQueryClient } from "@/lib/query/query-client";
+import type { WsClient } from "@/lib/ws-client";
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -14,6 +19,21 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock("@/lib/platform");
 });
+
+/** The section also mounts the paired-devices group, whose hooks need the app's query provider and a client: this one answers an empty device list (no relay assertions here). */
+function withDaemonQueryClient(ui: ReactElement) {
+  const relayClient = {
+    call: async (method: string) => {
+      if (method === "relay.device.list") return { devices: [], window: null };
+      throw new Error("method not found: " + method);
+    },
+  } as unknown as WsClient;
+  return (
+    <DaemonQueryProvider queryClient={createQueryClient()} client={relayClient} events={null}>
+      {ui}
+    </DaemonQueryProvider>
+  );
+}
 
 function baseStatus(overrides: Partial<Record<string, unknown>> = {}) {
   return {
@@ -45,6 +65,9 @@ async function renderSection(desktopApi: Record<string, unknown>) {
       daemonUpdate: vi.fn(),
       daemonRestart: vi.fn(),
       takeOverDaemon: vi.fn(),
+      getCurrentConnection: vi.fn(() =>
+        Promise.resolve({ id: "local", kind: "local", label: "Local", baseUrl: "http://127.0.0.1:4648" }),
+      ),
       ...desktopApi,
     },
   }));
@@ -52,7 +75,7 @@ async function renderSection(desktopApi: Record<string, unknown>) {
   await import("@/components/settings/daemon-section");
   const section = listSettingsSections().find((s) => s.id === "daemon");
   if (!section) throw new Error("daemon section did not register");
-  render(<>{section.render({ client: null })}</>);
+  render(withDaemonQueryClient(<>{section.render({ client: null })}</>));
   await flush();
   const platform = await import("@/lib/platform");
   return platform.desktop;
@@ -243,12 +266,15 @@ describe("daemon-section (desktop build)", () => {
           return () => {};
         },
         daemonInstall: () => new Promise<unknown>((resolve) => { state.resolveInstall = () => resolve(baseStatus()); }),
+        getCurrentConnection: vi.fn(() =>
+          Promise.resolve({ id: "local", kind: "local", label: "Local", baseUrl: "http://127.0.0.1:4648" }),
+        ),
       },
     }));
     const { listSettingsSections } = await import("@/components/settings/settings-registry");
     await import("@/components/settings/daemon-section");
     const section = listSettingsSections().find((s) => s.id === "daemon");
-    render(<>{section?.render({ client: null })}</>);
+    render(withDaemonQueryClient(<>{section?.render({ client: null })}</>));
     await flush();
 
     fireEvent.click(screen.getByTestId("daemon-install"));
