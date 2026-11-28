@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.23.0](https://github.com/spacingmind/smind/compare/v0.22.0...v0.23.0) (2026-11-28)
+
+
+### Features
+
+* **daemon:** config.get and config.set, human-only, direct-local-only, allowlisted, audited (ADR-0062, B4a) ([#991](https://github.com/spacingmind/smind/issues/991)) ([beb231b](https://github.com/spacingmind/smind/commit/beb231b683128e6942e0863b103ad3d7b6ecdac1))
+* **gitsafe,workspace:** daemon-initiated git runs stripped (hooks, filters, merge drivers, credential helpers); human-initiated keeps the repo's hooks (P0) ([#1004](https://github.com/spacingmind/smind/issues/1004)) ([d52f33c](https://github.com/spacingmind/smind/commit/d52f33c95144fe3218f8e7507ec4338edb21f006))
+* **profiles:** role-pack sync in the app: check/apply RPCs, Profiles banner and review dialog, doctor line (ADR-0058 PR 2) ([#984](https://github.com/spacingmind/smind/issues/984)) ([9c23946](https://github.com/spacingmind/smind/commit/9c23946ce00f2e221c24f1dbeaf875cd8368bf27))
+* **relay-web:** the browser relay client: WebCrypto identity, IndexedDB, RelaySocket, controller (web relay client, PR 2 of 4) ([#1006](https://github.com/spacingmind/smind/issues/1006)) ([c0b0d3b](https://github.com/spacingmind/smind/commit/c0b0d3b38afeff3098ea2c13661ce3e79baf262b))
+* **taskrunner:** spawned agents get a safe proxy environment: http:// for a bare proxy, loopback in NO_PROXY (P0 A3) ([#997](https://github.com/spacingmind/smind/issues/997)) ([36a0848](https://github.com/spacingmind/smind/commit/36a08481ef94aea32577bc9cc6809c26a7590412))
+* **transport:** provider calls honour HTTPS_PROXY / HTTP_PROXY / NO_PROXY (E4 R4) ([#983](https://github.com/spacingmind/smind/issues/983)) ([5fc442f](https://github.com/spacingmind/smind/commit/5fc442fa62080170ae60ee5c76c39d073d0a51c0))
+* **verify:** PASS / FAIL / INCONCLUSIVE result (E9 tri-state verify) ([#981](https://github.com/spacingmind/smind/issues/981)) ([3a666da](https://github.com/spacingmind/smind/commit/3a666da0b8782280c57608f52d858bfb86710756))
+* **web:** ambient quota notice at 90% used above the composer (ADR-0059 F) ([#985](https://github.com/spacingmind/smind/issues/985)) ([d128c1c](https://github.com/spacingmind/smind/commit/d128c1c32eb912d36c67276df2b08328d3fc5190))
+* **web:** Astryx Wave 0 spike (theme, build, 4 primitives behind the wrappers) + ADR-0064 ([#999](https://github.com/spacingmind/smind/issues/999)) ([6c0acb6](https://github.com/spacingmind/smind/commit/6c0acb693fca2d0caee5996314983e537a8be8ba))
+* **web:** one usage fetch at app start and the provider named in the quota notice (ADR-0028 amended) ([#990](https://github.com/spacingmind/smind/issues/990)) ([f22fc14](https://github.com/spacingmind/smind/commit/f22fc149b9a26e99c0723a329cbdab094b54e12c))
+* **web:** Settings as a modal dialog over the workspace (UI cleanup B3) ([#989](https://github.com/spacingmind/smind/issues/989)) ([7709f8e](https://github.com/spacingmind/smind/commit/7709f8e61164b033312a75c8b1369c572c862799))
+* **web:** switches for the global config keys, in Settings and on the Automations page (ADR-0062, B5) ([#992](https://github.com/spacingmind/smind/issues/992)) ([d5ae2c5](https://github.com/spacingmind/smind/commit/d5ae2c52289444149766f6fc0bb2985d3887afb3))
+* **web:** the Add project dialog restructure: host chip, method cards, recents, git hint, find-or-switch (create-project C1) ([#993](https://github.com/spacingmind/smind/issues/993)) ([9ecd9aa](https://github.com/spacingmind/smind/commit/9ecd9aac62ba2c0c57113c6094dc03f9480c93ee))
+* **web:** UI for the relay device, doctor and push RPCs that already exist (B6) ([#994](https://github.com/spacingmind/smind/issues/994)) ([33d5996](https://github.com/spacingmind/smind/commit/33d599676dcf467ca864cde1fd325f4b930884db))
+
+
+### Bug Fixes
+
+* **accounts,proxy,quota:** a dead refresh token is terminal; usage fetches spread after a sleep (C5b) ([#1002](https://github.com/spacingmind/smind/issues/1002)) ([0707ee0](https://github.com/spacingmind/smind/commit/0707ee0bf14f14e5ed405caed51f269fe3a65a00))
+* **daemon:** git runs no textconv, external diff or fsmonitor from repo config: one shared hardening, every call site audited (P0 A2) ([#996](https://github.com/spacingmind/smind/issues/996)) ([e870917](https://github.com/spacingmind/smind/commit/e87091783abfa0df8d72747c340826980a634ca5))
+* **runs,quota:** Retry-After/RetryInfo hints, account_blocked kind, no fallback after streamed output (C5a) ([#1001](https://github.com/spacingmind/smind/issues/1001)) ([9b65a07](https://github.com/spacingmind/smind/commit/9b65a0737559da31b36be25a9b88bada5177a4e2))
+* **taskrunner:** Codex spend-limit errors are a plan limit (fail over like usageLimitExceeded); Add project path placeholder says folder ([#995](https://github.com/spacingmind/smind/issues/995)) ([339654c](https://github.com/spacingmind/smind/commit/339654c0ed6121adccf8329db2a71034efd83b40))
+
 ## [0.22.0](https://github.com/spacingmind/smind/compare/v0.21.0...v0.22.0) (2026-11-25)
 
 
