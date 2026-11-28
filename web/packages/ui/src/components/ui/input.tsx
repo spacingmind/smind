@@ -23,6 +23,18 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
   return <AstryxInput type={type} className={className} {...props} />
 }
 
+// Astryx TextInput takes no className for the <input> element itself, only for the
+// field container. Text-level utilities (font, size, colour, tracking, ellipsis) belong
+// on the text element, so they are applied to the <input>; everything else (sizing,
+// flex, margin) lands on the container.
+const TEXT_LEVEL = /^(font-|text-|tracking-|leading-|placeholder:)/
+function splitClassName(className: string | undefined): { text: string; box: string } {
+  const text: string[] = []
+  const box: string[] = []
+  for (const token of (className ?? "").split(/\s+/).filter(Boolean)) (TEXT_LEVEL.test(token) ? text : box).push(token)
+  return { text: text.join(" "), box: box.join(" ") }
+}
+
 function AstryxInput({
   className,
   type,
@@ -47,9 +59,11 @@ function AstryxInput({
   const inputRef = React.useRef<HTMLInputElement | null>(null)
   // React mirrors a controlled value into the value attribute; a password must
   // never sit in the DOM (a native uncontrolled input has no such attribute).
+  const { text: textClass, box: boxClass } = splitClassName(className)
   React.useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
+    if (textClass) el.classList.add(...textClass.split(" "))
     if (type === "password") el.removeAttribute("value")
     // Astryx writes aria-invalid itself (from `status`, unused here).
     // Same for aria-busy (Astryx derives it from isLoading).
@@ -117,7 +131,7 @@ function AstryxInput({
         onChange?.(e)
       }}
       // Sizing utilities from call sites land on the field container.
-      containerClassName={cn(className)}
+      containerClassName={cn(boxClass)}
     />
   )
 }

@@ -209,7 +209,7 @@ function DialogContent({
       // surface keeps our radius and grid so child layout is unchanged.
       className={cn("w-full max-w-[calc(100%-2rem)] rounded-2xl sm:max-w-lg", className)}
     >
-      <div className="grid gap-4">{children}</div>
+      <div className={cn("grid gap-4", childLayoutClasses(className))}>{children}</div>
       {showCloseButton && (
         <SheetPrimitive.Close
           data-slot="dialog-close"
@@ -221,6 +221,11 @@ function DialogContent({
       )}
     </AstryxDialog>
   )
+}
+
+/** Astryx wraps the children in our body grid; the `[&>*]:` child-selector utilities a call site puts on DialogContent must target that wrapper's children. */
+function childLayoutClasses(className: string | undefined): string {
+  return (className ?? "").split(/\s+/).filter((t) => t.startsWith("[&>")).join(" ")
 }
 
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {

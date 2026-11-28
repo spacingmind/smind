@@ -25,7 +25,9 @@ describe("InviteHostDialog", () => {
     expect(field).toHaveAttribute("readonly");
     expect(field).toHaveValue("smind-host://v1#payload");
     expect(field).toHaveAttribute("title", "smind-host://v1#payload");
-    expect(field).toHaveClass("min-w-0", "flex-1", "text-ellipsis");
+    // Astryx TextInput: sizing utilities land on the field container, text utilities on the <input>.
+    expect(field).toHaveClass("text-ellipsis", "font-mono");
+    expect(field.closest('[class*="flex-1"]')).toHaveClass("min-w-0", "flex-1");
     expect(screen.getByTestId("invite-copy")).toHaveClass("shrink-0");
   });
 });
