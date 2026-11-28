@@ -174,3 +174,50 @@ func Test_human_stage_runs_the_clean_filter(t *testing.T) {
 	}
 	assertNoMarkers(t, r)
 }
+
+// The Push button's push (a human-marked context) runs the repository's
+// pre-push hook; the daemon's own push runs none. Both pushes are real:
+// each is preceded by a commit made through the daemon's (stripped) git.
+func Test_human_push_runs_the_pre_push_hook(t *testing.T) {
+	r := gitsafetest.NewStrippedRepo(t)
+	commit := func(msg string) {
+		t.Helper()
+		if _, _, err := execGit(context.Background(), r.Dir, nil, "commit", "--allow-empty", "-m", msg); err != nil {
+			t.Fatalf("setup commit %q: %v", msg, err)
+		}
+	}
+
+	commit("daemon push")
+	r.ClearMarkers()
+	if _, _, err := execGit(context.Background(), r.Dir, nil, "push", "origin", "main"); err != nil {
+		t.Fatalf("push(daemon) error = %v", err)
+	}
+	assertNoMarkers(t, r)
+
+	commit("human push")
+	r.ClearMarkers()
+	if _, _, err := execGit(WithHumanInitiated(context.Background()), r.Dir, nil, "push", "origin", "main"); err != nil {
+		t.Fatalf("push(human) error = %v", err)
+	}
+	if !slices.Contains(r.Markers(), "hook.ran") {
+		t.Fatalf("markers = %v, want hook.ran from the pre-push hook", r.Markers())
+	}
+}
+
+// The Sync button's merge (a human-marked context) runs the repository's
+// merge driver; the daemon's own merge runs none and reports the conflict
+// instead. Both merges may conflict or fail on the armed signing program;
+// the markers are what the mode is judged on.
+func Test_human_update_from_base_runs_the_merge_driver(t *testing.T) {
+	human := gitsafetest.NewStrippedRepo(t)
+	_, _, _ = execGit(WithHumanInitiated(context.Background()), human.Dir, nil, "merge", "--no-edit", "side")
+	if !slices.Contains(human.Markers(), "merge.ran") {
+		t.Fatalf("markers = %v, want merge.ran from the merge driver", human.Markers())
+	}
+
+	daemon := gitsafetest.NewStrippedRepo(t)
+	_, _, _ = execGit(context.Background(), daemon.Dir, nil, "merge", "--no-edit", "side")
+	if m := daemon.Markers(); len(m) != 0 {
+		t.Fatalf("an armed program ran: %v", m)
+	}
+}
