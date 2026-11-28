@@ -210,7 +210,7 @@ function DialogContent({
       // surface keeps our radius and grid so child layout is unchanged.
       // m-auto: the Tailwind preflight `* { margin: 0 }` outranks Astryx's margin:auto
       // when the cascade layers are mis-ordered; the utility centers it either way.
-      className={cn("m-auto w-full max-w-[calc(100%-2rem)] rounded-2xl sm:max-w-lg", className)}
+      className={cn("m-auto w-full max-w-[calc(100%-2rem)] rounded-2xl sm:max-w-lg", className, sheetResets(className))}
     >
       <div className={cn("grid gap-4 p-6", childLayoutClasses(className))}>{children}</div>
       {showCloseButton && (
@@ -224,6 +224,27 @@ function DialogContent({
       )}
     </AstryxDialog>
   )
+}
+
+/**
+ * A call site that pins the dialog to the viewport (`inset-0`, optionally under a
+ * variant) means the old fixed content element: it filled the area with auto size.
+ * The native <dialog> additionally caps its height and keeps an auto margin, so under
+ * the same variant drop both. Tailwind only emits classes it finds as literals in the
+ * source, hence the explicit table of the variants call sites use.
+ */
+const SHEET_RESETS: Record<string, string> = {
+  "inset-0": "max-h-none m-0",
+  "max-[860px]:inset-0": "max-[860px]:max-h-none max-[860px]:m-0",
+  "[@media(max-height:560px)]:inset-0": "[@media(max-height:560px)]:max-h-none [@media(max-height:560px)]:m-0",
+}
+
+function sheetResets(className: string | undefined): string {
+  return (className ?? "")
+    .split(/\s+/)
+    .map((t) => SHEET_RESETS[t])
+    .filter(Boolean)
+    .join(" ")
 }
 
 /** Astryx wraps the children in our body grid; the `[&>*]:` child-selector utilities a call site puts on DialogContent must target that wrapper's children. */
