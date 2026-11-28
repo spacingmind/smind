@@ -308,3 +308,61 @@ func Test_real_git_eol_attributes_do_not_show_spurious_changes(t *testing.T) {
 		t.Fatalf("daemon-mode status --porcelain printed %q, want nothing: the eol attribute must still apply", got)
 	}
 }
+
+// labRepo makes a plain repository (no armed fixture) with an initial
+// commit and returns its directory, a plain-git runner for setup and a
+// marker path; the user's git configuration is ignored.
+func labRepo(t *testing.T) (dir string, git func(args ...string), marker string) {
+	t.Helper()
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	dir = t.TempDir()
+	marker = filepath.Join(t.TempDir(), "marker")
+	git = func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-b", "main")
+	git("config", "user.name", "smind-test")
+	git("config", "user.email", "smind-test@example.com")
+	return dir, git, marker
+}
+
+// labScript writes a script that touches marker then runs tail.
+func labScript(t *testing.T, marker, tail string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "s.sh")
+	if err := os.WriteFile(p, []byte(fmt.Sprintf("#!/bin/sh\ntouch %q\n%s\n", marker, tail)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// Test_real_git_daemon_mode_equals_in_a_subsection_never_runs_the_program:
+// the armed filter whose name contains '=' cannot be neutralised, so
+// StrippedArgs refuses and no git call is made.
+func Test_real_git_daemon_mode_equals_in_a_subsection_never_runs_the_program(t *testing.T) {
+	dir, git, marker := labRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-m", "init")
+	git("config", "filter.a=b.clean", labScript(t, marker, "cat"))
+	if err := os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("*.txt filter=a=b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := StrippedArgs(context.Background(), dir, "status"); err == nil {
+		t.Fatal("StrippedArgs accepted a key with '=' in its subsection")
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("the filter ran")
+	}
+}

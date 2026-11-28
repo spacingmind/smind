@@ -234,7 +234,7 @@ func strippedOverrides(ctx context.Context, dir string, args []string) ([]string
 	if err != nil {
 		return nil, err
 	}
-	return overridePairs(entries, dir), nil
+	return overridePairs(entries, dir)
 }
 
 // defaultScan is the one git run behind the overrides: a config read that
@@ -365,7 +365,7 @@ func hasDotGitComponent(path string) bool {
 // rest get the neutral value that turns the program off. Credentials are
 // handled as a list, because helpers accumulate: one untrusted helper
 // anywhere resets the list and re-adds only the trusted ones.
-func overridePairs(entries []configEntry, dir string) []string {
+func overridePairs(entries []configEntry, dir string) ([]string, error) {
 	type pair struct{ key, value string }
 	var pairs []pair
 
@@ -382,6 +382,9 @@ func overridePairs(entries []configEntry, dir string) []string {
 		e := last[k]
 		if e.trusted(dir) {
 			continue
+		}
+		if wouldOverride(k) && strings.Contains(k, "=") {
+			return nil, errKeyHasEquals
 		}
 		switch {
 		case isFilterKey(k, ".clean"), isFilterKey(k, ".smudge"), isFilterKey(k, ".process"):
@@ -404,6 +407,11 @@ func overridePairs(entries []configEntry, dir string) []string {
 		}
 	}
 
+	for _, e := range entries {
+		if isCredentialHelperKey(e.key) && !e.trusted(dir) && strings.Contains(e.key, "=") {
+			return nil, errKeyHasEquals
+		}
+	}
 	if untrustedHelper := hasUntrustedHelper(entries, dir); untrustedHelper {
 		pairs = append(pairs, pair{"credential.helper", ""}) // the reset
 		for _, e := range entries {
@@ -416,9 +424,32 @@ func overridePairs(entries []configEntry, dir string) []string {
 	sort.SliceStable(pairs, func(i, j int) bool { return pairs[i].key < pairs[j].key })
 	out := make([]string, 0, 2*len(pairs))
 	for _, p := range pairs {
+		if strings.ContainsAny(p.key, "\n\x00") || strings.ContainsAny(p.value, "\n\x00") {
+			return nil, errors.New("gitsafe: a repository config key or value contains a newline or NUL and cannot be neutralised")
+		}
 		out = append(out, "-c", p.key+"="+p.value)
 	}
-	return out
+	return out, nil
+}
+
+// errKeyHasEquals is the fail-closed error for a key `-c key=value` cannot
+// carry: git splits at the first '=', so such a key is never neutralised.
+// It names no config value.
+var errKeyHasEquals = errors.New("gitsafe: a repository config key contains '=' and cannot be neutralised")
+
+// wouldOverride reports whether an untrusted entry for key gets an override.
+func wouldOverride(k string) bool {
+	switch {
+	case isFilterKey(k, ".clean"), isFilterKey(k, ".smudge"), isFilterKey(k, ".process"),
+		isNamedKey(k, "merge.", ".driver"):
+		return true
+	}
+	switch k {
+	case "core.sshcommand", "core.askpass", "core.gitproxy", "gpg.program",
+		"gpg.openpgp.program", "gpg.x509.program", "gpg.ssh.program":
+		return true
+	}
+	return false
 }
 
 // lastTrustedValue returns the value of the last trusted entry for key,

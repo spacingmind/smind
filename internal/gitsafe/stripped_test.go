@@ -459,3 +459,27 @@ func Test_stripped_adds_pack_program_flags_for_fetch_ls_remote_push(t *testing.T
 		})
 	}
 }
+
+// Test_stripped_key_with_equals_in_the_subsection_fails_closed: `-c k=v`
+// splits at the first '=', so a key with '=' in its subsection can never
+// be neutralised: StrippedArgs must refuse, naming no value. A trusted key
+// with '=' needs no override and is no error.
+func Test_stripped_key_with_equals_in_the_subsection_fails_closed(t *testing.T) {
+	for _, key := range []string{
+		"filter.a=b.clean",
+		"merge.a=b.driver",
+		"credential.https://h/?x=y.helper",
+	} {
+		stubScan(t, nil, scanRec{"local", "file:.git/config", key, "SECRETVALUE"})
+		got, err := StrippedArgs(context.Background(), "/base/repo", "status")
+		if err == nil {
+			t.Fatalf("%s: no error, argv %q", key, got)
+		}
+		if strings.Contains(err.Error(), "SECRETVALUE") {
+			t.Fatalf("%s: error names a value: %v", key, err)
+		}
+	}
+	stubScan(t, nil, scanRec{"global", "file:/home/u/.gitconfig", "filter.a=b.clean", "x"})
+	got, err := StrippedArgs(context.Background(), "/base/repo", "status")
+	assertArgv(t, got, err, wantArgv("status"))
+}
