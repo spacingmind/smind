@@ -123,6 +123,16 @@ function textOf(node: React.ReactNode): string {
   return ""
 }
 
+// Astryx puts the children in one inline <span>; Tailwind preflight makes an <svg>
+// display:block, so an icon next to text stacked above it. Mixed content (an icon
+// element plus text, or several nodes) gets an inline flex row with the per-size gap.
+function wrapContent(children: React.ReactNode, size: string): React.ReactNode {
+  const parts = React.Children.toArray(children)
+  if (parts.length < 2) return children
+  const gap = size === "xs" || size === "sm" ? "gap-1" : "gap-1.5"
+  return <span className={cn("inline-flex items-center justify-center align-middle", gap)}>{children}</span>
+}
+
 function AstryxBackedButton({
   className,
   variant = "default",
@@ -187,7 +197,7 @@ function AstryxBackedButton({
         className
       )}
     >
-      {iconOnly ? undefined : children}
+      {iconOnly ? undefined : wrapContent(children, sz as string)}
     </AstryxButton>
   )
 }
