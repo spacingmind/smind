@@ -1,11 +1,66 @@
 import * as React from "react"
 import { Dialog as SheetPrimitive } from "radix-ui"
+import { Dialog as AstryxDialog } from "@astryxdesign/core/Dialog"
 
 import { cn } from "@/lib/utils"
 import { Icons } from "@/lib/icons";
 
-function Dialog({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
-  return <SheetPrimitive.Root data-slot="dialog" {...props} />
+// jsdom lacks HTMLDialogElement.showModal/close, which Astryx calls. A no-op
+// browser never takes this branch; it only keeps component tests rendering.
+// (Belongs in src/test/setup.ts; moved there when that file is in scope.)
+if (typeof HTMLDialogElement !== "undefined") {
+  const proto = HTMLDialogElement.prototype
+  if (typeof proto.showModal !== "function") {
+    proto.showModal = function showModal(this: HTMLDialogElement) {
+      this.setAttribute("open", "")
+    }
+  }
+  if (typeof proto.close !== "function") {
+    proto.close = function close(this: HTMLDialogElement) {
+      this.removeAttribute("open")
+    }
+  }
+}
+
+// Astryx Dialog (Wave 0) renders DialogContent: a native <dialog> opened with
+// showModal(), so Escape, backdrop click, focus trapping, top layer and its
+// keyboard-only focus ring come from Astryx. It is controlled (isOpen /
+// onOpenChange) and has no Trigger/Portal/Overlay/Close parts, so the Radix
+// Root stays: it keeps Trigger, Close, Title, Description and the consumers
+// that compose DialogPrimitive.Content with DialogOverlay/DialogPortal
+// (settings-dialog, attachment-lightbox) working. This Root only mirrors the
+// open state into a context so DialogContent can drive Astryx.
+const DialogOpenContext = React.createContext<{
+  open: boolean
+  setOpen: (open: boolean) => void
+}>({ open: false, setOpen: () => {} })
+
+function Dialog({
+  open: openProp,
+  defaultOpen,
+  onOpenChange,
+  ...props
+}: React.ComponentProps<typeof SheetPrimitive.Root>) {
+  const [inner, setInner] = React.useState(!!defaultOpen)
+  const controlled = openProp !== undefined
+  const open = controlled ? !!openProp : inner
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      if (!controlled) setInner(next)
+      onOpenChange?.(next)
+    },
+    [controlled, onOpenChange]
+  )
+  return (
+    <DialogOpenContext.Provider value={{ open, setOpen }}>
+      <SheetPrimitive.Root
+        data-slot="dialog"
+        open={open}
+        onOpenChange={setOpen}
+        {...props}
+      />
+    </DialogOpenContext.Provider>
+  )
 }
 
 function DialogTrigger({
@@ -46,33 +101,65 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  ref,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  const { open, setOpen } = React.useContext(DialogOpenContext)
+  const innerRef = React.useRef<HTMLDialogElement | null>(null)
+  const setRef = React.useCallback(
+    (node: HTMLDialogElement | null) => {
+      innerRef.current = node
+      if (typeof ref === "function") ref(node as unknown as HTMLDivElement)
+      else if (ref) (ref as React.RefObject<unknown>).current = node
+    },
+    [ref]
+  )
+
+  // Name the dialog from DialogTitle / DialogDescription (Radix wires these
+  // ids only for its own Content).
+  React.useLayoutEffect(() => {
+    const el = innerRef.current
+    if (!el || !open) return
+    const title = el.querySelector<HTMLElement>('[data-slot="dialog-title"]')
+    const desc = el.querySelector<HTMLElement>('[data-slot="dialog-description"]')
+    if (title?.id) el.setAttribute("aria-labelledby", title.id)
+    if (desc?.id) el.setAttribute("aria-describedby", desc.id)
+  })
+
+  const {
+    onOpenAutoFocus: _a,
+    onCloseAutoFocus: _b,
+    onEscapeKeyDown: _c,
+    onPointerDownOutside: _d,
+    onInteractOutside: _e,
+    forceMount: _f,
+    ...rest
+  } = props
+
   return (
-    <DialogPortal data-slot="dialog-portal">
-      <DialogOverlay data-slot="dialog-overlay" />
-      <SheetPrimitive.Content
-        data-slot="dialog-content"
-        className={cn(
-          "fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-2xl border bg-background p-6 shadow-md duration-(--duration-menu) sm:max-w-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
-          className
-        )}
-        {...props}
-      >
-        {children}
-        {showCloseButton && (
-          <SheetPrimitive.Close
-            data-slot="dialog-close"
-            className="absolute top-3.5 right-3.5 flex size-7 items-center justify-center rounded-lg text-foreground-muted opacity-70 transition-opacity hover:bg-muted hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-hidden disabled:pointer-events-none [&>svg]:size-4 [&>svg]:shrink-0"
-          >
-            <Icons.close />
-            <span className="sr-only">Close</span>
-          </SheetPrimitive.Close>
-        )}
-      </SheetPrimitive.Content>
-    </DialogPortal>
+    <AstryxDialog
+      {...(rest as object)}
+      ref={setRef}
+      isOpen={open}
+      onOpenChange={(next) => setOpen(next)}
+      data-slot="dialog-content"
+      // Positioning, animation and focus handling now belong to Astryx; the
+      // surface keeps our radius and grid so child layout is unchanged.
+      className={cn("w-full max-w-[calc(100%-2rem)] rounded-2xl sm:max-w-lg", className)}
+    >
+      <div className="grid gap-4">{children}</div>
+      {showCloseButton && (
+        <SheetPrimitive.Close
+          data-slot="dialog-close"
+          className="absolute top-3.5 right-3.5 flex size-7 items-center justify-center rounded-lg text-foreground-muted opacity-70 transition-opacity hover:bg-muted hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-hidden disabled:pointer-events-none [&>svg]:size-4 [&>svg]:shrink-0"
+        >
+          <Icons.close />
+          <span className="sr-only">Close</span>
+        </SheetPrimitive.Close>
+      )}
+    </AstryxDialog>
   )
 }
 
