@@ -14,6 +14,8 @@
     "test:scripts": "node --test scripts/*.test.mjs"
   },
   "dependencies": {
+    "@astryxdesign/core": "0.7.17",
+    "@astryxdesign/theme-neutral": "0.7.17",
     "@codemirror/commands": "^6.11.0",
     "@codemirror/language": "^6.12.4",
     "@codemirror/search": "^6.7.2",
@@ -21,6 +23,7 @@
     "@codemirror/view": "^6.43.9",
     "@dnd-kit/core": "^6.3.1",
     "@fontsource-variable/geist": "^5.3.0",
+    "@stylexjs/stylex": "0.19.2",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.90.11",
     "@tauri-apps/api": "^2.11.1",
@@ -47,6 +50,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@astryxdesign/cli": "0.7.17",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^26.4.0",
