@@ -36,6 +36,18 @@ func WithTTL(ttl time.Duration) Option { return func(p *Poller) { p.ttl = ttl } 
 // WithClock injects the clock (tests).
 func WithClock(now func() time.Time) Option { return func(p *Poller) { p.clock = now } }
 
+// WithResumeClocks injects the wall and monotonic clocks the resume watch
+// compares (tests).
+func WithResumeClocks(wall func() time.Time, mono func() time.Duration) Option {
+	return func(p *Poller) { p.resumeWall, p.resumeMono = wall, mono }
+}
+
+// WithSleep injects the wait used to spread fetches after a resume (tests).
+// It must return ctx.Err() when ctx ends first.
+func WithSleep(fn func(ctx context.Context, d time.Duration) error) Option {
+	return func(p *Poller) { p.sleep = fn }
+}
+
 // WithJitter injects the jitter source, returning [0,1) (tests).
 func WithJitter(jit func() float64) Option { return func(p *Poller) { p.jitter = jit } }
 
@@ -71,8 +83,13 @@ type Poller struct {
 	ttl       time.Duration
 	clock     func() time.Time
 	jitter    func() float64
+	sleep     func(ctx context.Context, d time.Duration) error
+	resume    *resumeWatch
 	onFetch   func(Result)
 	cooldowns CooldownSource // passive cooldowns (WithCooldowns); nil = none
+
+	resumeWall func() time.Time
+	resumeMono func() time.Duration
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -116,6 +133,7 @@ func New(s *store.Store, src AccountSource, f ReportFetcher, opts ...Option) *Po
 		ttl:     touchTTLFloor,
 		clock:   time.Now,
 		jitter:  rand.Float64,
+		sleep:   timerSleep,
 		ctx:     ctx,
 		cancel:  cancel,
 		sem:     make(chan struct{}, maxInFlight),
@@ -127,6 +145,7 @@ func New(s *store.Store, src AccountSource, f ReportFetcher, opts ...Option) *Po
 	if p.ttl < touchTTLFloor {
 		p.ttl = touchTTLFloor
 	}
+	p.resume = newResumeWatch(p.resumeWall, p.resumeMono)
 	return p
 }
 
@@ -289,6 +308,9 @@ func (p *Poller) request(ctx context.Context, id int64, forced bool) Result {
 	fp := fingerprint(acc)
 	a := p.entry(id)
 	now := p.clock()
+	if p.resume.observe() {
+		log.Printf("quota: resume detected: spreading usage fetches for %s", resumeWindow)
+	}
 
 	a.mu.Lock()
 	if !p.load(id, a) {
@@ -353,7 +375,7 @@ func (p *Poller) request(ctx context.Context, id int64, forced bool) Result {
 	a.inflight = fl
 	a.mu.Unlock()
 
-	crash.Go("quota.fetch", func() { p.run(id, a, fl, acc) })
+	crash.Go("quota.fetch", func() { p.run(id, a, fl, acc, forced) })
 	return p.wait(ctx, id, a, fl, fp)
 }
 
@@ -385,8 +407,21 @@ func (p *Poller) wait(ctx context.Context, id int64, a *acct, fl *flight, fp str
 }
 
 // run is the detached fetch goroutine of one flight.
-func (p *Poller) run(id int64, a *acct, fl *flight, acc accounts.Account) {
+//
+// Right after a resume from sleep a non-forced fetch first waits a random
+// 0-wakeSpreadMax, so accounts are spread and the network has come back. The
+// wait is outside the in-flight slot and ends with the poller's context; a
+// forced refresh (a person pressed it) is never delayed.
+func (p *Poller) run(id int64, a *acct, fl *flight, acc accounts.Account, forced bool) {
 	defer p.wg.Done()
+
+	if !forced && p.resume.active(p.clock()) {
+		d := time.Duration(p.jitter() * float64(wakeSpreadMax))
+		if err := p.sleep(p.ctx, d); err != nil {
+			p.release(a, fl)
+			return
+		}
+	}
 
 	select {
 	case p.sem <- struct{}{}:
@@ -532,4 +567,16 @@ func (p *Poller) complete(id int64, a *acct, fl *flight, acc accounts.Account, r
 	a.mu.Unlock()
 	close(fl.done)
 	return kind
+}
+
+// timerSleep waits d or until ctx ends, returning ctx.Err() in that case.
+func timerSleep(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
