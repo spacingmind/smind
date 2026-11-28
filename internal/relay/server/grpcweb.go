@@ -55,7 +55,7 @@ func serveGRPCWeb(ctx context.Context, gs *grpc.Server, getCert func(*tls.Client
 				origin = origin[:200]
 			}
 			if refusals.shouldLog(origin, time.Now()) {
-				log.Printf("relay: origin not allowed: %q", origin)
+				log.Printf("relay: refused browser origin %q", origin)
 			}
 			http.Error(w, "origin not allowed", http.StatusForbidden)
 			return
