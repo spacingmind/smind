@@ -1,0 +1,55 @@
+import { describe, expect, it } from 'vitest';
+import { IDBFactory } from 'fake-indexeddb';
+import { ed25519 } from '@noble/curves/ed25519.js';
+import { openRelayStore, type StoredPairing } from '../store';
+import {
+  NotPairedError,
+  RepairRequiredError,
+  createIdentityForPairing,
+  loadIdentityForConnect,
+} from '../identity-manager';
+
+const pairing: StoredPairing = {
+  offerUrl: 'smind://pair?x=1',
+  daemonId: 'd1',
+  relay: 'relay.example:443',
+  relayFingerprint: 'ab',
+  label: 'laptop',
+  pairedAt: 1,
+};
+
+describe('relay store', () => {
+  it('identity_key_survives_reload', async () => {
+    const factory = new IDBFactory();
+    const a = await openRelayStore(factory);
+    const created = await createIdentityForPairing(a);
+    await a.savePairing(pairing);
+    a.close();
+
+    const b = await openRelayStore(factory);
+    const rec = await b.loadIdentity();
+    expect(rec).not.toBeNull();
+    expect(rec!.privateKey.extractable).toBe(false);
+    const msg = new TextEncoder().encode('reload');
+    const sig = new Uint8Array(
+      await crypto.subtle.sign({ name: 'Ed25519' }, rec!.privateKey, msg),
+    );
+    expect(ed25519.verify(sig, msg, rec!.publicKey)).toBe(true);
+
+    const { identity } = await loadIdentityForConnect(b);
+    expect(identity.deviceId).toBe(created.deviceId);
+    b.close();
+  });
+
+  it('identity_key_missing_means_repair_not_new_identity', async () => {
+    const factory = new IDBFactory();
+    const s = await openRelayStore(factory);
+    await expect(loadIdentityForConnect(s)).rejects.toBeInstanceOf(NotPairedError);
+    await s.savePairing(pairing);
+    const err = await loadIdentityForConnect(s).catch((e) => e);
+    expect(err).toBeInstanceOf(RepairRequiredError);
+    expect(err.reason).toBe('identity_missing');
+    expect(await s.loadIdentity()).toBeNull();
+    s.close();
+  });
+});
