@@ -132,7 +132,7 @@ func Test_stripped_scan_parse_scope_and_origin(t *testing.T) {
 				assertArgv(t, got, err, wantArgv("status"))
 				return
 			}
-			assertArgv(t, got, err, wantArgv("-c", "filter.x.clean=", "status"))
+			assertArgv(t, got, err, wantArgv("-c", "filter.x.clean=", "-c", "filter.x.required=false", "status"))
 		})
 	}
 }
@@ -163,6 +163,7 @@ func Test_stripped_neutralises_local_filter_merge_driver_ssh_askpass_pack(t *tes
 		"-c", "credential.helper=",
 		"-c", "filter.evil.clean=",
 		"-c", "filter.evil.process=",
+		"-c", "filter.evil.required=false",
 		"-c", "filter.evil.smudge=",
 		"-c", "merge.evilm.driver=",
 		"status",
@@ -190,7 +191,7 @@ func Test_stripped_local_override_of_a_global_filter_is_reasserted(t *testing.T)
 		scanRec{"local", "file:.git/config", "filter.x.clean", "evil"},
 	)
 	got, err := StrippedArgs(context.Background(), "/base/repo", "status")
-	assertArgv(t, got, err, wantArgv("-c", "filter.x.clean=A", "status"))
+	assertArgv(t, got, err, wantArgv("-c", "filter.x.clean=A", "-c", "filter.x.required=false", "status"))
 }
 
 // Test_stripped_trusts_exact_lfs_command_lines covers the git-lfs
@@ -211,7 +212,7 @@ func Test_stripped_trusts_exact_lfs_command_lines(t *testing.T) {
 	}, exact[1:]...)
 	stubScan(t, nil, tampered...)
 	got, err = StrippedArgs(context.Background(), "/base/repo", "status")
-	assertArgv(t, got, err, wantArgv("-c", "filter.lfs.clean=", "status"))
+	assertArgv(t, got, err, wantArgv("-c", "filter.lfs.clean=", "-c", "filter.lfs.required=false", "status"))
 }
 
 // Test_stripped_credential_helper_reset_keeps_trusted_helpers covers the
@@ -590,5 +591,39 @@ func Test_stripped_submodule_cap_fails_closed(t *testing.T) {
 	stubSubmodules(t, files)
 	if got, err := StrippedArgs(context.Background(), dir, "status"); err == nil || got != nil {
 		t.Fatalf("got (%q, %v), want (nil, error)", got, err)
+	}
+}
+
+// Test_stripped_neutralised_filter_is_not_required: a filter whose command
+// is overridden also gets required=false (git dies on an emptied required
+// filter); a kept git-lfs filter gets none.
+func Test_stripped_neutralised_filter_is_not_required(t *testing.T) {
+	stubScan(t, nil,
+		scanRec{"local", "file:.git/config", "filter.gc.required", "true"},
+		scanRec{"local", "file:.git/config", "filter.gc.clean", "git-crypt clean"},
+		scanRec{"local", "file:.git/config", "filter.gc.smudge", "git-crypt smudge"},
+		scanRec{"local", "file:.git/config", "filter.lfs.clean", "git-lfs clean -- %f"},
+		scanRec{"local", "file:.git/config", "filter.lfs.required", "true"},
+	)
+	got, err := StrippedArgs(context.Background(), "/base/repo", "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasOverride(got, "filter.gc.required=false") {
+		t.Errorf("missing filter.gc.required=false in %q", got)
+	}
+	n := 0
+	for _, a := range got {
+		if a == "filter.gc.required=false" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("filter.gc.required=false emitted %d times, want once", n)
+	}
+	for _, a := range got {
+		if strings.HasPrefix(a, "filter.lfs.") {
+			t.Errorf("a kept git-lfs filter got an override: %q", a)
+		}
 	}
 }

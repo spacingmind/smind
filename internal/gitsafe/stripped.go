@@ -518,6 +518,7 @@ func hasDotGitComponent(path string) bool {
 func overridePairs(entries []configEntry, dir string) ([]string, error) {
 	type pair struct{ key, value string }
 	var pairs []pair
+	notRequired := map[string]bool{}
 
 	last := make(map[string]configEntry, len(entries))
 	for _, e := range entries {
@@ -533,7 +534,7 @@ func overridePairs(entries []configEntry, dir string) ([]string, error) {
 		if e.trusted(dir) {
 			continue
 		}
-		if wouldOverride(k) && strings.Contains(k, "=") {
+		if wouldOverride(k) && strings.Contains(k, "=") { // also covers the derived .required key
 			return nil, errKeyHasEquals
 		}
 		switch {
@@ -542,6 +543,13 @@ func overridePairs(entries []configEntry, dir string) ([]string, error) {
 				continue // git-lfs's own command lines stay, even from a local scope
 			}
 			pairs = append(pairs, pair{k, lastTrustedValue(entries, k, dir)})
+			// An emptied command with required=true makes git die ("clean
+			// filter failed"), so a neutralised filter is not required.
+			name := k[len("filter."):strings.LastIndex(k, ".")]
+			if !notRequired[name] {
+				notRequired[name] = true
+				pairs = append(pairs, pair{"filter." + name + ".required", "false"})
+			}
 		case isNamedKey(k, "merge.", ".driver"):
 			pairs = append(pairs, pair{k, lastTrustedValue(entries, k, dir)})
 		case k == "core.sshcommand":

@@ -492,3 +492,35 @@ func runPlain(dir string, args ...string) ([]byte, error) {
 	cmd.Dir = dir
 	return cmd.CombinedOutput()
 }
+
+// Test_real_git_daemon_mode_a_required_filter_does_not_fail_add: a local
+// required=true filter whose command is neutralised must not make the
+// daemon's add -A die.
+func Test_real_git_daemon_mode_a_required_filter_does_not_fail_add(t *testing.T) {
+	repo := gitsafetest.NewStrippedRepo(t)
+	repo.Git(t, "config", "filter.gc.clean", "cat")
+	repo.Git(t, "config", "filter.gc.smudge", "cat")
+	repo.Git(t, "config", "filter.gc.required", "true")
+	if err := os.WriteFile(filepath.Join(repo.Dir, ".git", "info", "attributes"), []byte("* filter=gc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo.Dir, "a.flt"), []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	argv, err := StrippedArgs(context.Background(), repo.Dir, "add", "-A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", argv...)
+	cmd.Dir = repo.Dir
+	cmd.Env = StrippedEnv(nil)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("daemon add -A: %v\n%s", err, out)
+	}
+	staged := runDaemon(t, repo, "diff", "--cached", "--name-only")
+	if !strings.Contains(staged, "a.flt") {
+		t.Fatalf("a.flt not staged: %q", staged)
+	}
+}
