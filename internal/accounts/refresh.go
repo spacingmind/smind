@@ -2,6 +2,8 @@ package accounts
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -126,8 +128,17 @@ func (r *Registry) EnsureFresh(ctx context.Context, id int64, refresher OAuthRef
 		return acc, nil
 	}
 
+	key := refreshKey(acc.OAuth.RefreshToken)
+	if r.refreshIsDead(id, key) {
+		return Account{}, fmt.Errorf("account %d: %w", id, ErrNeedsRelogin)
+	}
+
 	refreshed, err := refresher.Refresh(ctx, *acc.OAuth)
 	if err != nil {
+		if IsTerminalRefreshError(err) {
+			r.markRefreshDead(id, key)
+			return Account{}, fmt.Errorf("refresh oauth credential for account %d: %w: %w", id, ErrNeedsRelogin, err)
+		}
 		return Account{}, fmt.Errorf("refresh oauth credential for account %d: %w", id, err)
 	}
 
@@ -140,4 +151,46 @@ func (r *Registry) EnsureFresh(ctx context.Context, id int64, refresher OAuthRef
 		return Account{}, fmt.Errorf("persist refreshed credential for account %d: %w", id, err)
 	}
 	return decodeAccount(updated)
+}
+
+// refreshKey identifies a refresh token without keeping it: the first 16 hex
+// characters of its SHA-256. Never log the token itself.
+func refreshKey(refreshToken string) string {
+	sum := sha256.Sum256([]byte(refreshToken))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+func (r *Registry) markRefreshDead(id int64, key string) {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	if r.deadRefresh == nil {
+		r.deadRefresh = make(map[int64]string)
+	}
+	r.deadRefresh[id] = key
+}
+
+// refreshIsDead reports whether key is the remembered dead refresh token of
+// account id. A stale entry (the credential was replaced) is pruned.
+func (r *Registry) refreshIsDead(id int64, key string) bool {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	dead, ok := r.deadRefresh[id]
+	if !ok {
+		return false
+	}
+	if dead != key {
+		delete(r.deadRefresh, id)
+		return false
+	}
+	return true
+}
+
+// NeedsRelogin reports whether the account's current refresh token is the one
+// the provider refused for good. False for an unknown or api_key account.
+func (r *Registry) NeedsRelogin(id int64) bool {
+	acc, err := r.Get(id)
+	if err != nil || acc.OAuth == nil {
+		return false
+	}
+	return r.refreshIsDead(id, refreshKey(acc.OAuth.RefreshToken))
 }

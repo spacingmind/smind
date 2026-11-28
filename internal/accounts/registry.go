@@ -60,7 +60,11 @@ type Registry struct {
 	// refreshMu guards refreshLocks. Entries are kept for the Registry's
 	// lifetime rather than dropped when unused: account counts are small
 	// and pinning avoids lock-reuse races.
-	refreshMu    sync.Mutex
+	refreshMu sync.Mutex
+	// deadRefresh maps an account id to the key of its refresh token that the
+	// provider refused for good (see refreshKey). In memory only. Guarded by
+	// refreshMu.
+	deadRefresh  map[int64]string
 	refreshLocks map[int64]chan struct{}
 }
 
