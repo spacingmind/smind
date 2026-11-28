@@ -45,22 +45,28 @@ func exitCode(err error) int {
 	return -1
 }
 
-// DefaultRunner is the hardened runner: the gitsafe hardening (core.fsmonitor
-// forced off, --no-ext-diff --no-textconv on the diff family, no
-// GIT_EXTERNAL_DIFF inherited, GIT_PAGER=cat) — an agent-editable repo config
-// git would otherwise execute — no credential prompts, no optional locks, a C
-// locale, a deadline (LocalTimeout unless ctx already has one) that kills git,
-// and the process waited out at most waitDelay after.
+// DefaultRunner is the hardened runner: the gitsafe stripped mode (the
+// baseline hardening — core.fsmonitor forced off, --no-ext-diff
+// --no-textconv on the diff family, no GIT_EXTERNAL_DIFF inherited,
+// GIT_PAGER=cat — plus the overrides that stop git running a program an
+// agent-editable repo config would otherwise execute), no credential
+// prompts, no optional locks, a C locale, a deadline (LocalTimeout unless
+// ctx already has one) that kills git, and the process waited out at most
+// waitDelay after. When the stripped-mode config scan fails the run fails
+// closed: git is not started and a *RunError with ExitCode -1 comes back.
 func DefaultRunner(ctx context.Context, dir string, args ...string) (string, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, LocalTimeout)
 		defer cancel()
 	}
-	full := gitsafe.Args(args...)
+	full, err := gitsafe.StrippedArgs(ctx, dir, args...)
+	if err != nil {
+		return "", &RunError{Args: args, ExitCode: -1, Err: err}
+	}
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = dir
-	cmd.Env = append(gitsafe.Env(nil), "LC_ALL=C")
+	cmd.Env = append(gitsafe.StrippedEnv(nil), "LC_ALL=C")
 	cmd.WaitDelay = waitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

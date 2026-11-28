@@ -158,11 +158,19 @@ func takeRepo(dir string) (repoSnapshot, error) {
 func sum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 // git runs one read-only git command in dir with a scrubbed environment.
-// The env is built from scratch below, so no GIT_EXTERNAL_DIFF can be in it.
+// The env is built from scratch below, so no GIT_EXTERNAL_DIFF can be in it,
+// and the argv comes from gitsafe.StrippedArgs: an agent-edited repo config
+// cannot make git run a program while the snapshot is taken. The
+// stripped-mode config scan failing is an error (fail closed), never a
+// plain git call.
 func git(dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args(append([]string{"--no-optional-locks", "-C", dir}, args...)...)...)
+	full, err := gitsafe.StrippedArgs(ctx, dir, append([]string{"--no-optional-locks", "-C", dir}, args...)...)
+	if err != nil {
+		return nil, fmt.Errorf("git %s: %w", args[0], err)
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C"}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
