@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-var reRetryDelayText = regexp.MustCompile(`"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"`)
+var reRetryDelayText = regexp.MustCompile(`\\?"retryDelay\\?"\s*:\s*\\?"(\d+(?:\.\d+)?)s\\?"`)
 
 const retryInfoMaxDepth = 6
 
@@ -75,7 +75,11 @@ func delayValue(v any) (time.Duration, bool) {
 	if math.IsNaN(secs) || math.IsInf(secs, 0) || secs <= 0 || secs > 1e9 {
 		return 0, false
 	}
-	return time.Duration(secs * float64(time.Second)), true
+	d := time.Duration(secs * float64(time.Second))
+	if d <= 0 {
+		return 0, false
+	}
+	return d, true
 }
 
 func numberOf(v any) (float64, bool) {
@@ -100,5 +104,9 @@ func retryInfoFromText(s string) (time.Duration, bool) {
 	if err != nil || f <= 0 || f > 1e9 {
 		return 0, false
 	}
-	return time.Duration(f * float64(time.Second)), true
+	d := time.Duration(f * float64(time.Second))
+	if d <= 0 {
+		return 0, false
+	}
+	return d, true
 }

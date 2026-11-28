@@ -47,7 +47,9 @@ func Test_usage_429_retry_after_beats_retryinfo(t *testing.T) {
 }
 
 func Test_usage_429_body_read_is_capped_and_one_call(t *testing.T) {
-	big := strings.Repeat("x", 1<<20) + retryInfo90
+	// Valid JSON whose RetryInfo sits after 12 KiB of padding: only a read
+	// past the 8 KiB cap would find it.
+	big := `{"pad":"` + strings.Repeat("x", 12<<10) + `","error":{"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"90s"}]}}`
 	got, hits := get429(t, "", big)
 	if got != 0 {
 		t.Errorf("RetryAfter = %v, want 0 (RetryInfo is past the read cap)", got)

@@ -139,15 +139,13 @@ var (
 )
 
 // Classify classifies a failed run. Unknown never classifies and no time is
-// ever guessed. Precedence: a rejected signal or an explicit plan-usage text
+// ever guessed. Precedence: a rejected signal, then (with no typed code) a
+// shared-subscription rejection (account_blocked), then an explicit plan-usage text
 // (plan_window_exhausted) beats a typed backend code, which beats auth text,
 // which beats model text, which beats the generic 429 words (transient_429
 // when there is a Retry-After or an overload body, else the residual
 // rate_limited).
 func Classify(in Input, now time.Time) Result {
-	if reSubscriptionSharing.MatchString(in.Err) {
-		return Result{Kind: KindAccountBlocked}
-	}
 	var res Result
 	sigHit := false
 	if s := in.Signal; s != nil && s.Status == "rejected" && s.Type != "overage" {
@@ -159,6 +157,12 @@ func Classify(in Input, now time.Time) Result {
 			res.ResetAt = &t
 			res.ResetInferred = false
 		}
+	}
+	// A provider's rejection of how the account is used (a shared
+	// subscription) beats every TEXT class, but never structured data: a
+	// rejected signal (above) or a typed backend code names its own class.
+	if !sigHit && in.Code == "" && reSubscriptionSharing.MatchString(in.Err) {
+		return Result{Kind: KindAccountBlocked}
 	}
 	txt := classifyText(in.Err, now, in.Vendor)
 	if sigHit {

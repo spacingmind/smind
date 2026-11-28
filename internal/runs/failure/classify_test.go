@@ -523,6 +523,14 @@ func TestAllKinds_AreKnown(t *testing.T) {
 	}
 }
 
+func Test_retry_hint_reads_a_retrydelay_in_a_quoted_error_string(t *testing.T) {
+	for _, s := range []string{`{\"retryDelay\":\"30s\"}`, `{"retryDelay": "30s"}`} {
+		if got := retryHint(Input{Err: s}, time.Time{}); got != 30*time.Second {
+			t.Errorf("%q: hint = %v, want 30s", s, got)
+		}
+	}
+}
+
 func Test_retry_hint_order_and_text_forms(t *testing.T) {
 	cases := []struct {
 		name string
@@ -558,6 +566,18 @@ func Test_subscription_sharing_text_is_account_blocked(t *testing.T) {
 		if got.Kind != KindAccountBlocked {
 			t.Errorf("%q: kind = %q, want account_blocked", s, got.Kind)
 		}
+	}
+}
+
+// Structured data names its own class: a rejected signal or a typed backend
+// code beats the shared-subscription phrase in the error text.
+func Test_subscription_sharing_text_loses_to_a_signal_and_a_typed_code(t *testing.T) {
+	sig := &Signal{Status: "rejected", Type: "five_hour"}
+	if got := Classify(Input{Err: "rate_limit_error: see docs on subscription sharing", Signal: sig}, time.Time{}); got.Kind != KindPlanWindowExhausted {
+		t.Errorf("rejected signal: kind = %q, want plan_window_exhausted", got.Kind)
+	}
+	if got := Classify(Input{Err: "unauthorized 401: subscription sharing policy", Code: CodeUnauthorized}, time.Time{}); got.Kind != KindAuthExpired {
+		t.Errorf("typed code: kind = %q, want auth_expired", got.Kind)
 	}
 }
 
