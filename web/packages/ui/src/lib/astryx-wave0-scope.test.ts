@@ -33,6 +33,7 @@ const ALLOWED_OTHER = new Set([
   `${UI}/lib/astryx-build.test.ts`,
   `${UI}/lib/astryx-wave0-scope.test.ts`,
   `${UI}/lib/theme.ts`,
+  `${UI}/lib/theme.test.ts`,
   `${UI}/theme/smind-theme.css`,
   `${UI}/theme/smind-theme.test.ts`,
   `${UI}/theme/smind-theme.ts`,

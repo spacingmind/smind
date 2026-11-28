@@ -49,7 +49,7 @@ frames: []
 commands:
   - { id: C1, run: "cd web/packages/ui && bunx tsc -b", timeoutSec: 900 }
   - { id: C2, run: "cd web/packages/ui && bun run test", timeoutSec: 1800 }
-  - { id: C3, run: "cd web/packages/ui && bun run build:demo", timeoutSec: 900 }
+  - { id: C3, run: "cd web/packages/ui && bun run build:demo && rm -rf dist-demo", timeoutSec: 900 }
   - { id: C4, run: "go test ./internal/hygiene/ -count=1", timeoutSec: 900 }
   - { id: C5, run: "cd web/packages/ui && node --test scripts/check-demo-build.test.mjs", timeoutSec: 900 }
 limits: { budgetUsd: 3, maxMinutes: 60 }
