@@ -102,7 +102,9 @@ GLM peers write the code from step-by-step briefs (profile 8, one commit per ste
 
 ## Progress
 
-- Spec written (this commit).
+- Spec written (first commit); the Metro spike done (a package outside `mobile/` bundles; shape: one-line re-export shims).
+- PR 1 code by peers from step briefs on `peer-sonnet` (GLM was inside its logged plan window, reset 2026-11-28T18:43:20Z; runs `5665443674d2454afc1bc86634ff9d35` and `8eedeb8f8fbed8bfb6ba8070db269cfd`), one commit per step, each reviewed and cherry-picked by the Lead: the package and the mobile wiring plus leaf modules; the crypto and transport modules; the identity, passwords and the connection; the async signing seam; the guards. Mobile keeps `client.ts`, `platformKeyStore.ts`, `platformRandom.ts`, `useConnectionState.ts` and the node integration tests; the rest of `mobile/src/relay/` is one-line shims.
+- Lead mutations on committed code, each fails its named test: M1 (the HKDF label changed: 6 vector tests fail), M2 (a `react-native` import in the package), M3 (a shim replaced by a copy).
 
 ## Validation
 
