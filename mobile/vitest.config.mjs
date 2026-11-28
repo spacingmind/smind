@@ -1,3 +1,5 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
 
 // Expo SDK 58's `expo` package.json has an `exports` map without `./tsconfig.base`, so Vite's
@@ -8,5 +10,6 @@ import { defineConfig } from 'vitest/config';
 // platformRandom.ts installs expo-crypto's; see src/relay/random.ts).
 export default defineConfig({
   tsconfig: './tsconfig.vitest.json',
-  test: { setupFiles: ['./src/relay/__tests__/setupRandom.ts'] },
+  resolve: { alias: { '@smind/relay-client': path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web/packages/relay-client') } },
+  test: { setupFiles: ['../web/packages/relay-client/src/__tests__/setupRandom.ts'] },
 });
