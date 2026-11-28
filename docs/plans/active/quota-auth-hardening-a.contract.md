@@ -52,8 +52,8 @@ tests:
   - { name: wait_retry_still_queued_after_streamed_output, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/ -run wait_retry_still_queued_after_streamed_output -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: failure_text_covers_account_blocked, run: "TMPDIR=/tmp/c5-tmp go test ./cmd/smind/ -run failure_text_covers_account_blocked -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: account_blocked_is_in_the_web_failure_tables, run: "cd web/packages/ui && bunx vitest run src/lib/failure-text.test.ts src/lib/failure-class.test.ts -t account_blocked_is_in_the_web_failure_tables", timeoutSec: 1200 }
-  - { name: account_blocked_is_in_the_mobile_failure_tables, run: "cd mobile && bunx vitest run -t account_blocked_is_in_the_mobile_failure_tables", timeoutSec: 1200 }
-  - { name: account_blocked_class_card_e2e, run: "cd web/e2e && E2E_FULL=1 bunx playwright test specs/failure-classes.spec.ts -g account-blocked --project=light-1280", timeoutSec: 1200 }
+  - { name: account_blocked_is_in_the_mobile_failure_tables, run: "cd mobile && bun install --frozen-lockfile && bunx vitest run -t account_blocked_is_in_the_mobile_failure_tables", timeoutSec: 1200 }
+  - { name: account_blocked_class_card_e2e, run: "cd web && bun install --frozen-lockfile && bun run --filter @smind/ui build && cd .. && go build -o /tmp/c5-tmp/smind-e2e ./cmd/smind && cd web/e2e && SMIND_BIN=/tmp/c5-tmp/smind-e2e E2E_FULL=1 bunx playwright test specs/failure-classes.spec.ts -g account-blocked --project=light-1280", timeoutSec: 1200 }
   - { name: hygiene_and_scope, run: "go test ./internal/hygiene/ -count=1 && test -z \"$(git diff origin/develop...HEAD --name-only -- internal/accounts internal/server internal/relay)\"", timeoutSec: 1200 }
 mutations:
   - { id: M1, file: internal/runs/failure/classify.go, change: "retryHint ignores a RetryInfo fragment in the text and quota ignores the 429 body", expectFail: [retry_hint_order_and_text_forms, usage_429_retryinfo_body_sets_the_wait] }
