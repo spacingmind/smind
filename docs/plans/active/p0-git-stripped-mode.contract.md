@@ -91,7 +91,7 @@ frames: []
 commands:
   - { id: C1, run: "go build ./... && go vet ./internal/gitsafe/... ./internal/workspace/ ./internal/wsapi/ ./internal/gitstate/ ./internal/steward/ ./internal/validation/", timeoutSec: 900 }
   - { id: C2, run: "TMPDIR=/tmp/c5-tmp go test ./internal/gitsafe/... ./internal/workspace/ ./internal/gitstate/ ./internal/steward/ ./internal/validation/ ./internal/taskrunner/ ./internal/hygiene/ -count=1", timeoutSec: 2400 }
-limits: { budgetUsd: 6, maxMinutes: 120 }
+limits: { budgetUsd: 5, maxMinutes: 120 }
 ---
 
 # P0 stripped git mode validation contract
