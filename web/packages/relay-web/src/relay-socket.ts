@@ -127,13 +127,14 @@ export class RelaySocket implements SocketLike {
   }
 
   // events.subscribe is the daemon's own RPC, answered with its real outcome
-  // (so the UI's tolerant retry sees `unknown topic "x"`). Only after it
-  // succeeds is local dispatch registered, one conn.subscribe per topic and
-  // never twice for the same topic. conn.subscribe sends its own
-  // events.subscribe for the topic internally; that is harmless, the daemon
-  // dedups topics per connection.
+  // (so the UI's tolerant retry sees `unknown topic "x"`). Local dispatch (one
+  // conn.subscribe per topic, never twice for the same topic) is registered
+  // BEFORE the RPC goes out, so an event the daemon pushes right after it
+  // subscribes is not lost; a rejected RPC releases exactly the topics this
+  // call registered. conn.subscribe sends its own events.subscribe for the
+  // topic internally; that is harmless, the daemon dedups topics per connection.
   private subscribe(id: string, params: unknown): void {
-    const topics = topicsOf(params);
+    const added = this.register(topicsOf(params));
     const call = this.conn.call('events.subscribe', params ?? null);
     this.inflight.set(id, call);
     call.then(
@@ -141,19 +142,34 @@ export class RelaySocket implements SocketLike {
         if (this.inflight.get(id) !== call) return;
         this.inflight.delete(id);
         if (this.closed) return;
-        for (const topic of topics) {
-          if (this.subs.has(topic)) continue;
-          this.subs.set(
-            topic,
-            this.conn.subscribe([topic], (e) =>
-              this.emit({ event: { topic: e.topic, seq: e.seq ?? 0, payload: e.payload } }),
-            ),
-          );
-        }
+        // An overlapping subscribe that held a topic may have failed and released it.
+        this.register(topicsOf(params));
         this.emit({ id, result });
       },
-      (err: unknown) => this.failCall(id, call, err),
+      (err: unknown) => {
+        for (const topic of added) {
+          this.subs.get(topic)?.();
+          this.subs.delete(topic);
+        }
+        this.failCall(id, call, err);
+      },
     );
+  }
+
+  /** Registers local dispatch for the topics this socket does not hold yet; returns the newly registered ones. */
+  private register(topics: string[]): string[] {
+    const added: string[] = [];
+    for (const topic of topics) {
+      if (this.subs.has(topic)) continue;
+      this.subs.set(
+        topic,
+        this.conn.subscribe([topic], (e) =>
+          this.emit({ event: { topic: e.topic, seq: e.seq ?? 0, payload: e.payload } }),
+        ),
+      );
+      added.push(topic);
+    }
+    return added;
   }
 
   private failCall(id: string, call: Inflight, err: unknown): void {

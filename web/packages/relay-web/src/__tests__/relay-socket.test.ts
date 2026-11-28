@@ -27,10 +27,13 @@ class FakeConn implements RelayConnectionLike {
   /** events.subscribe answers: the daemon's real RPC, answered here without being recorded in calls. */
   subscribeRpcs: unknown[] = [];
   rejectUnknown = new Set<string>();
+  /** Runs inside the events.subscribe call, before its answer exists (the daemon pushing right after it subscribed). */
+  onSubscribeRpc: (() => void) | null = null;
   stateCbs: Array<(s: { kind: string }) => void> = [];
   call(method: string, params?: unknown, opts?: { onEvent?: (e: string, p: unknown) => void }) {
     if (method === 'events.subscribe') {
       this.subscribeRpcs.push(params);
+      this.onSubscribeRpc?.();
       const topics = (params as { topics: string[] }).topics;
       const bad = topics.find((t) => this.rejectUnknown.has(t));
       const q = (bad ? Promise.reject(new DaemonError(`unknown topic "${bad}"`)) : Promise.resolve({ topics })) as Promise<unknown> & { cancel(): void };
@@ -239,5 +242,21 @@ describe('RelaySocket', () => {
     expect(closed).toBe(false);
     await tick();
     expect(closed).toBe(true);
+  });
+
+  it('relay_socket_delivers_an_event_pushed_before_the_subscribe_answer', async () => {
+    const { conn, client } = setup();
+    const got: Array<{ topic: string; seq: number }> = [];
+    client.onNotification((n) => got.push({ topic: n.topic, seq: n.seq }));
+    conn.onSubscribeRpc = () => conn.push('t', 1, { first: true });
+    await client.call('events.subscribe', { topics: ['t'] });
+    await tick();
+    expect(got).toEqual([{ topic: 't', seq: 1 }]);
+
+    // and a rejected subscribe still leaves nothing registered
+    conn.onSubscribeRpc = null;
+    conn.rejectUnknown.add('bad');
+    await expect(client.call('events.subscribe', { topics: ['u', 'bad'] })).rejects.toThrow(/unknown topic/);
+    expect(conn.subTopics.map((r) => r.topics[0])).toEqual(['t']);
   });
 });
