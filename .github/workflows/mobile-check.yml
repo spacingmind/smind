@@ -8,6 +8,7 @@ name: mobile-check
 # (the RPC surface the client calls through the relay) and internal/push/ (the
 # sealed push format the client opens): a PR touching only those would
 # otherwise skip the live interop run and break the client after merge.
+# The shared relay client (web/packages/relay-client) is tested here too.
 # scripts/mobile-check-filter_test.sh pins the filter below.
 #
 # The check is required on develop, so it runs on every PR and reports
@@ -49,7 +50,7 @@ jobs:
             exit 0
           fi
           if git diff --name-only "origin/$BASE_REF...HEAD" |
-            grep -qE '^(mobile/|internal/relay/|internal/wsapi/|internal/push/|\.github/workflows/mobile-check\.yml$)'; then
+            grep -qE '^(mobile/|web/packages/relay-client/|internal/relay/|internal/wsapi/|internal/push/|\.github/workflows/mobile-check\.yml$)'; then
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "relevant=false" >> "$GITHUB_OUTPUT"
@@ -71,6 +72,26 @@ jobs:
       - name: npm ci
         if: steps.changes.outputs.relevant == 'true'
         run: npm ci
+
+      # The shared relay client (web/packages/relay-client) is a bun workspace
+      # member: its own tests (including the Go-vector test) and typecheck run here.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: steps.changes.outputs.relevant == 'true'
+
+      - name: Install the web workspace
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: web
+        run: bun install --frozen-lockfile
+
+      - name: Shared relay client typecheck
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: web
+        run: bun run --filter '@smind/relay-client' typecheck
+
+      - name: Shared relay client tests
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: web
+        run: bun run --filter '@smind/relay-client' test
 
       - name: Typecheck
         if: steps.changes.outputs.relevant == 'true'
