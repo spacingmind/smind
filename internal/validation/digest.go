@@ -5,11 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/gitsafe"
 )
 
 // Snapshot is a worktree's HEAD and its `git status --porcelain` text. The seat
@@ -129,9 +130,9 @@ func IsAncestor(ctx context.Context, dir, commit, of string) (bool, error) {
 }
 
 func gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, "git", gitsafe.Args(args...)...)
 	cmd.Dir = dir
-	for _, e := range os.Environ() {
+	for _, e := range gitsafe.Env(nil) {
 		if strings.HasPrefix(e, "GIT_DIR=") || strings.HasPrefix(e, "GIT_WORK_TREE=") || strings.HasPrefix(e, "GIT_INDEX_FILE=") {
 			continue
 		}

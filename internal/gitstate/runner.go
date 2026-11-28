@@ -5,9 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"time"
+
+	"github.com/spacingmind/smind/internal/gitsafe"
 )
 
 // Deadlines (ADR-0039 §4 hard rule 6).
@@ -44,20 +45,22 @@ func exitCode(err error) int {
 	return -1
 }
 
-// DefaultRunner is the hardened runner: core.fsmonitor forced off (an
-// agent-editable repo config git would execute), no credential prompts, no
-// optional locks, a C locale, a deadline (LocalTimeout unless ctx already has
-// one) that kills git, and the process waited out at most waitDelay after.
+// DefaultRunner is the hardened runner: the gitsafe hardening (core.fsmonitor
+// forced off, --no-ext-diff --no-textconv on the diff family, no
+// GIT_EXTERNAL_DIFF inherited, GIT_PAGER=cat) — an agent-editable repo config
+// git would otherwise execute — no credential prompts, no optional locks, a C
+// locale, a deadline (LocalTimeout unless ctx already has one) that kills git,
+// and the process waited out at most waitDelay after.
 func DefaultRunner(ctx context.Context, dir string, args ...string) (string, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, LocalTimeout)
 		defer cancel()
 	}
-	full := append([]string{"-c", "core.fsmonitor=false"}, args...)
+	full := gitsafe.Args(args...)
 	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C")
+	cmd.Env = append(gitsafe.Env(nil), "LC_ALL=C")
 	cmd.WaitDelay = waitDelay
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

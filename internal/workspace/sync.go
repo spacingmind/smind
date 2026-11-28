@@ -345,7 +345,7 @@ func shortRemoteRef(ref string) string {
 
 // unmergedFiles lists the paths git left unmerged, sorted and capped.
 func unmergedFiles(ctx context.Context, dir string) (files []string, truncated bool) {
-	out, _, err := execGit(ctx, dir, nil, "diff", "--name-only", "-z", "--diff-filter=U")
+	out, _, err := execGit(ctx, dir, nil, "diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--diff-filter=U")
 	if err != nil {
 		return nil, false
 	}

@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/gitsafe"
 )
 
 const (
@@ -62,8 +64,8 @@ func gitRuleInfo(cwd, cmd string) *GitRuleInfo {
 func stagedFiles(cwd string) ([]string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitStagedTimeout)
 	defer cancel()
-	c := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=false", "-C", cwd, "diff", "--cached", "--name-only")
-	c.Env = append(c.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	c := exec.CommandContext(ctx, "git", gitsafe.Args("-c", "core.fsmonitor=false", "-C", cwd, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--name-only")...)
+	c.Env = gitsafe.Env(nil)
 	var out bytes.Buffer
 	c.Stdout = &out
 	if err := c.Run(); err != nil {

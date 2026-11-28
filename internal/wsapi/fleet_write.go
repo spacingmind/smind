@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -13,6 +12,7 @@ import (
 	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/fleet/serve"
 	"github.com/spacingmind/smind/internal/fleet/wire"
+	"github.com/spacingmind/smind/internal/gitsafe"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -107,10 +107,10 @@ func safeRefName(ref string) bool {
 func fetchOriginRef(path, ref string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), fleetFetchTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=false", "-C", path,
+	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("-c", "core.fsmonitor=false", "-C", path,
 		"fetch", "--no-tags", "origin",
-		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", ref, ref))
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", ref, ref))...)
+	cmd.Env = gitsafe.Env(nil)
 	if err := cmd.Run(); err != nil {
 		return serve.NewRefusal(wire.CodeBranchNotFound, "branch not found on origin")
 	}

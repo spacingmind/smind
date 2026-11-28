@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gitsafe"
 )
 
 // remoteFetchTimeout bounds the best-effort `git fetch <remote> <branch>`
@@ -89,8 +90,9 @@ func validateRefName(dir, ref string, isBranch bool) error {
 // guarantees the user-supplied ref can only ever be parsed as a rev, never
 // as an option.
 func gitRefCommitExists(dir, ref string) bool {
-	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	cmd := exec.Command("git", gitsafe.Args("rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")...)
 	cmd.Dir = dir
+	cmd.Env = gitsafe.Env(nil)
 	return cmd.Run() == nil
 }
 
@@ -112,8 +114,9 @@ func splitRemoteBranch(ref string) (remote, branch string, ok bool) {
 
 // remoteConfigured reports whether remote is a configured git remote.
 func remoteConfigured(dir, remote string) bool {
-	cmd := exec.Command("git", "remote", "get-url", "--", remote)
+	cmd := exec.Command("git", gitsafe.Args("remote", "get-url", "--", remote)...)
 	cmd.Dir = dir
+	cmd.Env = gitsafe.Env(nil)
 	return cmd.Run() == nil
 }
 
@@ -126,8 +129,9 @@ func fetchRemoteBranchBestEffort(dir, remote, branch string) {
 	ctx, cancel := context.WithTimeout(context.Background(), remoteFetchTimeout)
 	defer cancel()
 	refspec := fmt.Sprintf("+refs/heads/%s:refs/remotes/%s/%s", branch, remote, branch)
-	cmd := exec.CommandContext(ctx, "git", netGitArgs(ctx, dir, remote, "fetch", remote, refspec)...)
+	cmd := exec.CommandContext(ctx, "git", gitsafe.Args(netGitArgs(ctx, dir, remote, "fetch", remote, refspec)...)...)
 	cmd.Dir = dir
+	cmd.Env = gitsafe.Env(nil)
 	_ = cmd.Run()
 }
 

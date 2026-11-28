@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/spacingmind/smind/internal/gitsafe"
 )
 
 // repoWorktreeLocks serializes git worktree mutations per repository.
@@ -137,22 +139,20 @@ func runGitOutputEnvCtx(ctx context.Context, dir string, env []string, args ...s
 // execGit runs git with the daemon's hardening and returns stdout and stderr
 // separately, so a caller that must not leak argv (the PR actions) can build
 // its error from stderr alone.
+//
+// The hardening itself is gitsafe's (internal/gitsafe): core.fsmonitor is
+// forced off (agent-editable repo config that git would execute as a
+// program), diff-family subcommands carry --no-ext-diff --no-textconv
+// (external diff and textconv are programs the repo's config can name), and
+// the environment drops GIT_EXTERNAL_DIFF and carries GIT_PAGER=cat,
+// GIT_TERMINAL_PROMPT=0 (a credential prompt must not hang the daemon) and
+// GIT_OPTIONAL_LOCKS=0 (read-only commands must not take index.lock under a
+// running agent). env != nil replaces the environment as before; gitsafe.Env
+// handles the nil case (the daemon's own environment).
 func execGit(ctx context.Context, dir string, env []string, args ...string) (stdout, stderr string, err error) {
-	// core.fsmonitor is agent-editable repo config that git would execute as
-	// a program; force it off for every daemon call. It must precede the
-	// subcommand. GIT_TERMINAL_PROMPT=0 keeps a credential prompt from
-	// hanging the daemon; GIT_OPTIONAL_LOCKS=0 stops read-only commands
-	// (status) from taking index.lock under a running agent.
-	full := append([]string{"-c", "core.fsmonitor=false"}, args...)
-	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd := exec.CommandContext(ctx, "git", gitsafe.Args(args...)...)
 	cmd.Dir = dir
-	// env != nil replaces the environment, so the hardening is appended to
-	// whichever base applies.
-	base := env
-	if base == nil {
-		base = os.Environ()
-	}
-	cmd.Env = append(append([]string(nil), base...), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	cmd.Env = gitsafe.Env(env)
 	// CommandContext kills only git itself; a grandchild (an fsmonitor hook,
 	// a credential helper) that outlives it keeps the stdout/stderr pipes
 	// open and Run would wait for it indefinitely. WaitDelay bounds that
@@ -265,7 +265,7 @@ func taskDiff(worktreePath, base string) (string, error) {
 	}
 	defer cleanup()
 
-	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-color", "--cached", base)
+	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", base)
 	if err != nil {
 		return "", fmt.Errorf("diff against base %s: %w", base, err)
 	}
@@ -287,7 +287,7 @@ func taskChangedFiles(worktreePath, base string) ([]TaskFile, error) {
 	}
 	defer cleanup()
 
-	out, err := runGitOutputEnv(worktreePath, env, "diff", "--name-status", "--cached", base)
+	out, err := runGitOutputEnv(worktreePath, env, "diff", "--no-ext-diff", "--no-textconv", "--name-status", "--cached", base)
 	if err != nil {
 		return nil, fmt.Errorf("diff names against base %s: %w", base, err)
 	}
@@ -334,7 +334,7 @@ func taskFileDiff(worktreePath, base, path string) (string, error) {
 	}
 	defer cleanup()
 
-	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-color", "--cached", base, "--", path)
+	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", base, "--", path)
 	if err != nil {
 		return "", fmt.Errorf("diff %q against base %s: %w", path, base, err)
 	}
@@ -387,7 +387,7 @@ func stagedPaths(worktreePath string) (map[string]bool, error) {
 // than letting git's "nothing to commit" stderr leak: that case is an
 // expected, caller-presentable condition, not a plumbing failure.
 func gitTaskCommit(worktreePath, message string) (CommitResult, error) {
-	names, err := runGitOutput(worktreePath, "diff", "--cached", "--name-only")
+	names, err := runGitOutput(worktreePath, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--name-only")
 	if err != nil {
 		return CommitResult{}, fmt.Errorf("read staged files: %w", err)
 	}
@@ -439,7 +439,7 @@ func taskDiffStat(worktreePath, base string) (files, insertions, deletions int, 
 	}
 	defer cleanup()
 
-	out, err := runGitOutputEnv(worktreePath, env, "diff", "--shortstat", "--cached", base)
+	out, err := runGitOutputEnv(worktreePath, env, "diff", "--no-ext-diff", "--no-textconv", "--shortstat", "--cached", base)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("diff shortstat against base %s: %w", base, err)
 	}
