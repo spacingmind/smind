@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spacingmind/smind/internal/gitsafe/gitsafetest"
 )
@@ -31,9 +32,31 @@ func assertNoDriversRan(t *testing.T, r *gitsafetest.Repo) {
 	}
 }
 
+// touchATxt bumps dir's a.txt mtime one second forward. The fixture's
+// unstaged a.txt change ("one" -> "two") is the same size as the committed
+// blob, and the whole fixture is built within one timestamp tick, so git's
+// stat-freshness check can very occasionally (about 1 run in 100) consider
+// the file unchanged and snapshotIndex's `git add -A` skip it, making the
+// diff empty -- a flake, not a hardening failure (no marker, identical
+// argv; bin.dat, whose size changes, is never missed). A mtime the
+// recorded stat can never match makes the change deterministic to detect
+// without touching its content or any git call.
+func touchATxt(t *testing.T, dir string) {
+	t.Helper()
+	p := filepath.Join(dir, "a.txt")
+	st, err := os.Stat(p)
+	if err != nil {
+		t.Fatalf("stat a.txt: %v", err)
+	}
+	if err := os.Chtimes(p, st.ModTime().Add(time.Second), st.ModTime().Add(time.Second)); err != nil {
+		t.Fatalf("bump a.txt mtime: %v", err)
+	}
+}
+
 func Test_taskdiff_does_not_run_textconv_or_external_diff(t *testing.T) {
 	r := gitsafetest.NewDriverRepo(t)
 	base := r.Git(t, "rev-parse", "HEAD")
+	touchATxt(t, r.Dir)
 
 	diff, err := taskDiff(r.Dir, base)
 	if err != nil {
@@ -53,6 +76,7 @@ func Test_taskdiff_does_not_run_textconv_or_external_diff(t *testing.T) {
 func Test_task_name_status_does_not_run_drivers(t *testing.T) {
 	r := gitsafetest.NewDriverRepo(t)
 	base := r.Git(t, "rev-parse", "HEAD")
+	touchATxt(t, r.Dir)
 
 	files, err := taskChangedFiles(r.Dir, base)
 	if err != nil {
@@ -71,6 +95,7 @@ func Test_task_name_status_does_not_run_drivers(t *testing.T) {
 func Test_task_file_diff_does_not_run_drivers(t *testing.T) {
 	r := gitsafetest.NewDriverRepo(t)
 	base := r.Git(t, "rev-parse", "HEAD")
+	touchATxt(t, r.Dir)
 
 	diff, err := taskFileDiff(r.Dir, base, "a.txt")
 	if err != nil {
@@ -84,6 +109,7 @@ func Test_task_file_diff_does_not_run_drivers(t *testing.T) {
 
 func Test_staged_names_do_not_run_drivers(t *testing.T) {
 	r := gitsafetest.NewDriverRepo(t)
+	touchATxt(t, r.Dir)            // the staging below must see the change
 	r.Git(t, "add", "--", "a.txt") // staging is setup; it may run fsmonitor
 	r.ClearMarkers()
 
@@ -111,6 +137,7 @@ func Test_staged_names_do_not_run_drivers(t *testing.T) {
 func Test_task_shortstat_does_not_run_drivers(t *testing.T) {
 	r := gitsafetest.NewDriverRepo(t)
 	base := r.Git(t, "rev-parse", "HEAD")
+	touchATxt(t, r.Dir)
 
 	files, insertions, _, err := taskDiffStat(r.Dir, base)
 	if err != nil {
@@ -124,6 +151,7 @@ func Test_task_shortstat_does_not_run_drivers(t *testing.T) {
 
 func Test_archive_numstat_does_not_run_drivers(t *testing.T) {
 	r := gitsafetest.NewDriverRepo(t)
+	touchATxt(t, r.Dir)
 
 	files, _, _, err := uncommittedStat(r.Dir)
 	if err != nil {
@@ -150,6 +178,7 @@ func Test_pr_shortstat_does_not_run_drivers(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wt, "a.txt"), []byte("three\n"), 0o644); err != nil {
 		t.Fatalf("write a.txt: %v", err)
 	}
+	touchATxt(t, r.Dir)
 	runGitT(t, wt, "add", "--", "a.txt")
 	runGitT(t, wt, "commit", "-m", "change a.txt")
 	r.ClearMarkers()
@@ -177,6 +206,7 @@ func Test_sync_conflict_names_do_not_run_drivers(t *testing.T) {
 func Test_workspace_status_does_not_run_fsmonitor(t *testing.T) {
 	r := gitsafetest.NewDriverRepo(t)
 	base := r.Git(t, "rev-parse", "HEAD")
+	touchATxt(t, r.Dir)
 
 	out, err := runGitOutput(r.Dir, "status", "--porcelain")
 	if err != nil {
