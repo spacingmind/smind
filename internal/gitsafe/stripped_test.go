@@ -484,3 +484,15 @@ func Test_stripped_key_with_equals_in_the_subsection_fails_closed(t *testing.T) 
 	got, err := StrippedArgs(context.Background(), "/base/repo", "status")
 	assertArgv(t, got, err, wantArgv("status"))
 }
+
+// Test_stripped_scans_describe: describe --dirty runs the clean filter, so
+// describe is scanned like any other subcommand.
+func Test_stripped_scans_describe(t *testing.T) {
+	calls := stubScan(t, nil)
+	if _, err := StrippedArgs(context.Background(), "", "describe", "--tags"); err != nil {
+		t.Fatal(err)
+	}
+	if *calls != 1 {
+		t.Fatalf("describe made %d scans, want 1", *calls)
+	}
+}

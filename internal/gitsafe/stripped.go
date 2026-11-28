@@ -32,7 +32,8 @@ import (
 // and so is remote as a plain member: remote update, remote add -f and
 // remote prune do network work that runs uploadpack, credential and ssh
 // programs, so only remote's read-only shapes qualify, which refOnlyCall
-// decides. tag is absent too: `tag -s` signs through gpg.program, which
+// decides. describe is absent: --dirty and --broken re-hash stat-dirty
+// files and run the clean filter. tag is absent too: `tag -s` signs through gpg.program, which
 // commit.gpgsign=false does not stop.
 var refOnlySubcommands = map[string]bool{
 	"rev-parse":        true,
@@ -45,7 +46,6 @@ var refOnlySubcommands = map[string]bool{
 	"show-ref":         true,
 	"ls-tree":          true,
 	"name-rev":         true,
-	"describe":         true,
 	"check-ref-format": true,
 }
 
@@ -255,7 +255,7 @@ func defaultScan(ctx context.Context, dir string) ([]byte, error) {
 	sctx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(sctx, "git", Args(args...)...)
-	cmd.Env = Env(nil)
+	cmd.Env = scanEnv()
 	if dir != "" && !filepath.IsAbs(dir) {
 		// A relative -C would be resolved by git against a directory it
 		// was itself told to change to; cmd.Dir resolves it once, against
@@ -509,4 +509,18 @@ func lfsCommandLine(key string) string {
 		return "git-lfs filter-process"
 	}
 	return ""
+}
+
+// scanEnv is the baseline environment minus GIT_DIR, GIT_WORK_TREE and
+// GIT_INDEX_FILE, so the scan always reads the repository of dir and never
+// one the daemon's own environment points at.
+func scanEnv() []string {
+	var out []string
+	for _, e := range Env(nil) {
+		if strings.HasPrefix(e, "GIT_DIR=") || strings.HasPrefix(e, "GIT_WORK_TREE=") || strings.HasPrefix(e, "GIT_INDEX_FILE=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }

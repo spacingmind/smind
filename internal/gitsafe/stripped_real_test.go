@@ -394,3 +394,30 @@ func Test_real_git_daemon_mode_never_runs_an_ext_transport_program(t *testing.T)
 		t.Log("human mode did not run the ext program on this platform's git; the lab is not armed")
 	}
 }
+
+// Test_stripped_scan_ignores_inherited_git_dir: an inherited GIT_DIR must
+// not redirect the scan away from the repository of dir.
+func Test_stripped_scan_ignores_inherited_git_dir(t *testing.T) {
+	dirA, gitA, _ := labRepo(t)
+	gitA("config", "filter.keya.clean", "a")
+	dirB, gitB, _ := labRepo(t)
+	gitB("config", "filter.keyb.clean", "b")
+	t.Setenv("GIT_DIR", filepath.Join(dirB, ".git"))
+
+	out, err := defaultScan(context.Background(), dirA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := parseConfigRecords(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hasA, hasB bool
+	for _, e := range entries {
+		hasA = hasA || e.key == "filter.keya.clean"
+		hasB = hasB || e.key == "filter.keyb.clean"
+	}
+	if !hasA || hasB {
+		t.Fatalf("scan read the wrong repository: keya=%v keyb=%v", hasA, hasB)
+	}
+}
