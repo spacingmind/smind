@@ -91,7 +91,7 @@ func Test_grpcweb_websocket_from_the_default_origin_works(t *testing.T) {
 func Test_grpcweb_from_a_disallowed_origin_is_403_for_unary_preflight_and_websocket(t *testing.T) {
 	relay, stop := startGRPCWebTestRelay(t)
 	defer stop()
-	for _, origin := range []string{"https://unlisted.example", "null", "https://app.spacingmind.com.evil.org", "https://evilapp.spacingmind.com", DefaultWebOrigin + ":8443", "http://app.spacingmind.com", DefaultWebOrigin + "/path", "https://u@app.spacingmind.com"} {
+	for _, origin := range []string{"https://unlisted.example", "null", "https://app.spacingmind.com.evil.org", "https://evilapp.spacingmind.com", "https://app.spacingmind.com:8443", "http://app.spacingmind.com", DefaultWebOrigin + "/path", "https://u@app.spacingmind.com"} {
 		t.Run(origin, func(t *testing.T) {
 			for _, method := range []string{http.MethodPost, http.MethodOptions} {
 				status, headers, data := originRequest(t, relay, method, &origin)
