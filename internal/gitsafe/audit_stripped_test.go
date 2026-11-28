@@ -7,11 +7,18 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
 	"unicode"
 )
+
+// gitSpawnWithArgs matches the spawn sites that run a real git command: the
+// "git" is followed by arguments. A bare exec.Command(ctx, "git") with none
+// is the fail-closed branch next to a StrippedArgs error (a command that
+// can only fail), not a call that needs its own StrippedArgs.
+var gitSpawnWithArgs = regexp.MustCompile(`exec\.Command(Context)?\([^"\n]*"git"\s*,`)
 
 // auditStripped is the stripped-mode audit (the plan's D5) over a
 // repository root (a directory holding internal/ and cmd/) and the text of
@@ -145,17 +152,25 @@ func auditStripped(root, plan string) (unclassified, notStripped, humanUnnamed [
 			unclassified = append(unclassified, f.rel)
 			continue
 		}
-		daemonOrMixed, allHuman := false, true
+		daemonOrMixed, allHuman, anyMixed := false, true, false
 		for _, r := range naming {
 			if r.class == "daemon" || r.class == "mixed" {
 				daemonOrMixed = true
+			}
+			if r.class == "mixed" {
+				anyMixed = true
 			}
 			if r.class != "human" {
 				allHuman = false
 			}
 		}
+		stripped := strings.Count(f.src, "gitsafe.StrippedArgs(")
 		switch {
-		case daemonOrMixed && !strings.Contains(f.src, "gitsafe.StrippedArgs("):
+		case daemonOrMixed && !anyMixed && stripped < len(gitSpawnWithArgs.FindAllString(f.src, -1)):
+			// A daemon file: every spawn site carries its own StrippedArgs
+			// call, so reverting one site of a multi-site file fails.
+			notStripped = append(notStripped, f.rel)
+		case daemonOrMixed && stripped == 0:
 			notStripped = append(notStripped, f.rel)
 		case allHuman && !strings.Contains(f.src, "gitsafe.Args("):
 			notStripped = append(notStripped, f.rel)
@@ -294,6 +309,7 @@ func Test_audit_flags_a_new_unclassified_spawn(t *testing.T) {
 	}
 	write("internal/demo/spawn.go", "package demo\n\nimport \"os/exec\"\n\nfunc status() bool {\n\treturn exec.Command(\"git\", \"status\").Run() == nil\n}\n")
 	write("internal/demo/human.go", "package demo\n\nimport (\n\t\"context\"\n\n\t\"github.com/spacingmind/smind/internal/workspace\"\n)\n\nfunc rogue(ctx context.Context) {\n\t_ = workspace.WithHumanInitiated(ctx)\n}\n")
+	write("internal/demo/two.go", "package demo\n\nimport \"os/exec\"\n\nfunc a() {\n\targs, _ := gitsafe.StrippedArgs(nil, \"\", \"status\")\n\t_ = exec.Command(\"git\", args...).Run()\n}\n\nfunc b() {\n\t_ = exec.Command(\"git\", \"log\").Run()\n}\n")
 	if err := os.MkdirAll(filepath.Join(root, "cmd"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -310,6 +326,9 @@ func Test_audit_flags_a_new_unclassified_spawn(t *testing.T) {
 		"| `demo/spawn.go`: `status` | `status` | **daemon** | why |\n"
 	// A plan that names the human-variant function in backticks.
 	planRogue := planOther + "\nThe named human function is `rogue`.\n"
+
+	// A daemon row naming a two-spawn file where only one site is stripped.
+	planTwo := planDaemon + "| `demo/two.go`: `a`, `b` | `status` | **daemon** | why |\n"
 
 	has := func(list []string, want string) bool {
 		for _, s := range list {
@@ -331,6 +350,11 @@ func Test_audit_flags_a_new_unclassified_spawn(t *testing.T) {
 	_, notStripped, _ = auditStripped(root, planDaemon)
 	if !has(notStripped, "internal/demo/spawn.go") {
 		t.Errorf("notStripped = %q, want it to flag internal/demo/spawn.go (a daemon row, no gitsafe.StrippedArgs in the source)", notStripped)
+	}
+
+	_, notStripped, _ = auditStripped(root, planTwo)
+	if !has(notStripped, "internal/demo/two.go") {
+		t.Errorf("notStripped = %q, want it to flag internal/demo/two.go (two spawns, one StrippedArgs)", notStripped)
 	}
 
 	_, _, humanUnnamed = auditStripped(root, planOther)
