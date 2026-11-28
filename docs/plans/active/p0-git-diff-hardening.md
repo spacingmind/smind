@@ -103,8 +103,10 @@ GLM peers from step-by-step briefs, one commit per step, at most two at a time; 
 
 ## Progress
 
-- Spec and contract first.
+- Spec and contract first (audit of every spawn site done by the Lead before any code). Code by GLM peers from step briefs, one commit per step: G1 (`internal/gitsafe`, `gitsafetest`), G2 (`internal/workspace`), G3 (steward, validation, tripwire, gitstate, arm, taskrunner, wsapi), G4 (the two source-audit tests). Each reviewed and cherry-picked by the Lead.
+- Found while building: git runs `diff.external` and textconv only for PATCH output; the stat/name sites are inert (documented above); the real exposure is `taskDiff` and `taskFileDiff`. `validation` and the probe `tripwire` ran `git status` with no fsmonitor override at all (an agent-edited probe sandbox is exactly the repository the tripwire reads).
 
 ## Validation
 
-- Pending.
+- Mutations M3, M5, M6 and the gitstate / tripwire bypasses were run by the Lead on committed code; each fails its named test (see the PR body for the exact output).
+- `sh scripts/verify.sh` PASS; the validator's verdict and the two reviewers' findings are in the PR body.
