@@ -27,10 +27,14 @@ var globalOptionWithValue = map[string]bool{
 	"--namespace": true,
 }
 
-// diffSubcommand lists the subcommands that render a diff and therefore
-// would run a configured diff driver: an external diff program
+// diffSubcommand lists the subcommands the daemon uses that render a diff and
+// therefore would run a configured diff driver: an external diff program
 // (diff.external) or a textconv filter (diff.<driver>.textconv named from
-// .gitattributes).
+// .gitattributes). `blame`, `reflog -p`, `diff-tree`, `diff-index`,
+// `format-patch` and `stash show` can render patches too (blame and reflog run
+// textconv) but take no --no-ext-diff / --no-textconv in the same shape and the
+// daemon calls none of them; a new use must be hardened where it is added (the
+// call-site audit in audit_test.go names every spawn of git).
 var diffSubcommand = map[string]bool{
 	"diff":        true,
 	"show":        true,
@@ -72,7 +76,9 @@ var droppedEnv = []string{
 // subcommand and every other argument is left exactly as given, in order.
 func Args(args ...string) []string {
 	out := make([]string, 0, len(args)+4)
-	if !hasPair(args, "-c", "core.fsmonitor=false") {
+	// Only the arguments before a bare "--" are options: a pathspec that happens to read
+	// `-c core.fsmonitor=false` must not suppress the prefix (git reads it as a path).
+	if !hasPair(beforePathspecs(args), "-c", "core.fsmonitor=false") {
 		out = append(out, "-c", "core.fsmonitor=false")
 	}
 	sub := subcommandIndex(args)

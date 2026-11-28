@@ -64,7 +64,7 @@ func gitRuleInfo(cwd, cmd string) *GitRuleInfo {
 func stagedFiles(cwd string) ([]string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitStagedTimeout)
 	defer cancel()
-	c := exec.CommandContext(ctx, "git", gitsafe.Args("-c", "core.fsmonitor=false", "-C", cwd, "diff", "--cached", "--name-only")...)
+	c := exec.CommandContext(ctx, "git", gitsafe.Args("-c", "core.fsmonitor=false", "-C", cwd, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--name-only")...)
 	c.Env = gitsafe.Env(nil)
 	var out bytes.Buffer
 	c.Stdout = &out

@@ -163,6 +163,11 @@ func Test_gitsafe_args_leaves_pathspecs_after_double_dash(t *testing.T) {
 			want: []string{"-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--cached", "--", "--no-textconv", "a.txt"},
 		},
 		{
+			name: "a pathspec pair reading -c core.fsmonitor=false does not suppress the prefix",
+			in:   []string{"status", "--", "-c", "core.fsmonitor=false"},
+			want: []string{"-c", "core.fsmonitor=false", "status", "--", "-c", "core.fsmonitor=false"},
+		},
+		{
 			name: "a real flag before the -- counts as present",
 			in:   []string{"diff", "--no-textconv", "--", "a.txt"},
 			want: []string{"-c", "core.fsmonitor=false", "diff", "--no-ext-diff", "--no-textconv", "--", "a.txt"},

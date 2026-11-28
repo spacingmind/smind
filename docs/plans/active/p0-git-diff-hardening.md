@@ -55,11 +55,13 @@ Verdict: **safe** (cannot run a configured program, or only a read of refs), **f
 | `workspace/git.go:86` checkpoint commit, `:404` user commit | `git commit` | **hooks** reachable: **out of scope (D4: hooks)**; the checkpoint is automatic, the user commit is a user action |
 | `workspace/git.go:45, :54`, `task.go`, `task_ref.go:167,171`, `archive_branch.go:605,607` | `git worktree add` (post-checkout hook, smudge) | **out of scope (D4)** |
 | `workspace/pr.go:304` | `git cherry-pick` (merge driver) | **out of scope (D4: merge driver)**; it runs in a throwaway worktree the daemon made |
+| `workspace/sync.go:328` | `git merge` / `git rebase` (the Sync action: merge driver, post-merge / post-rebase hooks) | **out of scope (D4: merge driver, hooks)**; user-initiated; the fixed classes are off (it goes through `execGit`) |
+| `workspace/pr.go:294`, `:318-321` (`execGitWorktreeAdd`) | `git worktree add -b` for the PR preview (post-checkout hook, smudge) | **out of scope (D4)**; a throwaway worktree the daemon made; through `execGit` |
 | `workspace/pr.go:206, :263`, `sync.go:290`, `archive_branch.go:344`, `task_ref.go:129,138`, `wsapi/fleet_write.go:110` | `git fetch` / `git push` (credential helper, ssh command, pre-push hook) | **out of scope (D4: credentials)**: that is how the user's own login works |
 | `workspace/git.go:193`, `archive_branch.go:405,417,441`, `branches.go`, `default_base.go`, `sync.go:96,159,191,204,367,396,405`, `pr.go:377,391,404`, `task.go:182,191,230,296`, `git.go:353` `restore --staged` | `rev-parse`, `rev-list`, `for-each-ref`, `symbolic-ref`, `merge-base`, `config --get`, `remote`, `worktree list/remove`, `branch -D`, `ls-files` | **safe** (refs and config reads; `ls-files` honours fsmonitor, off in `execGit`) |
 | `steward/git.go` (`diff --numstat`, `diff -U0`, `log`, `rev-list`, `merge-base`) and `steward/standards_git.go` (`diff`, `ls-tree`, `cat-file`) | read-only | **safe / fixed**: the two diffs already carry the flags; `gitCmd` now carries the shared hardening |
 | `gitstate/runner.go` (`DefaultRunner`) | status / refs / config for the UI | fsmonitor off; **fixed**: environment scrubbed by `gitsafe.Env`; filters: **out of scope (D4)** |
-| `taskrunner/gitrules_detail.go:65` | `git diff --cached --name-only` | **fixed** (flags spelled) |
+| `taskrunner/gitrules_detail.go:65` | `git diff --cached --name-only` | **fixed** (flags spelled, review round 1) |
 | `validation/digest.go:33,155` `rev-parse`; `:121` `merge-base --is-ancestor` | refs | **safe** |
 | `wsapi/steward_collect.go:157`, `wsapi/steward_collect_twoaxis.go:81,100` | `rev-parse`, `ls-tree`, `grep -q` (reads a commit's blobs, no textconv) | **safe** |
 | `wsapi/fleet_read.go:99`, `wsapi/forge_auth.go:252` | `remote get-url` | **safe** |
@@ -76,7 +78,7 @@ Verdict: **safe** (cannot run a configured program, or only a read of refs), **f
 - AC3 For each of the eight `git diff` call sites listed as **fixed**, in a real repository whose `.gitattributes` names a textconv driver and whose config sets `diff.external`, the call produces the same diff output as in a plain repository and creates **no marker file** (the driver and the external diff did not run).
 - AC4 `status` (fsmonitor): the `validation` snapshot and the `sandbox` tripwire do not run a `core.fsmonitor` program (no marker).
 - AC5 Every choke point listed in D2 goes through `gitsafe` (a source-level test fails when a listed file builds a git command without it).
-- AC6 The audit table above covers every non-test call site (a test greps for `exec.Command*("git"` and the helper names and fails when a file is not named in the plan).
+- AC6 The audit table above covers every non-test call site (the test checks at FILE granularity: a spawn added to an already-listed file needs its row by review; the table, not the test, is the audit artefact) (a test greps for `exec.Command*("git"` and the helper names and fails when a file is not named in the plan).
 - AC7 `task test`, `task lint`, `go test ./internal/hygiene/`, `sh scripts/verify.sh`.
 
 ## Test scenarios (named)
@@ -100,6 +102,11 @@ Verdict: **safe** (cannot run a configured program, or only a read of refs), **f
 ## Staffing
 
 GLM peers from step-by-step briefs, one commit per step, at most two at a time; two **fresh-context verifier peers** (not the authors) review the exact head before this is reported; the validator judges the head against the contract.
+
+## Review round 1 (two fresh GLM reviewers on `854fc0748`)
+
+- Reviewer 1 (attack): no way to make the daemon run a textconv / external diff / fsmonitor marker through the fixed paths (44 argument shapes fuzzed; `.git/info/attributes`, `extensions.worktreeConfig`, `include.path`, `GIT_CONFIG_COUNT`, `GIT_EXTERNAL_DIFF`, `GIT_DIFF_OPTS`, pager, aliases all blocked or inert). Findings, all fixed in the next commit: P2 `taskrunner/gitrules_detail.go` claimed spelled flags but relied on `gitsafe.Args` alone (now spelled); P3 `Args` looked for `-c core.fsmonitor=false` past a bare `--`, so a pathspec pair suppressed the prefix (now only before `--`, with a test); P3 `blame` / `reflog -p` run textconv and are not in the diff family (the daemon calls neither; stated in the code comment); P3 `whatchanged` is refused by current git (harmless).
+- Reviewer 2 (regressions and audit): no regression (argument order, env, error text, Windows build + vet all clean; all six package groups green). Two audit rows were missing (`sync.go:328` merge/rebase, `pr.go:294` worktree add; both out of scope D4): added. P3: the audit test is file-granular: documented in AC6.
 
 ## Progress
 
