@@ -132,6 +132,7 @@ tasks:
       - bun install
       - bun run --filter '@smind/ui' test
       - bun run --filter '@smind/relay-client' test
+      - bun run --filter '@smind/relay-web' test
 
   lint:
     desc: Vet + gofmt check + web UI typecheck (tsc -b, the same strict check `build:web` runs, tests included)
@@ -141,7 +142,7 @@ tasks:
       # vitest does not typecheck, and tsc -b is what rejects unused imports
       # (TS6133) in tests; without this step `task lint` is green while
       # `task build` breaks.
-      - cd web && bun install --frozen-lockfile && bun run --filter '@smind/ui' typecheck && bun run --filter '@smind/relay-client' typecheck
+      - cd web && bun install --frozen-lockfile && bun run --filter '@smind/ui' typecheck && bun run --filter '@smind/relay-client' typecheck && bun run --filter '@smind/relay-web' typecheck
       - |
         if command -v shellcheck >/dev/null 2>&1; then
           shellcheck scripts/macos-sign/lib.sh scripts/macos-sign/sign-notarize.sh scripts/macos-sign/verify.sh scripts/macos-sign/check-release.sh scripts/install.sh scripts/install_test.sh scripts/service_smoke.sh scripts/task-setup.sh scripts/task_setup_test.sh scripts/desktop-audit-build.sh scripts/desktop-audit-build_test.sh scripts/desktop-audit-smoke.sh scripts/desktop-audit-smoke_test.sh scripts/verify-classify.sh scripts/verify-classify_test.sh scripts/verify.sh scripts/verify_test.sh

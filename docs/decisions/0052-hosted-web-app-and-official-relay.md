@@ -2,7 +2,15 @@
 
 ## Status
 
-**Proposed — 2026-11-01. A DRAFT FOR THE HUMAN. No code, nothing built, nothing decided.** *Update 2026-11-01 (Human): this ADR and the hosted relay are parked until the mobile app is close to publishing (about 2 months out); self-hosting with Cloudflare Tunnel is documented meanwhile (ADR-0031 decision 12, `public-docs/mobile-and-relay.md`).* This document lays out the options, what each
+**Accepted for Phase 1 — 2026-11-28, by the Human** (decisions H1, H2, H3, H5, H6, H7 below; H4, H10 and H14 stay open with a recommendation each; H8, H9, H11-H13 are not Phase 1). Originally Proposed 2026-11-01 as a draft; the hosted relay stays parked (*Update 2026-11-01: this ADR and the hosted relay are parked until the mobile app is close to publishing; self-hosting with Cloudflare Tunnel is documented meanwhile (ADR-0031 decision 12, `public-docs/mobile-and-relay.md`)*), and Phase 1 builds against the Human's **self-hosted** relay. The spec and the pull-request split are `docs/plans/active/web-relay-client.md`. [ADR-0051](0051-web-demo-mode-and-app-spacingmind-com.md) is **superseded** by this ADR (the demo is dropped).
+
+**Decided (Phase 1):** H1 yes, a hosted web app for real daemons. H2 Option A: browser to relay, E2EE v2 in the browser, no direct mode. H3 built against the self-hosted relay first (the one mobile uses through a Cloudflare Tunnel); the relay URL comes from pairing (a link or QR), as on mobile; `relay.spacingmind.com` stays parked. H5 a web device gets the same capabilities as a paired mobile device (no narrower tier). H6 the device key is a WebCrypto non-extractable key in IndexedDB; if the browser evicts it the person re-pairs. H7 the demo is dropped entirely; `app.spacingmind.com` becomes the real app.
+
+**Still open for the Human, with a recommendation:** H4 minimum trust measures: immutable versioned builds, a published bundle hash per release, and a one-line disclosure at pairing. H10 relay `Origin` policy: allowlist `app.spacingmind.com` plus operator-configured origins for requests that carry an `Origin` (non-browser clients unchanged). H14 analytics: none.
+
+**What was built in the second pull request** (the browser relay client, `web/packages/relay-web`): the device identity key is generated `extractable: false` through WebCrypto (Ed25519) and stored as a `CryptoKeyPair` in IndexedDB; a browser without WebCrypto Ed25519 fails with a typed error and there is no weaker fallback; an evicted key is reported as "re-pair needed" and a new identity is never created silently; the E2EE v2 channel, admission and reconnect/resume are the shared `@smind/relay-client` code (the same vectors as Go). Non-extractability protects the identity key at rest and against exfiltration; it does not protect the session keys, which live in JavaScript memory while a page is open, and it does not stop hostile script on the same origin from *using* the key: that is the hosted-JavaScript trust problem below, answered by H4, not by cryptography.
+
+This document lays out the optionsThis document lays out the options, what each
 costs and what each puts at risk, and ends with the decisions only the Human can make ([H1–H14](#human-decisions)). Nothing here is a recommendation
 to merge anything; a "Lead's lean" is marked as one and is not a decision.
 
