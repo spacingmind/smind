@@ -53,3 +53,36 @@ describe("switch", () => {
     expect(disabledChange).not.toHaveBeenCalled();
   });
 });
+
+describe("Switch on Astryx", () => {
+  it("switch_toggles_and_keeps_data_state", () => {
+    const onCheckedChange = vi.fn();
+    const { container } = render(
+      <Switch aria-label="Flag" className="my-extra" onCheckedChange={onCheckedChange} />,
+    );
+    const el = screen.getByRole("switch", { name: "Flag" });
+    expect(el).toHaveAttribute("aria-checked", "false");
+    expect(el).toHaveAttribute("data-state", "unchecked");
+    expect(container.querySelector('[data-slot="switch"]')).toHaveAttribute("data-state", "unchecked");
+    expect(container.querySelector(".my-extra")).not.toBeNull();
+
+    fireEvent.click(el);
+    expect(onCheckedChange).toHaveBeenLastCalledWith(true);
+    expect(screen.getByRole("switch", { name: "Flag" })).toHaveAttribute("data-state", "checked");
+    expect(screen.getByRole("switch", { name: "Flag" })).toHaveAttribute("aria-checked", "true");
+    expect(container.querySelector('[data-slot="switch"]')).toHaveAttribute("data-state", "checked");
+
+    fireEvent.click(screen.getByRole("switch", { name: "Flag" }));
+    expect(onCheckedChange).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("switch", { name: "Flag" })).toHaveAttribute("data-state", "unchecked");
+  });
+
+  it("disabled switch does not toggle", () => {
+    const onCheckedChange = vi.fn();
+    render(<Switch aria-label="Off" disabled onCheckedChange={onCheckedChange} />);
+    const el = screen.getByRole("switch", { name: "Off" });
+    fireEvent.click(el);
+    expect(onCheckedChange).not.toHaveBeenCalled();
+    expect(el).toHaveAttribute("aria-checked", "false");
+  });
+});
