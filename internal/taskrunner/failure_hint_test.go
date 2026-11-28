@@ -17,6 +17,9 @@ func TestFailureHint(t *testing.T) {
 		code string
 	}{
 		{"usageLimitExceeded", &codex.TurnError{Info: "usageLimitExceeded"}, failure.CodeUsageLimit},
+		{"apiKeySpendLimitExceeded", &codex.TurnError{Info: "apiKeySpendLimitExceeded"}, failure.CodeUsageLimit},
+		{"projectSpendLimitExceeded", &codex.TurnError{Info: "projectSpendLimitExceeded"}, failure.CodeUsageLimit},
+		{"organizationSpendLimitExceeded", &codex.TurnError{Info: "organizationSpendLimitExceeded"}, failure.CodeUsageLimit},
 		{"unauthorized", &codex.TurnError{Info: "unauthorized"}, failure.CodeUnauthorized},
 		{"serverOverloaded", &codex.TurnError{Info: "serverOverloaded"}, failure.CodeOverloaded},
 		{"rateLimitExceeded", &codex.TurnError{Info: "rateLimitExceeded"}, failure.CodeRateLimit},
@@ -25,6 +28,9 @@ func TestFailureHint(t *testing.T) {
 		{"flexUnavailable", &codex.TurnError{Info: "flexUnavailable"}, failure.CodeOverloaded},
 		// Deliberately unmapped: retrying cannot fix them.
 		{"badRequest", &codex.TurnError{Info: "badRequest"}, ""},
+		{"inferenceHookDenied", &codex.TurnError{Info: "inferenceHookDenied"}, ""},
+		{"bioPolicy", &codex.TurnError{Info: "bioPolicy"}, ""},
+		{"someFutureError", &codex.TurnError{Info: "someFutureError"}, ""},
 		{"wrapped turn error", fmt.Errorf("x: %w", &codex.TurnError{Info: "serverOverloaded"}), failure.CodeOverloaded},
 		{"non-codex error", errors.New("boom"), ""},
 		{"nil", nil, ""},
@@ -37,6 +43,27 @@ func TestFailureHint(t *testing.T) {
 			}
 			if retryAfter != 0 {
 				t.Fatalf("retryAfter = %v, want 0", retryAfter)
+			}
+		})
+	}
+}
+
+// TestFailureHint_SpendLimitsClassifyAsPlanWindow: the three Codex spend-limit
+// names take the usageLimitExceeded path: a plan-window limit, so the wait /
+// fallback policy and the cooldown can act on them.
+func TestFailureHint_SpendLimitsClassifyAsPlanWindow(t *testing.T) {
+	for _, info := range []string{"apiKeySpendLimitExceeded", "projectSpendLimitExceeded", "organizationSpendLimitExceeded"} {
+		t.Run(info, func(t *testing.T) {
+			code, retryAfter := FailureHint(&codex.TurnError{Info: info})
+			if retryAfter != 0 {
+				t.Fatalf("retryAfter = %v, want 0", retryAfter)
+			}
+			r := failure.Classify(failure.Input{Code: code}, time.Date(2026, 11, 1, 3, 0, 0, 0, time.UTC))
+			if r.Kind != failure.KindPlanWindowExhausted {
+				t.Fatalf("Classify(%q) kind = %q, want %q", info, r.Kind, failure.KindPlanWindowExhausted)
+			}
+			if !failure.IsPlanLimit(r.Kind) {
+				t.Fatalf("IsPlanLimit(%q) = false, want true", r.Kind)
 			}
 		})
 	}
