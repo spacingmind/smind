@@ -72,7 +72,7 @@ export function OpenFolderStep({
         <Input
           id="add-project-path"
           data-testid="add-project-path-input"
-          placeholder="/path/to/repo"
+          placeholder="/path/to/folder"
           value={value.path}
           onChange={(e) => onChange({ ...value, path: e.target.value })}
           onBlur={() => void onCheck(value.path)}
