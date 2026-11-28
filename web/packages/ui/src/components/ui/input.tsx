@@ -31,8 +31,9 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
 const TEXT_DEFAULTS = "text-ui-base placeholder:text-foreground-subtlest"
 // Same field box as the native input (h-8, 1px border, rounded-lg, px-2.5, fill). Utilities
 // win over Astryx's cascade layers, so the look does not depend on its field styles.
+// shadow-none drops Astryx's 2px inset focus/hover ring: focus is the border + fill change.
 const CONTROL_CLASSES =
-  "h-8 rounded-lg border border-input-border bg-input px-2.5 hover:border-input-border-hover focus-within:border-input-border-focused focus-within:bg-input-focused"
+  "h-8 rounded-lg border border-input-border bg-input px-2.5 shadow-none hover:shadow-none focus-within:shadow-none hover:border-input-border-hover focus-within:border-input-border-focused focus-within:bg-input-focused"
 const TEXT_LEVEL = /^(font-|text-|tracking-|leading-|placeholder:)/
 function splitClassName(className: string | undefined): { text: string; box: string } {
   const text: string[] = []
