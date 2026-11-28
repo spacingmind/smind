@@ -4,7 +4,7 @@
 
 **Proposed. Not accepted. No code.** Written 2026-11-28 for the Human to decide.
 
-Builds on [ADR-0041](0041-in-smind-orchestration.md) (seat instructions for role seats) and the ACP provider work in `internal/acp`. Every claim about the protocol was read in the protocol repository's v1 and v2 docs (`docs/protocol/v2/migration.mdx`, `docs/protocol/v1/session-setup.mdx`); every claim about sMind was read in the code on `develop` at this date.
+Builds on [ADR-0041](0041-in-smind-orchestration.md) (seat instructions for role seats) and the ACP provider work in `internal/acp`. Every claim about the protocol was read in the protocol repository's v1 and v2 docs (the v2 migration guide and the v1 session-setup page); every claim about sMind was read in the code on `develop` at this date.
 
 ## Context
 
