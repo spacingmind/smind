@@ -38,7 +38,8 @@ Codex (profile 10) writes the relay server change; GLM (profile 8) the CLI flag,
 
 ## Progress
 
-- Spec written (this commit).
+- Spec and contract written first. Server (allowlist, parser, 403 middleware, logging) by Codex (profile 10); CLI flag/env/docs by GLM (profile 8); the API stub, the log-wording fix and the hygiene fix by the Lead.
+- Lead mutations M1-M4 on the committed code: each makes the named tests fail (M1 with 200/101 and CORS headers on a refused origin; M2 fails the 403 test; M3 fails the no-Origin tests incl. the pre-existing grpc-web tests; M4 fails the lookalike test).
 
 ## Validation
 
