@@ -27,6 +27,12 @@ import (
 // is skipped for exactly these. An unknown subcommand, no subcommand at all
 // and every subcommand not listed here is scanned, so a new subcommand
 // fails safe (it is scanned even though it might not need to be).
+//
+// cat-file is deliberately absent (--filters and --textconv run a filter),
+// and so is remote as a plain member: remote update, remote add -f and
+// remote prune do network work that runs uploadpack, credential and ssh
+// programs, so only remote's read-only shapes qualify, which refOnlyCall
+// decides.
 var refOnlySubcommands = map[string]bool{
 	"rev-parse":        true,
 	"rev-list":         true,
@@ -34,15 +40,42 @@ var refOnlySubcommands = map[string]bool{
 	"symbolic-ref":     true,
 	"merge-base":       true,
 	"config":           true,
-	"remote":           true,
 	"branch":           true,
 	"tag":              true,
 	"show-ref":         true,
 	"ls-tree":          true,
-	"cat-file":         true,
 	"name-rev":         true,
 	"describe":         true,
 	"check-ref-format": true,
+}
+
+// refOnlyCall reports whether the call args[sub] is the subcommand of only
+// reads refs or the configuration: a member of refOnlySubcommands, or the
+// subcommand remote with nothing but a read-only shape after it (up to any
+// "--"): no arguments, exactly -v or --verbose, get-url ..., or
+// show -n .... Every other remote call (update, add -f, prune, set-head)
+// is scanned, because it can run a program.
+func refOnlyCall(args []string, sub int) bool {
+	if sub < 0 || sub >= len(args) {
+		return false
+	}
+	if refOnlySubcommands[args[sub]] {
+		return true
+	}
+	if args[sub] != "remote" {
+		return false
+	}
+	rest := beforePathspecs(args[sub+1:])
+	if len(rest) == 0 {
+		return true
+	}
+	if len(rest) == 1 && (rest[0] == "-v" || rest[0] == "--verbose") {
+		return true
+	}
+	if rest[0] == "get-url" {
+		return true
+	}
+	return len(rest) >= 2 && rest[0] == "show" && rest[1] == "-n"
 }
 
 // scanConfig reads the configuration the overrides are derived from, as a
@@ -128,8 +161,7 @@ func insertExtras(base, extras []string) []string {
 // none of the neutralised classes) or the scan found no entries. An error
 // means the caller must not run git.
 func strippedOverrides(ctx context.Context, dir string, args []string) ([]string, error) {
-	sub := subcommandIndex(args)
-	if sub >= 0 && refOnlySubcommands[args[sub]] {
+	if refOnlyCall(args, subcommandIndex(args)) {
 		return nil, nil
 	}
 	out, err := scanConfig(ctx, dir)
@@ -155,15 +187,21 @@ func strippedOverrides(ctx context.Context, dir string, args []string) ([]string
 func defaultScan(ctx context.Context, dir string) ([]byte, error) {
 	args := []string{
 		"config", "--show-scope", "--show-origin", "--null", "--get-regexp",
-		`^(filter|merge|remote|credential|core)\.`,
+		`^(filter|merge|remote|credential|core|gpg)\.`,
 	}
-	if dir != "" {
+	if dir != "" && filepath.IsAbs(dir) {
 		args = append([]string{"-C", dir}, args...)
 	}
 	sctx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(sctx, "git", Args(args...)...)
 	cmd.Env = Env(nil)
+	if dir != "" && !filepath.IsAbs(dir) {
+		// A relative -C would be resolved by git against a directory it
+		// was itself told to change to; cmd.Dir resolves it once, against
+		// this process's working directory, which is what dir means.
+		cmd.Dir = dir
+	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
@@ -260,8 +298,9 @@ func hasDotGitComponent(path string) bool {
 // and the sort is stable, so the credential reset keeps its re-added
 // helpers in their original order.
 //
-// For every filter, merge driver, ssh command, askpass, git proxy and
-// pack-program key whose LAST entry is untrusted an override is emitted:
+// For every filter, merge driver, ssh command, askpass, git proxy,
+// signing-program and pack-program key whose LAST entry is untrusted an
+// override is emitted:
 // filters and merge drivers get the last trusted value of the same key
 // (so a local entry cannot hide the person's own "git lfs install"), the
 // rest get the neutral value that turns the program off. Credentials are
@@ -297,6 +336,12 @@ func overridePairs(entries []configEntry, dir string) []string {
 			pairs = append(pairs, pair{k, "ssh"})
 		case k == "core.askpass", k == "core.gitproxy":
 			pairs = append(pairs, pair{k, ""})
+		case k == "gpg.program", k == "gpg.openpgp.program":
+			pairs = append(pairs, pair{k, "gpg"})
+		case k == "gpg.x509.program":
+			pairs = append(pairs, pair{k, "gpgsm"})
+		case k == "gpg.ssh.program":
+			pairs = append(pairs, pair{k, "ssh-keygen"})
 		case isNamedKey(k, "remote.", ".uploadpack"):
 			pairs = append(pairs, pair{k, "git-upload-pack"})
 		case isNamedKey(k, "remote.", ".receivepack"):

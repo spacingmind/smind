@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -331,4 +332,75 @@ func Test_stripped_scans_an_unknown_subcommand(t *testing.T) {
 			t.Fatalf("scan ran %d times, want 1", *calls)
 		}
 	})
+}
+
+// Test_stripped_remote_update_is_scanned_but_remote_get_url_is_not covers
+// remote's read-only shapes: the bare listing, -v/--verbose, get-url and
+// show -n are not scanned; update, add -f and prune do network work and
+// are.
+func Test_stripped_remote_update_is_scanned_but_remote_get_url_is_not(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  []string
+		calls int
+	}{
+		{"bare remote", []string{"remote"}, 0},
+		{"remote -v", []string{"remote", "-v"}, 0},
+		{"remote --verbose", []string{"remote", "--verbose"}, 0},
+		{"remote get-url", []string{"remote", "get-url", "origin"}, 0},
+		{"remote show -n", []string{"remote", "show", "-n", "origin"}, 0},
+		{"remote update", []string{"remote", "update"}, 1},
+		{"remote add -f", []string{"remote", "add", "-f", "x", "y"}, 1},
+		{"remote prune", []string{"remote", "prune", "origin"}, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := stubScan(t, nil)
+			got, err := StrippedArgs(context.Background(), "", tt.args...)
+			assertArgv(t, got, err, wantArgv(tt.args...))
+			if *calls != tt.calls {
+				t.Fatalf("scan ran %d times, want %d", *calls, tt.calls)
+			}
+		})
+	}
+}
+
+// Test_stripped_cat_file_filters_is_scanned covers cat-file's removal from
+// the allow-list: even the shapes that only read an object are scanned,
+// because --filters and --textconv run a filter.
+func Test_stripped_cat_file_filters_is_scanned(t *testing.T) {
+	for _, args := range [][]string{
+		{"cat-file", "-e", "x"},
+		{"cat-file", "--filters", "x"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			calls := stubScan(t, nil)
+			got, err := StrippedArgs(context.Background(), "", args...)
+			assertArgv(t, got, err, wantArgv(args...))
+			if *calls != 1 {
+				t.Fatalf("scan ran %d times, want 1", *calls)
+			}
+		})
+	}
+}
+
+// Test_stripped_neutralises_a_local_gpg_program covers the signing
+// programs commit.gpgsign=false does not stop (an explicit commit -S or
+// tag -s): a local gpg.program and its variants fall back to the default
+// program names.
+func Test_stripped_neutralises_a_local_gpg_program(t *testing.T) {
+	stubScan(t, nil,
+		scanRec{"local", "file:.git/config", "gpg.program", "/m/gpg.sh"},
+		scanRec{"local", "file:.git/config", "gpg.openpgp.program", "/m/gpg-openpgp.sh"},
+		scanRec{"local", "file:.git/config", "gpg.x509.program", "/m/gpgsm.sh"},
+		scanRec{"local", "file:.git/config", "gpg.ssh.program", "/m/ssh-keygen.sh"},
+	)
+	got, err := StrippedArgs(context.Background(), "/base/repo", "status")
+	assertArgv(t, got, err, wantArgv(
+		"-c", "gpg.openpgp.program=gpg",
+		"-c", "gpg.program=gpg",
+		"-c", "gpg.ssh.program=ssh-keygen",
+		"-c", "gpg.x509.program=gpgsm",
+		"status",
+	))
 }
