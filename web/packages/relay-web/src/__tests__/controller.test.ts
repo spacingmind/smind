@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { base64UrlEncode } from '@smind/relay-client/src/base64';
+import { deviceIdFor } from '@smind/relay-client/src/deviceIdentity';
+import { RelayConnection } from '@smind/relay-client/src/RelayConnection';
 import { FakeRelay } from '@smind/relay-client/src/__tests__/fakeRelay';
 import { WsClient } from '../../../ui/src/lib/ws-client';
 import { RelayController, RelayStateError, type ControllerState } from '../controller';
@@ -155,5 +157,82 @@ describe('controller', () => {
     expect((await real.loadPairing())!.label).toBe(pairA.label);
     expect(c.state.kind).toBe('connected');
     expect(await new WsClient(await c.socket()).call('workspace.list')).toEqual([]);
+  });
+
+  function recorder() {
+    const opened: Array<{ conn: RelayConnection; closed: boolean; deviceId: string }> = [];
+    const open: typeof RelayConnection.open = (url, opts) => {
+      const conn = RelayConnection.open(url, opts);
+      const rec = { conn, closed: false, deviceId: opts.identity.deviceId };
+      const orig = conn.close.bind(conn);
+      conn.close = () => {
+        rec.closed = true;
+        orig();
+      };
+      opened.push(rec);
+      return conn;
+    };
+    return { opened, open };
+  }
+
+  it('concurrent_pair_calls_leave_one_live_connection', async () => {
+    const relay = new FakeRelay();
+    const real = await openRelayStore(new IDBFactory());
+    const { opened, open } = recorder();
+    const c = new RelayController({ store: real, net: relay, timings, open });
+    controllers.push(c);
+    await Promise.all([c.pair(offerFor(relay).url, 'first'), c.pair(offerFor(relay).url, 'second')]);
+    await c.whenConnected();
+    expect(opened.length).toBe(2);
+    expect(opened.filter((o) => !o.closed).length).toBe(1);
+    expect(opened[0].closed).toBe(true);
+    expect((await real.loadPairing())!.label).toBe('second');
+    expect(deviceIdFor((await real.loadIdentity())!.publicKey)).toBe(opened[1].deviceId);
+    expect(await new WsClient(await c.socket()).call('workspace.list')).toEqual([]);
+  });
+
+  it('resume_during_pair_waits_for_the_pair', async () => {
+    const relay = new FakeRelay();
+    const real = await openRelayStore(new IDBFactory());
+    const { opened, open } = recorder();
+    const c = new RelayController({ store: real, net: relay, timings, open });
+    controllers.push(c);
+    const seen: string[] = [];
+    c.onState((s) => seen.push(s.kind));
+    const p = c.pair(offerFor(relay).url, 'p');
+    const r = c.resume(); // starts in the same tick: must not see 'unpaired' nor NotPairedError
+    expect(c.state.kind).toBe('connecting');
+    await Promise.all([p, r]);
+    await c.whenConnected();
+    expect(seen).not.toContain('unpaired');
+    expect(opened.filter((o) => !o.closed).length).toBe(1);
+  });
+
+  it('a_throwing_state_listener_does_not_break_the_others', async () => {
+    const relay = new FakeRelay();
+    const real = await openRelayStore(new IDBFactory());
+    const c = new RelayController({ store: real, net: relay, timings });
+    controllers.push(c);
+    const seen: string[] = [];
+    c.onState(() => {
+      throw new Error('boom');
+    });
+    c.onState((s) => seen.push(s.kind));
+    await c.pair(offerFor(relay).url, 'l');
+    await c.whenConnected();
+    expect(seen).toContain('connected');
+    expect(await new WsClient(await c.socket()).call('workspace.list')).toEqual([]);
+  });
+
+  it('an_unexpected_connection_close_is_reported_as_failed', async () => {
+    const relay = new FakeRelay();
+    const real = await openRelayStore(new IDBFactory());
+    const { opened, open } = recorder();
+    const c = new RelayController({ store: real, net: relay, timings, open });
+    controllers.push(c);
+    await c.pair(offerFor(relay).url, 'l');
+    await c.whenConnected();
+    opened[0].conn.close(); // not the controller's doing
+    expect(c.state).toEqual({ kind: 'failed', message: 'the relay connection closed' });
   });
 });

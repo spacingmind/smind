@@ -87,7 +87,13 @@ export class RelayController {
   private conn: RelayConnection | null = null;
   private offConn: (() => void) | null = null;
   private current: ControllerState = { kind: 'unpaired' };
+  /** The last state that came from the connection or a finished operation (not the optimistic 'connecting'). */
+  private real: ControllerState = { kind: 'unpaired' };
   private listeners = new Set<(s: ControllerState) => void>();
+  /** Tail of the mutex: pair, resume, unpair and close each start after the previous settles. */
+  private chain: Promise<void> = Promise.resolve();
+  /** Operations queued or running; while any is, connection events are recorded but not announced. */
+  private busy = 0;
 
   constructor(opts: ControllerOptions) {
     this.o = opts;
@@ -102,33 +108,37 @@ export class RelayController {
     return () => this.listeners.delete(cb);
   }
 
-  async pair(offerUrl: string, label: string): Promise<void> {
+  pair(offerUrl: string, label: string): Promise<void> {
     const offer = parsePairingURL(offerUrl);
-    const { record, identity } = await newIdentityForPairing(this.o.subtle);
-    await this.o.store.savePaired(record, {
-      offerUrl,
-      daemonId: offer.daemonId,
-      relay: offer.relay,
-      relayFingerprint: offer.relayFingerprint,
-      label,
-      pairedAt: Date.now(),
-    });
-    // Only now is the previous connection replaced: any failure above leaves the
-    // old identity, the old pairing and the old connection as they were.
-    this.detach();
-    this.start(offerUrl, identity, label);
+    return this.run(async () => {
+      const { record, identity } = await newIdentityForPairing(this.o.subtle);
+      await this.o.store.savePaired(record, {
+        offerUrl,
+        daemonId: offer.daemonId,
+        relay: offer.relay,
+        relayFingerprint: offer.relayFingerprint,
+        label,
+        pairedAt: Date.now(),
+      });
+      // Only now is the previous connection replaced: any failure above leaves the
+      // old identity, the old pairing and the old connection as they were.
+      this.start(offerUrl, identity, label);
+    }, true);
   }
 
-  async resume(): Promise<void> {
-    this.detach();
-    try {
-      const { identity, pairing } = await loadIdentityForConnect(this.o.store, this.o.subtle);
-      this.start(pairing.offerUrl, identity, pairing.label);
-    } catch (e) {
-      if (e instanceof RepairRequiredError) this.set({ kind: 'needs-repair' });
-      else if (e instanceof NotPairedError) this.set({ kind: 'unpaired' });
-      throw e;
-    }
+  resume(): Promise<void> {
+    return this.run(async () => {
+      try {
+        const { identity, pairing } = await loadIdentityForConnect(this.o.store, this.o.subtle);
+        this.start(pairing.offerUrl, identity, pairing.label);
+      } catch (e) {
+        if (e instanceof RepairRequiredError || e instanceof NotPairedError) {
+          this.detach();
+          this.settle(e instanceof RepairRequiredError ? { kind: 'needs-repair' } : { kind: 'unpaired' });
+        }
+        throw e;
+      }
+    }, true);
   }
 
   whenConnected(): Promise<void> {
@@ -145,19 +155,51 @@ export class RelayController {
     this.conn?.submitPassword(password);
   }
 
-  async unpair(): Promise<void> {
-    this.detach();
-    await this.o.store.deletePairing();
-    await this.o.store.deleteIdentity();
-    this.set({ kind: 'unpaired' });
+  unpair(): Promise<void> {
+    return this.run(async () => {
+      this.detach();
+      await this.o.store.deletePairing();
+      await this.o.store.deleteIdentity();
+      this.settle({ kind: 'unpaired' });
+    }, false);
   }
 
-  close(): void {
-    this.detach();
-    this.set({ kind: 'unpaired' });
+  close(): Promise<void> {
+    return this.run(async () => {
+      this.detach();
+      this.settle({ kind: 'unpaired' });
+    }, false);
+  }
+
+  /** Queues fn behind every earlier operation; `optimistic` reports 'connecting' at once (nothing says connected while a connection is being replaced). */
+  private run(fn: () => Promise<void>, optimistic: boolean): Promise<void> {
+    this.busy++;
+    if (optimistic) this.set({ kind: 'connecting' });
+    const result = this.chain.then(fn);
+    this.chain = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result.then(
+      () => {
+        this.busy--;
+      },
+      (e: unknown) => {
+        this.busy--;
+        // A failed operation leaves the previous connection (if any) in place: report what it is doing.
+        if (this.busy === 0 && optimistic) this.set(this.real);
+        throw e;
+      },
+    );
+  }
+
+  private settle(s: ControllerState): void {
+    this.real = s;
+    this.set(s);
   }
 
   private start(offerUrl: string, identity: Parameters<typeof RelayConnection.open>[1]['identity'], label: string): void {
+    this.detach();
     const open = this.o.open ?? RelayConnection.open;
     const t = this.o.timings ?? {};
     const conn = open(offerUrl, {
@@ -171,9 +213,17 @@ export class RelayController {
     });
     this.conn = conn;
     this.offConn = conn.onState((s) => {
-      if (this.conn === conn && s.kind !== 'closed') this.set(mapState(s));
+      if (this.conn !== conn) return;
+      // detach() unhooks this listener before closing, so a 'closed' that arrives
+      // here is one the controller did not ask for.
+      const next: ControllerState =
+        s.kind === 'closed' ? { kind: 'failed', message: 'the relay connection closed' } : mapState(s);
+      this.real = next;
+      if (this.busy === 0) this.set(next);
     });
-    this.set(mapState(conn.state));
+    // A queued operation behind this one has already reported 'connecting'; it replaces this connection next.
+    this.real = mapState(conn.state);
+    if (this.busy <= 1) this.set(this.real);
   }
 
   private detach(): void {
@@ -185,7 +235,13 @@ export class RelayController {
 
   private set(s: ControllerState): void {
     this.current = s;
-    for (const cb of [...this.listeners]) cb(s);
+    for (const cb of [...this.listeners]) {
+      try {
+        cb(s);
+      } catch {
+        // a throwing listener must not affect the others or the connection
+      }
+    }
   }
 
   private waitConnected(): Promise<RelayConnection> {
