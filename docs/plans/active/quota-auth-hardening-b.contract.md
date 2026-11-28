@@ -56,7 +56,7 @@ mutations:
 frames: []
 commands:
   - { id: C1, run: "go build ./... && go vet ./internal/accounts/ ./internal/server/ ./internal/quota/", timeoutSec: 900 }
-  - { id: C2, run: "TMPDIR=/tmp/c5-tmp go test ./internal/accounts/ ./internal/server/ ./internal/quota/ ./internal/routing/ ./internal/wsapi/ -count=1", timeoutSec: 2400 }
+  - { id: C2, run: "TMPDIR=/tmp/c5-tmp go test ./internal/accounts/ ./internal/server/ ./internal/quota/ ./internal/routing/ ./internal/crash/ ./internal/hygiene/ -count=1", timeoutSec: 2400 }
 limits: { budgetUsd: 5, maxMinutes: 90 }
 ---
 
