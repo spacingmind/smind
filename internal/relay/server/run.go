@@ -41,6 +41,12 @@ type Config struct {
 	// DefaultGRPCWebListenAddr, so real deployments still get a stable,
 	// documented port.
 	GRPCWebListenAddr string
+
+	// AllowedOrigins are extra browser origins (already validated by
+	// ParseAllowedOrigins) accepted on the grpc-web listener besides
+	// DefaultWebOrigin; NoDefaultWebOrigin drops the default (spec D2).
+	AllowedOrigins     []string
+	NoDefaultWebOrigin bool
 	// DataDir holds the persisted self-signed TLS certificate and
 	// relay host enrollments (config.Dir()/relay by default from the CLI).
 	DataDir string
