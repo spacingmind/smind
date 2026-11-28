@@ -317,8 +317,9 @@ describe("Add project open a folder", () => {
 
     // The hint names the problem and the next step, before submit (AC5).
     const hint = screen.getByTestId("add-project-hint-not-git");
-    expect(hint).toHaveTextContent("Not a git repository");
-    expect(hint).toHaveTextContent("git init");
+    // It states today's limit neutrally: no "sMind works on git", no instruction to run git init.
+    expect(hint).toHaveTextContent("Folders without git are not supported yet.");
+    expect(hint.textContent).not.toMatch(/git init|works on git|must be/i);
     // A known non-repo never reaches the daemon.
     expect(screen.getByTestId("add-project-submit")).toBeDisabled();
 
@@ -436,8 +437,8 @@ describe("Add project open a folder", () => {
     expect(screen.getByTestId("add-project-done")).toHaveTextContent("New2 is ready.");
     expect(screen.queryByTestId("add-project-cancel")).toBeNull();
     expect(screen.queryByTestId("add-project-submit")).toBeNull();
-    // The header sentence no longer applies once the project is added: it stays for screen readers only.
-    expect(screen.getByText("This folder must be a git repository.")).toHaveClass("sr-only");
+    // The dialog carries no sentence about git at all, in the done state either.
+    expect(screen.getByTestId("add-project-dialog").textContent).not.toMatch(/git repositor|must be/i);
 
     await act(async () => {
       fireEvent.click(screen.getByTestId("add-project-start-task"));
@@ -492,7 +493,8 @@ describe("Add project open a folder", () => {
     renderDialog();
     await flush();
     const dialog = screen.getByTestId("add-project-dialog");
-    expect(dialog).toHaveTextContent("This folder must be a git repository.");
+    // No sentence under the title at all (a folder does not need to be a git repository).
+    expect(dialog.textContent).not.toMatch(/git repositor|must be/i);
     expect(dialog.textContent).not.toContain("--");
     expect(dialog.textContent?.toLowerCase()).not.toContain("worktree");
     // the host chip is a pill with the server icon, shrink-wrapped, not a full-width input-like bar

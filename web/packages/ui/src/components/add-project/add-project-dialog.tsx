@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -99,6 +98,7 @@ export function AddProjectDialog(props: {
         <DialogContent
           ref={contentRef}
           tabIndex={-1}
+          aria-describedby={undefined}
           data-testid="add-project-dialog"
           data-sheet={sheet ? "true" : undefined}
           className={cn(
@@ -119,10 +119,6 @@ export function AddProjectDialog(props: {
           )}
           <DialogHeader>
             <DialogTitle>Add project</DialogTitle>
-            {/* Once the project is added the sentence no longer applies: kept for screen readers only. */}
-            <DialogDescription className={landed ? "sr-only" : undefined}>
-              This folder must be a git repository.
-            </DialogDescription>
           </DialogHeader>
           <AddProjectBody
             client={client}

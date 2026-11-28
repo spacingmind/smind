@@ -35,7 +35,7 @@ Size M, **web UI only, NO new RPC** (`fs.listDir`, `workspace.create`, `workspac
 - AC2 Step 1: one host gives a compact chip "<friendly name> <address>" only; several give rows: the current one selected, saved connections listed and not switchable, fleet hosts disabled with "Adding projects on fleet hosts isn't supported yet".
 - AC3 Step 2: only "Open a folder" is live; the other three are disabled with "Coming soon".
 - AC4 Recents are per host, persisted, keep removed projects, and "remove from recents" never deletes a project.
-- AC5 A known non-git path shows "Not a git repository" before submit, with no git-init action and a clear next step; a missing folder says so.
+- AC5 A known non-git path shows "Folders without git are not supported yet." before submit (today's daemon limit, stated neutrally: no claim that sMind needs git, no instruction to run git init), with no git-init action; a missing folder says so. The dialog has no sentence about git under its title (Human, 2026-11-28: a folder does not need to be a git repo).
 - AC6 A duplicate path finds and opens the existing project; `workspace.create` is not called.
 - AC7 `~` is expanded client-side; other relative paths get a hint.
 - AC8 After create the project is expanded and in view, and "Start a task" is offered (it opens the New task dialog for that project).
@@ -74,3 +74,5 @@ GLM peers write the code from step briefs (A the modal shell and the host and me
 ## Validation
 
 (filled at PR time)
+
+- **2026-11-28 copy change (Human direction):** the dialog sentence "This folder must be a git repository." is removed with no replacement; the inline non-git hint stays only because `workspace.create` still refuses a folder without `.git`, and it now says "Folders without git are not supported yet." Tests: `add_project_non_git_hint_before_submit_and_no_git_init_action` (new text, no git-init action), `add_project_copy_is_plain_and_the_host_chip_is_a_chip` (no git sentence), `add_project_after_create_selects_and_offers_start_a_task` (no git sentence in the done state); UC-C1-04 and the frames spec follow.

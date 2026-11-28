@@ -91,7 +91,7 @@ export function OpenFolderStep({
       <div data-testid="add-project-path-status" aria-live="polite">
         {status.kind === "not-git" && (
           <p data-testid="add-project-hint-not-git" className="text-ui-base text-foreground-muted">
-            Not a git repository. sMind works on git repositories: run git init in that folder, then add it again.
+            Folders without git are not supported yet.
           </p>
         )}
         {status.kind === "missing" && (

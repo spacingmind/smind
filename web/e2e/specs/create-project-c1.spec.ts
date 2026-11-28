@@ -167,7 +167,7 @@ test('UC-C1-04 non-git folder shows the hint before submit', async ({ app }, tes
   await typePath(page, folder)
   const hint = page.getByTestId('add-project-hint-not-git')
   await expect(hint).toBeVisible()
-  await expect(hint).toContainText('Not a git repository')
+  await expect(hint).toContainText('Folders without git are not supported yet.')
   await shot(page, testInfo, 'UC-C1-04-hint')
   // A known non-repo never reaches the daemon, and there is no git-init action (that is C2).
   await expect(page.getByTestId('add-project-submit')).toBeDisabled()

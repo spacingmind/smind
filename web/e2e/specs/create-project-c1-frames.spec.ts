@@ -229,7 +229,7 @@ test('non-git-hint: a plain folder is said before submit', async ({ app }, testI
   const folder = path.join(daemon.home, 'frames-plain')
   fs.mkdirSync(folder, { recursive: true })
   await typePath(page, folder)
-  await expect(page.getByTestId('add-project-hint-not-git')).toContainText('Not a git repository')
+  await expect(page.getByTestId('add-project-hint-not-git')).toContainText('Folders without git are not supported yet.')
   await expect(page.getByTestId('add-project-submit')).toBeDisabled()
   await shot(page, testInfo, 'non-git-hint')
 })
