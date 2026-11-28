@@ -87,7 +87,7 @@ func TestFailureLabels_NoApprovalWords(t *testing.T) {
 		if g := Guidance(kind); g == "" || banned.MatchString(g) {
 			t.Errorf("Guidance(%q) = %q", kind, g)
 		}
-		if a := NextAction(kind, ActionContext{Provider: "glm", Model: "opus", Now: time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), ResetAt: ptrTime(time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))}); a == nil || a.Label == "" || banned.MatchString(a.Label) {
+		if a := NextAction(kind, ActionContext{Provider: "glm", FallbackProfileID: 9, Model: "opus", Now: time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC), ResetAt: ptrTime(time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC))}); a == nil || a.Label == "" || banned.MatchString(a.Label) {
 			t.Errorf("NextAction(%q) = %+v", kind, a)
 		}
 	}

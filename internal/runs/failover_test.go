@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -309,5 +310,110 @@ func TestPolicy_QueueFullGivesUp(t *testing.T) {
 	e.reg.applyRateLimitPolicy(r, futureFail(time.Hour))
 	if n := len(retryItems(t, e.st, r.chatID)); n != 0 {
 		t.Fatalf("retry items = %d, want 0 when the queue is full", n)
+	}
+}
+
+func Test_transient_retry_honours_provider_delay_between_1s_and_1h(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		hint time.Duration
+		want time.Duration
+	}{
+		{"30s", 30 * time.Second, 30 * time.Second},
+		{"20min", 20 * time.Minute, 20 * time.Minute},
+		{"2h capped", 2 * time.Hour, time.Hour},
+		{"200ms floored", 200 * time.Millisecond, time.Second},
+		{"no hint", 0, 30 * time.Second},
+	}
+	for _, c := range cases {
+		e := newQueuedTestEnv(t, "")
+		pid := profileWith(t, e.st, "wait")
+		r := e.failedRun(t, "failed-1", failedOpts{profileID: pid})
+		before := time.Now()
+		e.reg.enqueueTransientRetry(r, failure.Result{Kind: failure.KindTransient429, RetryAfter: c.hint})
+		items := retryItems(t, e.st, r.chatID)
+		if len(items) != 1 || items[0].NotBefore == nil {
+			t.Fatalf("%s: items = %+v, want one with not_before", c.name, items)
+		}
+		got := items[0].NotBefore.Sub(before)
+		if got < c.want-2*time.Second || got > c.want+2*time.Second {
+			t.Errorf("%s: not_before in %v, want about %v", c.name, got, c.want)
+		}
+	}
+}
+
+func streamPartial(r *run) {
+	r.mu.Lock()
+	r.history = append(r.history, taskrunner.Event{Type: taskrunner.EventTypeText, Text: "partial"})
+	r.mu.Unlock()
+}
+
+// The history budget may evict the run's own history in finish() before the
+// policy runs; the guard must still see the output that was streamed.
+func Test_no_fallback_after_streamed_output_even_when_the_history_is_evicted(t *testing.T) {
+	t.Parallel()
+	e := newFallbackEnv(t, "")
+	e.reg.SetHistoryBudget(1)
+	fbMain, _ := fallbackProfiles(t, e.st)
+	r := e.failedRun(t, "evicted", failedOpts{profileID: fbMain})
+	streamPartial(r)
+	e.reg.finish(r, &codex.TurnError{Info: "usageLimitExceeded", Message: "limit"})
+	for _, s := range e.reg.List(0) {
+		if s.FailoverOf == "evicted" {
+			t.Fatalf("a fallback successor started after streamed output (history evicted before the policy ran)")
+		}
+	}
+	if n := len(extraChats(t, e, r.taskID)); n != 0 {
+		t.Fatalf("fallback chats = %d, want 0", n)
+	}
+}
+
+func Test_no_fallback_after_the_first_streamed_delta(t *testing.T) {
+	t.Parallel()
+	e := newFallbackEnv(t, "")
+	fbMain, _ := fallbackProfiles(t, e.st)
+	r := e.failedRun(t, "streamed", failedOpts{profileID: fbMain})
+	streamPartial(r)
+	e.reg.finish(r, &codex.TurnError{Info: "usageLimitExceeded", Message: "limit"})
+	st := r.statusLocked()
+	if st.FailureKind != failure.KindPlanWindowExhausted {
+		t.Fatalf("kind = %q", st.FailureKind)
+	}
+	// The run's own action never knew the fallback; the wire layer rebuilds it
+	// with the profile's fallback, which stays a switch.
+	act := failure.NextAction(st.FailureKind, failure.ActionContext{FallbackProfileID: e.reg.FallbackProfileFor(fbMain), Now: time.Now()})
+	if act == nil || act.Kind != failure.ActionSwitchProfile {
+		t.Fatalf("action = %+v, want switch_profile", act)
+	}
+	// finish applies the policy synchronously; nothing may have started.
+	for _, s := range e.reg.List(0) {
+		if s.FailoverOf == "streamed" {
+			t.Fatalf("a fallback successor %s started after streamed output", s.ID)
+		}
+	}
+	if n := len(extraChats(t, e, r.taskID)); n != 0 {
+		t.Fatalf("fallback chats = %d, want 0", n)
+	}
+}
+
+func Test_fallback_still_starts_without_streamed_output(t *testing.T) {
+	t.Parallel()
+	e := newFallbackEnv(t, "")
+	fbMain, _ := fallbackProfiles(t, e.st)
+	r := e.failedRun(t, "silent", failedOpts{profileID: fbMain})
+	e.reg.finish(r, &codex.TurnError{Info: "usageLimitExceeded", Message: "limit"})
+	successorRow(t, e, "silent")
+}
+
+func Test_wait_retry_still_queued_after_streamed_output(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "")
+	pid := profileWith(t, e.st, "wait")
+	r := e.failedRun(t, "waiter", failedOpts{profileID: pid})
+	streamPartial(r)
+	e.reg.applyRateLimitPolicy(r, futureFail(time.Hour))
+	if n := len(retryItems(t, e.st, r.chatID)); n != 1 {
+		t.Fatalf("retry items = %d, want 1", n)
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/spacingmind/smind/internal/runs/failure"
 )
 
 const (
@@ -102,7 +104,16 @@ func getBody(ctx context.Context, client *http.Client, url string, header http.H
 	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
 		return nil, resp.StatusCode, nil
 	case resp.StatusCode == http.StatusTooManyRequests:
-		return nil, 0, httpStatusError(resp.StatusCode, parseRetryAfter(resp.Header.Get("Retry-After"), now()))
+		ra := parseRetryAfter(resp.Header.Get("Retry-After"), now())
+		if ra == 0 {
+			// Only on a 429 with no header: a RetryInfo in the body. The body is
+			// never copied into an error string.
+			b, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<10))
+			if d, ok := failure.ParseRetryInfo(b); ok {
+				ra = min(d, retryAfterCap)
+			}
+		}
+		return nil, 0, httpStatusError(resp.StatusCode, ra)
 	case resp.StatusCode < 200 || resp.StatusCode > 299:
 		return nil, 0, httpStatusError(resp.StatusCode, 0)
 	}
