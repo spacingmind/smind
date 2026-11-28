@@ -39,8 +39,11 @@ One GLM peer from a step-by-step brief, one commit per step. Lead: spec, review,
 
 ## Progress
 
-- Spec written.
+- Spec first, then one GLM peer (two commits), reviewed and cherry-picked by the Lead.
+- Launch paths covered (all through `launchEnvEntries` or the isolated env): ACP agents (built-in and custom), claude-native turns, Codex turns, the claude isolated launch (probe / reflect / curate), and the ACP model probes. **Not covered**: the Codex model probe (`acp_modes.go` `probeCodexModels` builds its env from `providerEnvEntries` directly: a short-lived `model/list` call, not an agent run), terminals, setup scripts, the agent browser, plugin providers.
 
 ## Validation
 
-- Pending.
+- Mutations by the Lead on committed code: no-scheme branch removed fails `Test_proxy_launch_bare_host_port_gets_http_scheme` and `Test_launch_env_entries_carry_the_proxy_defaults`; loopback block removed fails `Test_proxy_launch_no_proxy_gets_loopbacks_without_duplicates`; `launchEnvEntries` without `withProxyLaunchDefaults` fails `Test_launch_env_entries_carry_the_proxy_defaults`.
+- `go test ./internal/netenv/ ./internal/taskrunner/` pass with no proxy in the environment AND with `HTTPS_PROXY=proxy.corp:3128` set ambiently (one existing test, `TestPluginProvider_CoreProviderLaunchUnchanged`, clears the proxy names itself now).
+- No contract: S/M, daemon env only; no wsapi, store, permission, relay or UI change (ADR-0045 asks a contract for those).
