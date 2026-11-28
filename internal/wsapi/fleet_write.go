@@ -103,14 +103,21 @@ func safeRefName(ref string) bool {
 
 // fetchOriginRef runs the one fetch a remote task's branch or base ref
 // needs, into the tracking ref the workspace manager reads back
-// (refs/remotes/origin/<ref>), with no credential prompts and no tags.
+// (refs/remotes/origin/<ref>), with no credential prompts and no tags. It
+// runs stripped (the forced default upload-pack included), and a
+// stripped-mode failure fails closed: no fetch, and the same refusal, so
+// a scan error is never distinguishable from a missing branch.
 func fetchOriginRef(path, ref string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), fleetFetchTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("-c", "core.fsmonitor=false", "-C", path,
+	full, err := gitsafe.StrippedArgs(ctx, path, "-c", "core.fsmonitor=false", "-C", path,
 		"fetch", "--no-tags", "origin",
-		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", ref, ref))...)
-	cmd.Env = gitsafe.Env(nil)
+		fmt.Sprintf("+refs/heads/%s:refs/remotes/origin/%s", ref, ref))
+	if err != nil {
+		return serve.NewRefusal(wire.CodeBranchNotFound, "branch not found on origin")
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Env = gitsafe.StrippedEnv(nil)
 	if err := cmd.Run(); err != nil {
 		return serve.NewRefusal(wire.CodeBranchNotFound, "branch not found on origin")
 	}

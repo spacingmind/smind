@@ -35,6 +35,7 @@ func (h *prHost) push(ctx context.Context, rc *requestContext, raw json.RawMessa
 	if err := refuseRunScoped("task.push", rc); err != nil {
 		return nil, err
 	}
+	ctx = humanContext(ctx, rc)
 	var p struct {
 		TaskID int64 `json:"taskId"`
 	}
@@ -78,6 +79,7 @@ func (h *prHost) updateFromBase(ctx context.Context, rc *requestContext, raw jso
 	if err := refuseRunScoped("task.updateFromBase", rc); err != nil {
 		return nil, err
 	}
+	ctx = humanContext(ctx, rc)
 	var p struct {
 		TaskID   int64  `json:"taskId"`
 		Strategy string `json:"strategy"`
