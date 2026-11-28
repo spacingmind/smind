@@ -143,6 +143,37 @@ keeps it only in memory.
   or Cloudflare's, through a tunnel (next section). A phone cannot confirm a
   fingerprint, so a relay it reaches directly with a self-signed certificate is refused.
 
+## Browser clients
+
+Besides the mobile app, smind has a web client that runs in a browser, served
+from `https://app.spacingmind.com`. It reaches your daemon through the same
+relay a phone does, so nothing changes for a relay operator.
+
+A browser page is not trusted the way a paired device is, so the relay checks
+where it comes from: it accepts browser connections only from
+`https://app.spacingmind.com`. To run your own web client at another address,
+allow that origin when starting the relay:
+
+```sh
+smind relay --allowed-origin https://my.example.com
+```
+
+The flag is repeatable. `SMIND_RELAY_ALLOWED_ORIGINS` holds the same list as a
+comma-separated environment variable, which is easier in a container. An origin
+must be `https://`, except `http://localhost` for development. Pass
+`--no-default-web-origin` to drop the default and accept only the origins you
+listed. An invalid origin stops the relay from starting, with a message that
+names it.
+
+Only browsers are affected by this. The mobile app, the desktop app, the
+daemon and the CLI send no browser origin at all, so they are never refused by
+this check.
+
+When a page from an origin you did not allow connects, the relay refuses it
+before admission and logs a line like
+`refused browser origin https://unknown.example`, at most once a minute per
+origin. If that origin is yours, add it with `--allowed-origin`.
+
 ## Self-host the relay with Cloudflare Tunnel
 
 A phone only talks to a relay whose certificate it already trusts, and a relay normally
