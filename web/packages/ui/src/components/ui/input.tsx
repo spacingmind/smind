@@ -32,6 +32,7 @@ function AstryxInput({
   disabled,
   readOnly,
   placeholder,
+  autoFocus,
   ref,
   "aria-invalid": ariaInvalid,
   ...rest
@@ -95,6 +96,7 @@ function AstryxInput({
       // placeholder.
       label={"\u00a0"}
       isLabelHidden
+      hasAutoFocus={autoFocus}
       value={current}
       placeholder={placeholder}
       isDisabled={disabled}

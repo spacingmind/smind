@@ -108,6 +108,11 @@ function DialogContent({
 }) {
   const { open, setOpen } = React.useContext(DialogOpenContext)
   const innerRef = React.useRef<HTMLDialogElement | null>(null)
+  const beforeRef = React.useRef<HTMLElement | null>(null)
+  if (open && !beforeRef.current) beforeRef.current = document.activeElement as HTMLElement | null
+  if (!open) beforeRef.current = null
+  const onCloseAutoFocusRef = React.useRef(props.onCloseAutoFocus)
+  onCloseAutoFocusRef.current = props.onCloseAutoFocus
   const setRef = React.useCallback(
     (node: HTMLDialogElement | null) => {
       innerRef.current = node
@@ -130,13 +135,28 @@ function DialogContent({
 
   const {
     onOpenAutoFocus: _a,
-    onCloseAutoFocus: _b,
+    onCloseAutoFocus: _b, // handled above
     onEscapeKeyDown: _c,
     onPointerDownOutside: _d,
     onInteractOutside: _e,
     forceMount: _f,
     ...rest
   } = props
+
+  // Radix gave focus back to whatever had it before the dialog opened. The
+  // content unmounts on close here (no native close()), so do it explicitly.
+  React.useLayoutEffect(() => {
+    if (!open) return
+    // Captured while rendering (below): children's autoFocus has already moved
+    // focus by the time any effect runs.
+    const before = beforeRef.current
+    return () => {
+      const ev = new Event("closeautofocus", { cancelable: true })
+      onCloseAutoFocusRef.current?.(ev)
+      if (ev.defaultPrevented) return
+      if (before && before !== document.body && before.isConnected) before.focus()
+    }
+  }, [open])
 
   // Radix hid everything outside the modal from assistive tech (and from
   // role queries); a native modal <dialog> only does so in real browsers.
@@ -154,6 +174,24 @@ function DialogContent({
     }
     return () => hidden.forEach((n) => n.removeAttribute("aria-hidden"))
   }, [open])
+
+  // Escape closes only the top-most dialog. A Radix layer opened earlier (the
+  // settings sheet) would otherwise take the key first. Capture on window runs
+  // before any document-level listener.
+  React.useEffect(() => {
+    const el = innerRef.current
+    if (!el || !open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.isComposing) return
+      const all = document.querySelectorAll('[data-slot="dialog-content"]')
+      if (all[all.length - 1] !== el) return
+      e.stopImmediatePropagation()
+      e.preventDefault()
+      setOpen(false)
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [open, setOpen])
 
   // Unmount when closed (Radix did): a closed native <dialog> stays in the DOM
   // and keeps its children queryable. Costs the exit animation.
