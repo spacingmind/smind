@@ -120,7 +120,15 @@ type acct struct {
 	snapLoaded bool
 }
 
-type flight struct{ done chan struct{} }
+type flight struct {
+	done chan struct{}
+	// skip is closed when a forced refresh joins the flight: the post-resume
+	// spread wait ends at once (a person pressed refresh; never delayed).
+	skip     chan struct{}
+	skipOnce sync.Once
+}
+
+func (f *flight) skipSpread() { f.skipOnce.Do(func() { close(f.skip) }) }
 
 // New returns a Poller. Defaults: enabled, 5 minute TTL.
 func New(s *store.Store, src AccountSource, f ReportFetcher, opts ...Option) *Poller {
@@ -320,6 +328,9 @@ func (p *Poller) request(ctx context.Context, id int64, forced bool) Result {
 	}
 	if fl := a.inflight; fl != nil { // join: no budget, no state change
 		a.mu.Unlock()
+		if forced {
+			fl.skipSpread()
+		}
 		return p.wait(ctx, id, a, fl, fp)
 	}
 	clampState(&a.st, now)
@@ -371,7 +382,7 @@ func (p *Poller) request(ctx context.Context, id int64, forced bool) Result {
 	}
 	p.wg.Add(1)
 	p.mu.Unlock()
-	fl := &flight{done: make(chan struct{})}
+	fl := &flight{done: make(chan struct{}), skip: make(chan struct{})}
 	a.inflight = fl
 	a.mu.Unlock()
 
@@ -417,7 +428,17 @@ func (p *Poller) run(id int64, a *acct, fl *flight, acc accounts.Account, forced
 
 	if !forced && p.resume.active(p.clock()) {
 		d := time.Duration(p.jitter() * float64(wakeSpreadMax))
-		if err := p.sleep(p.ctx, d); err != nil {
+		sctx, cancel := context.WithCancel(p.ctx)
+		go func() {
+			select {
+			case <-fl.skip:
+				cancel()
+			case <-sctx.Done():
+			}
+		}()
+		err := p.sleep(sctx, d)
+		cancel()
+		if err != nil && p.ctx.Err() != nil { // the poller closed (a skip leaves p.ctx alive)
 			p.release(a, fl)
 			return
 		}

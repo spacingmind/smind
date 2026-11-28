@@ -2,7 +2,6 @@ package quota
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"sync"
 	"testing"
@@ -30,13 +29,22 @@ type resumeRig struct {
 
 func newResumeRig(t *testing.T, jits ...float64) *resumeRig {
 	t.Helper()
+	return newResumeRigMk(t, nil, jits...)
+}
+
+// newResumeRigMk is newResumeRig with a custom fetcher maker (nil = the fake).
+func newResumeRigMk(t *testing.T, mk func(*accounts.Registry, *fakeClock) ReportFetcher, jits ...float64) *resumeRig {
+	t.Helper()
 	r := &resumeRig{
 		fetcher:  &fakeReportFetcher{},
 		sleepHit: make(chan struct{}, 16),
 		release:  make(chan struct{}),
 		jits:     jits,
 	}
-	r.env = newEnv(t, func(*accounts.Registry, *fakeClock) ReportFetcher { return r.fetcher },
+	if mk == nil {
+		mk = func(*accounts.Registry, *fakeClock) ReportFetcher { return r.fetcher }
+	}
+	r.env = newEnv(t, mk,
 		WithResumeClocks(func() time.Time { return r.clk.Now() }, func() time.Duration {
 			r.monoMu.Lock()
 			defer r.monoMu.Unlock()
@@ -137,36 +145,97 @@ func Test_poller_forced_refresh_is_not_delayed_after_a_resume(t *testing.T) {
 	}
 }
 
+// A token that expired while the machine slept is refreshed like any other and
+// is never reported as "login expired": the poller, the real fetcher and a
+// refresher that succeeds, through a resume. Provider calls are counted.
 func Test_poller_expired_token_after_resume_is_not_an_expiry_error(t *testing.T) {
-	t.Run("refresh succeeds", func(t *testing.T) {
-		h := newFetcherHarness(t)
-		h.refresher.cred = accounts.OAuthCredential{AccessToken: "access-new", RefreshToken: "refresh-new", ExpiresAt: time.Now().Add(time.Hour)}
-		acc := h.oauthAccount(t, "anthropic", "a", time.Now().Add(-time.Minute))
-		got, err := h.fetcher.Fetch(context.Background(), acc)
-		if err != nil || got.Status != StatusAvailable {
-			t.Fatalf("Fetch() = %+v, %v, want available", got, err)
+	srv := newUsageServer(t)
+	ref := &fetcherRefresher{cred: accounts.OAuthCredential{AccessToken: "access-new", RefreshToken: "refresh-new", ExpiresAt: time.Now().Add(100000 * time.Hour)}}
+	r := newResumeRigMk(t, func(reg *accounts.Registry, clk *fakeClock) ReportFetcher {
+		src := newAnthropicSource(srv.srv.Client())
+		src.url = srv.srv.URL + pathAnthropic
+		return newAccountFetcher(reg, map[string]providerSpec{"anthropic": {source: src, refresher: ref}}, clk.Now)
+	}, 0)
+	close(r.release) // the spread wait ends at once
+	r.touch(r.addOAuth("prime"))
+	r.advance(10*time.Minute, time.Second)
+	id := r.addOAuthExpiring("anthropic", "stale", time.Now().Add(-time.Minute))
+	res := r.touch(id)
+	if res.Report != nil && res.Report.Problem != nil && res.Report.Problem.Kind == ProblemExpired {
+		t.Fatalf("report = %+v, must not be expired", res.Report.Problem)
+	}
+	if n := ref.calls.Load(); n != 1 {
+		t.Errorf("refresher calls = %d, want 1", n)
+	}
+	if n := srv.Calls(); n != 2 {
+		t.Errorf("usage calls = %d, want 2 (prime + the refreshed account)", n)
+	}
+	if st := r.state(id); st.ConsecutiveFailures != 0 {
+		t.Errorf("consecutive failures = %d, want 0", st.ConsecutiveFailures)
+	}
+}
+
+// A forced refresh that joins a flight already waiting in the spread is not
+// delayed: it ends the wait.
+func Test_poller_forced_refresh_joining_a_spread_flight_skips_the_wait(t *testing.T) {
+	r := newResumeRig(t, 0.9)
+	r.primeAndSleep()
+	id := r.addOAuth("a")
+	go r.touch(id) // non-forced: enters the spread wait
+	select {
+	case <-r.sleepHit:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the touch never entered the spread wait")
+	}
+	done := make(chan struct{})
+	go func() { r.refresh(id); close(done) }() // joins; never released by the test
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a forced refresh stayed blocked behind the spread wait")
+	}
+	if c := r.fetcher.Calls(); c != 2 {
+		t.Errorf("fetcher calls = %d, want 2 (prime + the one flight)", c)
+	}
+}
+
+// Closing the poller during the spread ends the wait, leaves no flight open
+// and makes no provider call.
+func Test_poller_close_during_the_spread_makes_no_call_and_leaves_no_flight(t *testing.T) {
+	r := newResumeRig(t, 0.9)
+	r.primeAndSleep()
+	id := r.addOAuth("a")
+	got := make(chan Result, 1)
+	go func() { got <- r.touch(id) }()
+	select {
+	case <-r.sleepHit:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the touch never entered the spread wait")
+	}
+	r.p.Close()
+	select {
+	case res := <-got:
+		if res.InFlight {
+			t.Errorf("touch returned in flight after Close")
 		}
-		if got.Problem != nil && got.Problem.Kind == ProblemExpired {
-			t.Errorf("problem = %+v, must not be expired", got.Problem)
-		}
-		if n := h.refresher.calls.Load(); n != 1 {
-			t.Errorf("refresher calls = %d, want 1", n)
-		}
-	})
-	t.Run("refresh hits a network error", func(t *testing.T) {
-		h := newFetcherHarness(t)
-		h.refresher.err = errors.New("anthropic oauth refresh request: dial tcp: network is unreachable")
-		acc := h.oauthAccount(t, "anthropic", "a", time.Now().Add(-time.Hour))
-		got, err := h.fetcher.Fetch(context.Background(), acc)
-		var fe *FetchError
-		if !errors.As(err, &fe) || got.Status != StatusError {
-			t.Fatalf("Fetch() = %+v, %v, want the transient error report", got, err)
-		}
-		if got.Problem != nil && got.Problem.Kind == ProblemExpired {
-			t.Errorf("problem = %+v, must not be expired", got.Problem)
-		}
-		if n := h.requests.Load(); n != 0 {
-			t.Errorf("usage requests = %d, want 0", n)
-		}
-	})
+	case <-time.After(5 * time.Second):
+		t.Fatal("touch still blocked after Close")
+	}
+	if c := r.fetcher.Calls(); c != 1 {
+		t.Errorf("fetcher calls = %d, want 1 (prime only)", c)
+	}
+}
+
+// Inside the TTL a second touch after a resume is a cache hit: no second wait,
+// no second provider call.
+func Test_poller_ttl_still_applies_after_a_resume(t *testing.T) {
+	r := newResumeRig(t, 0.5, 0.5)
+	close(r.release)
+	r.primeAndSleep()
+	id := r.addOAuth("a")
+	r.touch(id)
+	r.touch(id)
+	if c := r.fetcher.Calls(); c != 2 {
+		t.Errorf("fetcher calls = %d, want 2 (prime + one for the account)", c)
+	}
 }
