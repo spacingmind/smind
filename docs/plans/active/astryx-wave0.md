@@ -43,8 +43,9 @@ Wave 0 is the spike before any migration wave: the sMind theme, the build wiring
 
 ## Progress
 
-(filled in as work lands)
+- Spec and contract committed first. Peers (Codex tried first, tool host failed to start: Gatekeeper prompt, not a usage limit; GLM limited until 20:24): Peer 1 deps and wiring, Peer 2 theme, Peer 3 wrappers, Peer 4 class-pinned tests and harness, Peer 5 visual parity, Peer 6 three residual defects, experiment 783 source-compiled build: all `peer-sonnet`. Smoke runs: `peer-codex` (793, worked), `peer-glm` (795, worked), `peer-opencode` (794, authentication error).
+- Lead: the plugin switch, the layer-order fix in `index.html`, the size gate, frames, measurements.
 
 ## Validation
 
-(measurements, frames and the go or no-go land here)
+See ADR-0064, section "Wave 0 results": the measurements, the findings and the go or no-go. AC1 to AC7 are covered by the named tests (all pass); AC8 measurements and AC9 frames are in the ADR section and `~/.smind/dogfood/astryx-wave0/frames`; AC10 is the go or no-go there.

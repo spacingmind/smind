@@ -9,7 +9,7 @@ acs:
     covers: { tests: [astryx_deps_are_exactly_pinned], frames: [] }
   - id: AC2
     text: "The CSS entry declares one layer order for Astryx and Tailwind before any import that emits rules."
-    covers: { tests: [astryx_layer_order_is_declared_first], frames: [] }
+    covers: { tests: [astryx_layer_order_is_declared_first, astryx_layer_order_is_declared_in_index_html_before_any_stylesheet], frames: [] }
   - id: AC3
     text: "Typecheck, the full unit suite and the demo build check pass."
     covers: { tests: [], frames: [], commands: [C1, C2, C3] }
@@ -28,6 +28,7 @@ acs:
 tests:
   - { name: astryx_deps_are_exactly_pinned, run: "cd web/packages/ui && bunx vitest run src/lib/astryx-build.test.ts -t astryx_deps_are_exactly_pinned", timeoutSec: 900 }
   - { name: astryx_layer_order_is_declared_first, run: "cd web/packages/ui && bunx vitest run src/lib/astryx-build.test.ts -t astryx_layer_order_is_declared_first", timeoutSec: 900 }
+  - { name: astryx_layer_order_is_declared_in_index_html_before_any_stylesheet, run: "cd web/packages/ui && bunx vitest run src/lib/astryx-build.test.ts -t astryx_layer_order_is_declared_in_index_html_before_any_stylesheet", timeoutSec: 900 }
   - { name: smind_theme_covers_light_and_dark_for_every_token, run: "cd web/packages/ui && bunx vitest run src/theme/smind-theme.test.ts -t smind_theme_covers_light_and_dark_for_every_token", timeoutSec: 900 }
   - { name: smind_theme_stylesheet_is_built_not_compiled_at_runtime, run: "cd web/packages/ui && bunx vitest run src/theme/smind-theme.test.ts -t smind_theme_stylesheet_is_built_not_compiled_at_runtime", timeoutSec: 900 }
   - { name: prepaint_script_sets_the_astryx_theme_attributes, run: "cd web/packages/ui && bunx vitest run src/theme/smind-theme.test.ts -t prepaint_script_sets_the_astryx_theme_attributes", timeoutSec: 900 }
@@ -43,12 +44,14 @@ mutations:
   - { id: M2, file: web/packages/ui/src/index.css, change: "the layer order line moves below the first @import that emits rules", expectFail: [astryx_layer_order_is_declared_first] }
   - { id: M3, file: web/packages/ui/src/components/ui/dialog.tsx, change: "the dialog focuses its content with a visible ring on pointer open", expectFail: [dialog_pointer_open_shows_no_focus_ring] }
   - { id: M4, file: web/packages/ui/src/components/ui/switch.tsx, change: "data-state is no longer set on the switch root", expectFail: [switch_toggles_and_keeps_data_state] }
+  - { id: M5, file: web/packages/ui/index.html, change: "the inline @layer order style is removed from <head>", expectFail: [astryx_layer_order_is_declared_in_index_html_before_any_stylesheet] }
 frames: []
 commands:
   - { id: C1, run: "cd web/packages/ui && bunx tsc -b", timeoutSec: 900 }
   - { id: C2, run: "cd web/packages/ui && bun run test", timeoutSec: 1800 }
   - { id: C3, run: "cd web/packages/ui && bun run build:demo", timeoutSec: 900 }
   - { id: C4, run: "go test ./internal/hygiene/ -count=1", timeoutSec: 900 }
+  - { id: C5, run: "cd web/packages/ui && node --test scripts/check-demo-build.test.mjs", timeoutSec: 900 }
 limits: { budgetUsd: 3, maxMinutes: 60 }
 ---
 

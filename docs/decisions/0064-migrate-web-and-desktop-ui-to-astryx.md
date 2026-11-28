@@ -4,7 +4,7 @@
 
 **Accepted for the direction — 2026-11-28.** The Human decided to move all of the web UI and the desktop UI to Astryx. This record does not argue that again. It fixes the strategy, the build and theme approach, the risks and the order of work. The four sub-choices in [Open sub-decisions](#open-sub-decisions-for-the-human) are still open; each has a recommendation, and the waves that depend on one wait for the Human.
 
-Nothing is built yet. The first code is the Wave 0 spike, and it starts only on the Human's go.
+**Wave 0 (the spike) is built and measured: see [Wave 0 results](#wave-0-results-2026-11-28) for the numbers and the go or no-go.** Steps 5, 7 and 9 of the Decision were amended by what the spike found; the amendments are marked "Wave 0".
 
 Builds on [ADR-0013](0013-desktop-bundled-ui.md) (the desktop shell bundles the same web UI), [ADR-0051](0051-web-demo-mode-and-app-spacingmind-com.md) (the demo build) and the token rules in `docs/design.md`.
 
@@ -35,7 +35,7 @@ Builds on [ADR-0013](0013-desktop-bundled-ui.md) (the desktop shell bundles the 
 
 4. **Theme.** One custom sMind theme, written with `defineTheme`, extending the neutral Astryx theme, filled from our reference-derived tokens in `docs/design.md`. It has light and dark values, and the app keeps its three modes (light, dark, follow the system). The theme is **built ahead of time** into a stylesheet that ships with the app. It is not compiled in the browser, so there is no style flash while the desktop webview starts. The inline script in `index.html` keeps setting the mode before first paint.
 
-5. **Build.** Start on the prebuilt-stylesheet path with Tailwind 4 kept and layered (layer order as in the Astryx example, with our theme in `astryx-theme`). Move to compiling Astryx from source with its Vite plugin only if Wave 0 shows a size or theming reason. React 19 is already met. Versions of every `@astryxdesign/*` package and `@stylexjs/stylex` are pinned exactly.
+5. **Build.** *Wave 0 amendment:* compile Astryx from source with its Vite plugin (`@astryxdesign/build/vite`, `rootDir` set to the workspace root), with Tailwind 4 kept and layered. The prebuilt-stylesheet path was tried first and rejected: it ships the whole library's CSS (+52 kB gzip) before one component uses it. Components are imported only through deep entry points (`@astryxdesign/core/Button`, never the barrel), or the whole library's CSS comes back. The layer order is declared **inline, first in `<head>` of `index.html`**, as well as at the top of `index.css`: Astryx injects its own `@layer reset, astryx-base, astryx-theme;` at runtime (its `Theme` and `CodeBlock` modules), and the first declaration of a layer name wins, so without the inline line Tailwind's preflight outranks every Astryx style. A test pins it. React 19 is already met. Versions of every `@astryxdesign/*` package and `@stylexjs/stylex` are pinned exactly.
 
 6. **Tailwind stays during the migration.** It is the layout and spacing glue for screens that are not moved yet. Whether it stays afterwards is open sub-decision 1.
 
@@ -49,9 +49,11 @@ Builds on [ADR-0013](0013-desktop-bundled-ui.md) (the desktop shell bundles the 
 
 8. **First small item after Wave 0: opt-in "done" feedback.** A calm check mark that draws itself in about 400 to 600 ms when a task succeeds or when a pull request that sMind opened is merged. Rules: off by default; one switch, Settings, Appearance, "Celebrate finished work"; disabled under the system reduced-motion setting and under the in-app reduced-motion setting; the state change itself (the status text, the badge) always shows, with or without the effect; no sound; one shared animation, not one per screen. Frames at 0, 25, 50, 75 and 100 percent, light and dark, plus the reduced-motion frame.
 
-9. **Queue position.** The code waves start after the P0 batch and the non-git workspace work ([ADR-0063](0063-workspaces-without-a-git-worktree.md), still proposed) and **before** the P1 batch and the create-project steps C2 to C5, so new UI lands on Astryx instead of being moved twice. The "done" feedback item follows Wave 0.
+9. **Size gate (Human decision, 2026-11-28).** The demo size limits (`web/packages/ui/scripts/check-demo-build.mjs`: initial JS 1,150,000 B gzip, initial CSS 35,840 B gzip) are **raised temporarily** to Wave 0's measured numbers plus a small margin (JS 1,290,000 B, CSS 55,296 B), because radix and Astryx coexist until the last wave. The script and file names do not change. The old limits stay in the script as `FINAL_BUDGET`. It is a ratchet: each later wave keeps or lowers the numbers in the same PR, never raises them. The final wave (radix and cva removed) sets the limits back to `FINAL_BUDGET`, or justifies an exception here.
 
-10. **Calm by default.** Motion stays quiet. Nothing in the migration adds effects that the current UI does not have, except the opt-in item above.
+10. **Queue position.** The code waves start after the P0 batch and the non-git workspace work ([ADR-0063](0063-workspaces-without-a-git-worktree.md), still proposed) and **before** the P1 batch and the create-project steps C2 to C5, so new UI lands on Astryx instead of being moved twice. The "done" feedback item follows Wave 0.
+
+11. **Calm by default.** Motion stays quiet. Nothing in the migration adds effects that the current UI does not have, except the opt-in item above.
 
 ### Wave order (recommended, see sub-decision 3)
 
@@ -63,6 +65,47 @@ Builds on [ADR-0013](0013-desktop-bundled-ui.md) (the desktop shell bundles the 
 | 3 | Command palette, sidebar and side nav, toasts, sheets and drawers, menus, tooltips, popovers |
 | 4 | Typeaheads and tables; desktop shell chrome |
 | 5 | Task chat (only if sub-decision 2 says adopt), then removal of `radix-ui` and `class-variance-authority`, the final drift test |
+
+## Wave 0 results (2026-11-28)
+
+What was built: pinned deps (`@astryxdesign/core`, `theme-neutral`, `build`, `cli` 0.7.17, `@stylexjs/stylex` 0.19.2), the source-compiled build, the sMind theme built ahead of time (`src/theme/smind-theme.ts` to `smind-theme.css`), the layer order, and Button, Input, Switch and Dialog on Astryx behind the existing wrappers with the same props. Plan: `docs/plans/active/astryx-wave0.md`.
+
+**Measurements** (`vite build` of `web/packages/ui`, same machine, gzip level as vite prints; JS is the main chunk, CSS is every stylesheet in `assets/`):
+
+| State | CSS raw / gzip | JS raw / gzip | Build, warm |
+|---|---|---|---|
+| Before (develop) | 176.2 kB / 28.9 kB | 3,684.6 kB / 1,117.4 kB | 3.8 s |
+| Prebuilt Astryx CSS, no component used | 501.6 kB / 81.1 kB | 3,684.8 kB / 1,117.4 kB | 3.9 s |
+| Source build, no component used | 203.6 kB / 33.2 kB | 3,684.8 kB / 1,117.4 kB | 4.6 s |
+| Source build, four primitives (final) | 320.5 kB / 51.5 kB | 4,128.0 kB / 1,262.4 kB | 9 to 14 s |
+
+The change from before to the final state is CSS +22.5 kB gzip (+78%) and JS +145.0 kB gzip (+13%): +14.6% of the two together. The demo check reads 1,259,181 B initial JS and 51,051 B initial CSS (old limits 1,150,000 and 35,840), so the gate was raised (Decision 9). Most of the JS is shared infrastructure that the first components pull in (layers, positioning, i18n), so the cost of the next components is expected to be lower; that is not measured yet. Warm build time is 2.4 to 3.6 times the old one; fixing it is a separate small item.
+
+**Checks that passed:** `tsc -b`; the web unit suite (552 files, 6,012 tests, after the wrappers were fixed); the Chromium e2e suite on the final head (249 passed, 56 skipped, 0 failed); the demo build and its check; the desktop build; the dev server starts; Vite 7.3.6 works with the plugin; vitest needs no plugin.
+
+**Real window** (macOS 27.2.1 audit app, REAL-WINDOW frames, light and dark, 1280x800 and the 800x520 minimum, before and after, in `~/.smind/dogfood/astryx-wave0/frames`): cascade layers, nested layers, `@scope` and `light-dark()` all work in the macOS webview. First paint in dark mode shows no light flash at about 80 ms per frame, same as before. The Windows webview was not run; from the browser compatibility tables its Chromium engine supports layers (99), `@property` (85), `@scope` (118) and `light-dark()` (123).
+
+**What the spike found**
+
+1. The layer order bug above: every Astryx style lost to Tailwind's preflight until the order was declared in `index.html`. Unit tests could not see it; only a real page did.
+2. Wrappers are not drop-in at the DOM level. The first swap broke 47 unit tests: duplicate live regions, a label that renders twice, focus and Escape behaviour, `data-slot`, `aria-busy`, class names pinned by tests, a dialog structure that the call sites' class names assume. Each was fixed in the wrapper or its test. Input needed the most workarounds (Astryx wants a label and a controlled value, and takes no class name for the `<input>` element). Dialog needed its sizing classes routed to the right element.
+3. jsdom is not enough: the first real-window pass showed unstyled buttons, a dialog stuck in a corner, an icon above its label, a heavy focus ring and a dialog that is 130 px short as a small-window sheet. All were fixed and re-checked. Real-window frames stay a hard gate for every wave.
+4. **Browser floor.** `light-dark()` needs Safari 17.5 (macOS 14.5) and Chromium 123. Tailwind 4 alone needs Safari 16.4. The supported macOS and Windows webview versions must be written down before Wave 1.
+5. One difference is open: in the Add project dialog the primary button looks greyed in the first moments (before, it was solid). Functional e2e passes. It needs a look in Wave 1.
+
+**Staffing log (truthful).** Codex (`peer-codex`) was tried first for every Wave 0 step. Its tool host failed to start (a macOS Gatekeeper prompt on the Codex code-mode host, not a usage limit): three tasks, six runs, no shell command ever ran. GLM was then rate-limited until 20:24. So Wave 0's code was written by `peer-sonnet` (build wiring, theme, wrappers, test fixes, visual fixes, the source-build experiment). After the prompt was cleared, a smoke run on `peer-codex` worked end to end (shell, edit, tests, commit) and its test was kept. `peer-opencode` (GLM 5.4) failed at once with an authentication error from the OpenCode ACP session (no Z.AI credential); `peer-glm` (5.3) did the same smoke step in 40 s.
+
+### Go or no-go
+
+**GO to Wave 1, with these conditions** (each needs the Human's yes):
+
+1. Accept the size ratchet (Decision 9): about +14.6% gzip for the first four primitives, falling back to the old limits by the last wave.
+2. Accept the browser floor in finding 4, or change the theme tokens to avoid `light-dark()`.
+3. Change the strategy for Input and Dialog: after Wave 1 they are migrated at their call sites directly, not through a wrapper. Button and Switch keep their wrappers for now.
+4. Real-window light and dark frames (default and minimum size) are a merge gate for every wave, as stated.
+5. Warm build time is brought back near 3.8 s in its own small PR.
+
+A no-go would have come from the prebuilt path (size) or from the layer problem; both have a fix. The migration is feasible. It is not cheap: expect each wave to need a frame loop, not only tests.
 
 ## Risks
 
