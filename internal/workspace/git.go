@@ -109,6 +109,14 @@ func runGit(repoPath string, args ...string) error {
 	return err
 }
 
+// runGitCtx is runGit with the caller's context: the subprocess is killed
+// when ctx is done, and ctx's initiator mark decides the mode the call
+// runs in (human or stripped).
+func runGitCtx(ctx context.Context, repoPath string, args ...string) error {
+	_, err := runGitOutputEnvCtx(ctx, repoPath, nil, args...)
+	return err
+}
+
 // runGitOutput behaves like runGit but returns stdout instead of discarding
 // it.
 func runGitOutput(dir string, args ...string) (string, error) {
@@ -367,13 +375,15 @@ func taskFileDiff(worktreePath, base, path string) (string, error) {
 // taskStageFile stages (staged=true) or unstages (staged=false) a single
 // path in the worktree's real index. The `--` separator keeps paths that
 // look like options (or contain odd characters) from being interpreted as
-// anything but a pathspec.
-func taskStageFile(worktreePath, path string, staged bool) error {
+// anything but a pathspec. ctx carries the initiator: a human-marked
+// context runs the repository's clean filter (a git-lfs pointer stays a
+// pointer), the default daemon context runs stripped.
+func taskStageFile(ctx context.Context, worktreePath, path string, staged bool) error {
 	var err error
 	if staged {
-		err = runGit(worktreePath, "add", "--", path)
+		err = runGitCtx(ctx, worktreePath, "add", "--", path)
 	} else {
-		_, err = runGitOutput(worktreePath, "restore", "--staged", "--", path)
+		_, err = runGitOutputEnvCtx(ctx, worktreePath, nil, "restore", "--staged", "--", path)
 	}
 	return err
 }
@@ -408,9 +418,11 @@ func stagedPaths(worktreePath string) (map[string]bool, error) {
 // the new commit's full SHA, subject (first line of message), and file
 // count. An index with nothing staged returns ErrNothingStaged rather
 // than letting git's "nothing to commit" stderr leak: that case is an
-// expected, caller-presentable condition, not a plumbing failure.
-func gitTaskCommit(worktreePath, message string) (CommitResult, error) {
-	names, err := runGitOutput(worktreePath, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--name-only")
+// expected, caller-presentable condition, not a plumbing failure. ctx
+// carries the initiator: a human-marked context keeps the repository's
+// pre-commit hook, the default (daemon) context runs stripped.
+func gitTaskCommit(ctx context.Context, worktreePath, message string) (CommitResult, error) {
+	names, err := runGitOutputEnvCtx(ctx, worktreePath, nil, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--name-only")
 	if err != nil {
 		return CommitResult{}, fmt.Errorf("read staged files: %w", err)
 	}
@@ -424,10 +436,10 @@ func gitTaskCommit(worktreePath, message string) (CommitResult, error) {
 		return CommitResult{}, ErrNothingStaged
 	}
 
-	if err := runGit(worktreePath, "commit", "-m", message); err != nil {
+	if err := runGitCtx(ctx, worktreePath, "commit", "-m", message); err != nil {
 		return CommitResult{}, fmt.Errorf("commit: %w", err)
 	}
-	sha, err := runGitOutput(worktreePath, "rev-parse", "HEAD")
+	sha, err := runGitOutputEnvCtx(ctx, worktreePath, nil, "rev-parse", "HEAD")
 	if err != nil {
 		return CommitResult{}, fmt.Errorf("resolve new commit: %w", err)
 	}

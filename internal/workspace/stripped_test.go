@@ -103,11 +103,74 @@ func Test_execgit_picks_the_mode_from_the_context(t *testing.T) {
 	assertNoMarkers(t, r)
 
 	r.ClearMarkers()
-	// The armed repository sets commit.gpgsign=true with a failing signing
-	// program, so this commit fails AFTER the hook has run: the marker is
-	// what the human mode is judged on.
+	// The armed repository signs commits (commit.gpgsign=true) with a
+	// failing program, so this commit fails AFTER the hook has run: the
+	// marker is what the human mode is judged on.
 	_, _, _ = execGit(WithHumanInitiated(context.Background()), r.Dir, nil, "commit", "--allow-empty", "-m", "x")
 	if !slices.Contains(r.Markers(), "hook.ran") {
 		t.Fatalf("markers = %v, want hook.ran from the pre-commit hook", r.Markers())
 	}
+}
+
+// The Commit button's commit (a human-marked context) keeps the
+// repository's pre-commit hook.
+func Test_human_commit_runs_the_pre_commit_hook(t *testing.T) {
+	r := gitsafetest.NewStrippedRepo(t)
+	writeRepoFile(t, r.Dir, "a.mrg", "a.mrg changed\n")
+	r.Git(t, "add", "--", "a.mrg")
+	r.ClearMarkers()
+
+	// The armed repository signs commits (commit.gpgsign=true) with a
+	// failing program, so this commit fails AFTER the hook has run: the
+	// marker is what the human mode is judged on.
+	_, _ = gitTaskCommit(WithHumanInitiated(context.Background()), r.Dir, "m")
+	if !slices.Contains(r.Markers(), "hook.ran") {
+		t.Fatalf("markers = %v, want hook.ran from the pre-commit hook", r.Markers())
+	}
+}
+
+// The runner's agent commit (the default context) runs no hook, and the
+// commit itself still lands.
+func Test_runner_agent_commit_runs_no_hook(t *testing.T) {
+	r := gitsafetest.NewStrippedRepo(t)
+	writeRepoFile(t, r.Dir, "a.mrg", "a.mrg changed\n")
+	r.Git(t, "add", "--", "a.mrg")
+	r.ClearMarkers()
+
+	res, err := gitTaskCommit(context.Background(), r.Dir, "m")
+	if err != nil {
+		t.Fatalf("gitTaskCommit(daemon) error = %v", err)
+	}
+	if res.Files != 1 {
+		t.Fatalf("gitTaskCommit() counted %d files, want 1 (a.mrg)", res.Files)
+	}
+	assertNoMarkers(t, r)
+	out, err := r.Run("log", "--format=%s", "-n", "1")
+	if err != nil {
+		t.Fatalf("read the commit: %v", err)
+	}
+	if strings.TrimSpace(string(out)) != "m" {
+		t.Fatalf("git log -n 1 = %q, want the commit subject %q", out, "m")
+	}
+}
+
+// The Stage button's `git add` (a human-marked context) runs the clean
+// filter; the daemon's own staging runs none.
+func Test_human_stage_runs_the_clean_filter(t *testing.T) {
+	r := gitsafetest.NewStrippedRepo(t)
+
+	writeRepoFile(t, r.Dir, "a.flt", "a.flt human\n")
+	if err := taskStageFile(WithHumanInitiated(context.Background()), r.Dir, "a.flt", true); err != nil {
+		t.Fatalf("taskStageFile(human) error = %v", err)
+	}
+	if !slices.Contains(r.Markers(), "filter.ran") {
+		t.Fatalf("markers = %v, want filter.ran from the clean filter", r.Markers())
+	}
+
+	r.ClearMarkers()
+	writeRepoFile(t, r.Dir, "a.flt", "a.flt daemon\n")
+	if err := taskStageFile(context.Background(), r.Dir, "a.flt", true); err != nil {
+		t.Fatalf("taskStageFile(daemon) error = %v", err)
+	}
+	assertNoMarkers(t, r)
 }
