@@ -58,7 +58,7 @@ The landing page's "Try it live" link changes from the demo to the real app (or 
 | PR | What | Size |
 |---|---|---|
 | 1 | The shared package: move the pure relay client to `web/packages/relay-client`, interfaces for the platform seams, mobile imports it (behaviour unchanged), the Go vectors run in the package's tests | M, high-risk (the mobile app ships it) |
-| 2 | The browser client: WebCrypto identity key, IndexedDB store, `RelayWebConnection` over `SocketLike`, reconnect and resume, state hook, the real-relay e2e (browser, real relay, real daemon); ADR-0052 updated to Accepted for Phase 1 and ADR-0051 marked superseded (docs ride here) | L, high-risk |
+| 2 | The browser client as a new package `web/packages/relay-web` (no UI): WebCrypto identity key, IndexedDB stores, `RelaySocket` (a `SocketLike` over the shared `RelayConnection`, so the existing `WsClient` runs unchanged), a controller (pair, resume, state, reconnect, re-pair), the offer-fragment helper; tests with Node's WebCrypto and `fake-indexeddb`, and integration tests against the real Go relay devharness (as mobile does); ADR-0052 Accepted for Phase 1 and ADR-0051 superseded (docs ride here). Real-browser coverage (true IndexedDB and WebCrypto in Chromium) arrives with PR 3's UI e2e | L, high-risk |
 | 3 | The pairing and connection UI (pair screen, the states, re-pair after eviction, the "Web" chip in the devices list), `smind relay offer` prints the web link; browser frames | M |
 | 4 | Remove the demo; the hosted build mode and its CSP/size/forbidden-string gate; the release workflow deploys the real bundle to app.spacingmind.com; the ADR-0051 follow-through | M (needs the Lane B routing above) |
 
@@ -73,7 +73,7 @@ PR 2
 - AC4 The identity key is generated non-extractable (`key.extractable === false`, `exportKey` on the private key rejects), persisted in IndexedDB, and reloaded across a page reload; no code path creates an extractable identity key; an unsupported browser fails with a typed error.
 - AC5 No key material, session key, admission secret or offer payload is ever written to `console`, `localStorage`, `sessionStorage`, a cookie, an error message or the address bar after the fragment is consumed (a spy test over a full pair, connect, reconnect run).
 - AC6 Eviction (the stored identity deleted) is detected and reported as "re-pair needed"; a new identity is never created silently.
-- AC7 Over a real relay and a real daemon, the browser pairs from an offer link, connects, calls `task.list`, receives a pushed event, survives a relay restart (reconnect and resume), and is refused with a clear state when the daemon revokes the device.
+- AC7 Over a real Go relay and daemon hub (the devharness), the browser client pairs from an offer link, connects, calls `task.list`, receives a pushed event, survives a relay restart (reconnect and resume), and is refused with a clear state when the daemon revokes the device.
 - AC8 `RelayWebConnection` satisfies `SocketLike` so `WsClient` runs unchanged; the same wsapi calls work over it as over the same-origin socket.
 
 PR 3
@@ -88,7 +88,7 @@ PR 4
 ## Test scenarios (named; Vitest `it(...)` or Go `Test_...` as noted)
 
 PR 1: `relay_client_package_has_no_platform_imports`, `vectors_match_go_v2`, `mobile_imports_the_shared_package_only`, `mobile_bundle_resolves_the_shared_package` (command: `expo export`).
-PR 2: `identity_key_is_non_extractable`, `identity_key_survives_reload`, `identity_key_missing_means_repair_not_new_identity`, `unsupported_browser_fails_typed`, `no_secret_reaches_console_or_storage`, `fragment_is_removed_after_pairing`, `relay_web_connection_is_a_socketlike`, `reconnect_resumes_after_relay_restart`, `revoked_device_gets_a_clear_state`; e2e `WR-01` pair and call, `WR-02` reconnect, `WR-03` revoke, `WR-04` eviction.
+PR 2: `identity_key_is_non_extractable`, `identity_key_survives_reload`, `identity_key_missing_means_repair_not_new_identity`, `unsupported_browser_fails_typed`, `no_secret_reaches_console_or_storage`, `fragment_is_removed_after_pairing`, `relay_socket_is_a_socketlike_for_wsclient`, `reconnect_resumes_after_relay_restart`, `revoked_device_gets_a_clear_state`; real-relay integration (`*.node.test.ts`, `bun run test:integration`): `WR-01` pair and call and a pushed event, `WR-02` reconnect and resume, `WR-03` revoke; `WR-04` eviction is a unit test (a deleted identity record).
 PR 3: `pair_screen_accepts_link_and_qr`, `pair_screen_shows_fingerprint_relay_and_disclosure`, `web_chip_for_web_labels`; Go `relay_offer_prints_the_web_link`; frames.
 PR 4: `no_demo_code_remains` (a source guard), `hosted_build_has_no_same_origin_token_code`, `embedded_build_has_no_hosted_code`, `hosted_bundle_gates`.
 

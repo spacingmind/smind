@@ -2,6 +2,8 @@
 
 ## Status
 
+**Superseded by [ADR-0052](0052-hosted-web-app-and-official-relay.md) — 2026-11-28, by the Human:** the demo is dropped and `app.spacingmind.com` becomes the real web client (browser to relay, E2EE v2). Demo mode, its build and its deploy are removed in the fourth pull request of `docs/plans/active/web-relay-client.md`; until that lands the text below describes what is still in the tree.
+
 **Proposed — 2026-11-01** (implemented, unmerged, in PR #797). The *direction* is the Human's (2026-11-01): the landing page gets a **hybrid demo** — the hero stays a light
 coded mock (landing PR #34, another Lead), plus a "Try it live" entry that opens the **real** smind web UI (`web/packages/ui`) in **demo
 mode**, hosted at `app.spacingmind.com`, **demo only for now**. This ADR is the design the Human reviews; the demo is built as
