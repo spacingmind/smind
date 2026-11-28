@@ -35,7 +35,8 @@ import (
 // offer`) -- a different role from operating a relay: see internal/relay/
 // bridge's doc comment.
 //
-//	smind relay [--listen <addr>] [--data-dir <dir>] [--max-devices-per-host <n>] [--tls-cert <pem> --tls-key <pem>]
+//	smind relay [--listen <addr>] [--data-dir <dir>] [--max-devices-per-host <n>] [--allowed-origin <origin> ...]
+//	           [--no-default-web-origin] [--tls-cert <pem> --tls-key <pem>]
 //	smind relay host new <id>    (prints the raw secret once)
 //	smind relay host ls
 //	smind relay host rm <id>
@@ -90,6 +91,9 @@ func parseRelayServeFlags(args []string, stderr io.Writer) (server.Config, int) 
 	maxDevices := fs.Int("max-devices-per-host", server.DefaultMaxDevicesPerHost, "maximum devices attached to one relay host at once")
 	tlsCert := fs.String("tls-cert", "", "serve this PEM certificate chain (e.g. Let's Encrypt) instead of a self-signed one; needs --tls-key")
 	tlsKey := fs.String("tls-key", "", "the PEM private key for --tls-cert")
+	var allowedOrigins originValues
+	fs.Var(&allowedOrigins, "allowed-origin", "browser origin also accepted on the grpc-web listener (repeatable; browsers are otherwise accepted only from https://app.spacingmind.com)")
+	noDefaultWebOrigin := fs.Bool("no-default-web-origin", false, "do not accept https://app.spacingmind.com as a browser origin (only the --allowed-origin ones remain)")
 	if err := fs.Parse(args); err != nil {
 		return server.Config{}, 2
 	}
@@ -109,15 +113,94 @@ func parseRelayServeFlags(args []string, stderr io.Writer) (server.Config, int) 
 		fmt.Fprintln(stderr, "smind relay: --tls-cert and --tls-key must be given together")
 		return server.Config{}, 2
 	}
+	origins, err := resolveRelayOrigins(allowedOrigins.values, os.Getenv(relayAllowedOriginsEnv))
+	if err != nil {
+		fmt.Fprintf(stderr, "smind relay: %v\n", err)
+		return server.Config{}, 2
+	}
 	return server.Config{
-		ListenAddr:        *listen,
-		GRPCWebListenAddr: *grpcWebListen,
-		DataDir:           *dataDir,
-		MaxDevicesPerHost: *maxDevices,
-		TLSCertFile:       *tlsCert,
-		TLSKeyFile:        *tlsKey,
-		ListenersDir:      filepath.Join(config.Dir(), "listeners"),
+		ListenAddr:         *listen,
+		GRPCWebListenAddr:  *grpcWebListen,
+		DataDir:            *dataDir,
+		MaxDevicesPerHost:  *maxDevices,
+		TLSCertFile:        *tlsCert,
+		TLSKeyFile:         *tlsKey,
+		ListenersDir:       filepath.Join(config.Dir(), "listeners"),
+		AllowedOrigins:     origins,
+		NoDefaultWebOrigin: *noDefaultWebOrigin,
 	}, 0
+}
+
+// relayAllowedOriginsEnv is the comma-separated counterpart of the
+// repeatable --allowed-origin flag, for containers that cannot easily pass
+// the flag.
+const relayAllowedOriginsEnv = "SMIND_RELAY_ALLOWED_ORIGINS"
+
+// parseRelayOrigins is the browser-origin validator the relay server owns
+// (server.ParseAllowedOrigins); a variable only so tests can stand in for
+// it while its implementation lands.
+var parseRelayOrigins = server.ParseAllowedOrigins
+
+// originValues is the repeatable --allowed-origin flag: every occurrence
+// appends one origin.
+type originValues struct {
+	values []string
+}
+
+func (o *originValues) String() string {
+	if o == nil {
+		return ""
+	}
+	return strings.Join(o.values, ",")
+}
+
+func (o *originValues) Set(v string) error {
+	o.values = append(o.values, v)
+	return nil
+}
+
+// splitRelayOriginsEnv splits a relayAllowedOriginsEnv value into origins:
+// comma separated, each trimmed, empty items dropped.
+func splitRelayOriginsEnv(env string) []string {
+	var values []string
+	for _, v := range strings.Split(env, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			values = append(values, v)
+		}
+	}
+	return values
+}
+
+// resolveRelayOrigins merges the operator's browser origins for the
+// grpc-web listener: the --allowed-origin values first, then the env
+// values, de-duplicated by exact string, each validated and normalised by
+// parseRelayOrigins. Nothing configured: nil, and the server applies its
+// default origin. An invalid value's error names it and where it came
+// from, so the relay refuses to start before it listens.
+func resolveRelayOrigins(flagValues []string, env string) ([]string, error) {
+	seen := map[string]bool{}
+	var origins []string
+	add := func(source string, values ...string) error {
+		for _, v := range values {
+			if seen[v] {
+				continue
+			}
+			seen[v] = true
+			parsed, err := parseRelayOrigins([]string{v})
+			if err != nil {
+				return fmt.Errorf("%s: %q: %v", source, v, err)
+			}
+			origins = append(origins, parsed...)
+		}
+		return nil
+	}
+	if err := add("--allowed-origin", flagValues...); err != nil {
+		return nil, err
+	}
+	if err := add(relayAllowedOriginsEnv, splitRelayOriginsEnv(env)...); err != nil {
+		return nil, err
+	}
+	return origins, nil
 }
 
 // relayConnectNote says what connecting does and does not do: the word
@@ -551,9 +634,17 @@ func printRelayUsage(w io.Writer) {
 
 Usage:
   smind relay [--listen <addr>] [--grpc-web-listen <addr>] [--data-dir <dir>] [--max-devices-per-host <n>]
+              [--allowed-origin <origin>] [--no-default-web-origin]
               [--tls-cert <pem> --tls-key <pem>]           start the relay server (default 16 devices per relay host);
                                                            with --tls-cert/--tls-key it serves your CA certificate
                                                            (e.g. Let's Encrypt) instead of a self-signed one
+                                                           --allowed-origin <origin> accepts one more browser origin
+                                                           on the grpc-web listener (repeatable; the comma-separated
+                                                           SMIND_RELAY_ALLOWED_ORIGINS environment variable does the
+                                                           same for containers); browsers are otherwise accepted
+                                                           only from https://app.spacingmind.com
+                                                           --no-default-web-origin drops that default origin,
+                                                           leaving only the ones you allowed
   smind relay host new <id>                               enroll a relay host (secret printed once)
   smind relay host ls                                     list enrolled relay hosts
   smind relay host rm <id>                                remove a relay host
