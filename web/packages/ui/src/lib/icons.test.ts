@@ -61,6 +61,7 @@ describe("icon registry", () => {
         "groupByWorkspace": "FolderGit2",
         "help": "CircleQuestionMark",
         "history": "RotateCcwClock",
+        "home": "House",
         "host": "Server",
         "image": "Image",
         "inbox": "Inbox",

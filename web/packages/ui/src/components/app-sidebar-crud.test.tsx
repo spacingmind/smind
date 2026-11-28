@@ -252,7 +252,7 @@ describe("AppSidebar CRUD", () => {
     expect(screen.getByText("No tasks yet")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("sidebar-empty-new-workspace-button"));
-    expect(await screen.findByRole("button", { name: "Create workspace" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Add project" })).toBeInTheDocument();
   });
 
   it("new workspace event opens the create workspace dialog", async () => {
@@ -263,7 +263,7 @@ describe("AppSidebar CRUD", () => {
 
     act(() => requestNewWorkspace());
 
-    expect(await screen.findByRole("button", { name: "Create workspace" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Add project" })).toBeInTheDocument();
   });
 
   it("create-workspace dialog requires a path and shows a hint, without calling the RPC", async () => {
@@ -273,7 +273,7 @@ describe("AppSidebar CRUD", () => {
     await flush();
 
     fireEvent.click(await screen.findByRole("button", { name: "New workspace" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Create workspace" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Add project" }));
     await flush();
 
     expect(await screen.findByText("Path is required.")).toBeInTheDocument();
@@ -288,7 +288,7 @@ describe("AppSidebar CRUD", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "New workspace" }));
     fireEvent.change(await screen.findByLabelText("Path"), { target: { value: "/tmp/repo" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add project" }));
 
     const create = await waitFor(() => client.nth("workspace.create"));
     expect(create.params).toEqual({ path: "/tmp/repo" });
@@ -354,7 +354,7 @@ describe("AppSidebar CRUD", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "New workspace" }));
     fireEvent.change(await screen.findByLabelText("Path"), { target: { value: "/tmp/repo" } });
-    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add project" }));
 
     const create = await waitFor(() => client.nth("workspace.create"));
     await act(async () => {
@@ -362,7 +362,8 @@ describe("AppSidebar CRUD", () => {
     });
     await flush();
 
-    expect(await screen.findByText(/not a git repository/)).toBeInTheDocument();
+    // The daemon's label is dropped: the person reads one sentence.
+    expect(await screen.findByText("Not a git repository.")).toBeInTheDocument();
   });
 
   it("workspace row menu offers Add task and Add space; Add space calls space.create and refreshes", async () => {

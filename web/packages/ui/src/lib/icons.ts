@@ -73,6 +73,7 @@ import {
   GitPullRequest,
   Globe,
   Hand,
+  House,
   RotateCcwClock,
   Hourglass,
   Image,
@@ -287,6 +288,8 @@ export const Icons = {
   // --- settings sections / hosts
   host: Server,
   connections: Network,
+  /** The daemon user's home directory (the folder picker's Home place). */
+  home: House,
   notifications: Bell,
   appearance: Palette,
   themeLight: Sun,

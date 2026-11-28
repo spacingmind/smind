@@ -34,7 +34,6 @@ import type {
   Workspace,
 } from "@/lib/types";
 import {
-  recentWorkspaceParentDirs,
   searchTasks,
   type SpaceWithTasks,
   type TaskSearchResult,
@@ -75,10 +74,10 @@ import {
   ArchiveTaskDialog,
   CreateSpaceDialog,
   CreateTaskDialog,
-  CreateWorkspaceDialog,
   DeleteSpaceDialog,
   DeleteWorkspaceDialog,
 } from "@/components/crud-dialogs";
+import { AddProjectDialog } from "@/components/add-project/add-project-dialog";
 import { SetupBadge } from "@/components/task-setup";
 import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
@@ -1134,17 +1133,25 @@ export function AppSidebar({
       {/* Outside <Sidebar>: on mobile it is a Sheet that unmounts while closed. */}
       {client && (
         <>
-          <CreateWorkspaceDialog
+          <AddProjectDialog
             client={client}
             open={crud?.kind === "workspace"}
             onOpenChange={(o) => !o && setCrud(null)}
-            onCreated={(ws) => {
+            workspaces={workspaces ?? []}
+            onProjectReady={(ws) => {
               // Land on the new workspace expanded, even if a deleted
-              // workspace's id is still persisted as collapsed.
+              // workspace's id is still persisted as collapsed, and bring
+              // its row into view (C1 D6).
               nodes.open(`ws:${ws.ID}`);
               refresh();
+              scrollWorkspaceIntoView(ws.ID);
             }}
-            recentPaths={recentWorkspaceParentDirs(workspaces ?? [])}
+            onStartTask={(ws) =>
+              // A freshly created workspace has no tree yet; the New task
+              // dialog only reads ID/Title/Path, and the next tree refresh
+              // replaces this object.
+              setCrud({ kind: "task", workspace: { ...ws, spaces: [], ungroupedTasks: [] }, spaceId: null })
+            }
           />
           {crud?.kind === "space" && (
             <CreateSpaceDialog
@@ -1735,6 +1742,26 @@ function RowActions({ children }: { children: ReactNode }) {
       {children}
     </span>
   );
+}
+
+/**
+ * Scrolls the workspace's row into view after the Add-project dialog lands on
+ * it (C1 D6): the row only exists once the tree's refresh has rendered, so
+ * retry on animation frames -- at most ~20 -- and then give up silently:
+ * scrolling is a courtesy to the person, never an error.
+ */
+function scrollWorkspaceIntoView(workspaceId: number): void {
+  const selector = `[data-testid="sidebar-workspace-row"][data-workspace-id="${workspaceId}"]`;
+  let frames = 0;
+  const find = () => {
+    const row = document.querySelector<HTMLElement>(selector);
+    if (row) {
+      row.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    if (frames++ < 20) requestAnimationFrame(find);
+  };
+  requestAnimationFrame(find);
 }
 
 function WorkspaceItem({
