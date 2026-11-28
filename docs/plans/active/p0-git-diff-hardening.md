@@ -58,16 +58,16 @@ Verdict: **safe** (cannot run a configured program, or only a read of refs), **f
 | `workspace/pr.go:206, :263`, `sync.go:290`, `archive_branch.go:344`, `task_ref.go:129,138`, `wsapi/fleet_write.go:110` | `git fetch` / `git push` (credential helper, ssh command, pre-push hook) | **out of scope (D4: credentials)**: that is how the user's own login works |
 | `workspace/git.go:193`, `archive_branch.go:405,417,441`, `branches.go`, `default_base.go`, `sync.go:96,159,191,204,367,396,405`, `pr.go:377,391,404`, `task.go:182,191,230,296`, `git.go:353` `restore --staged` | `rev-parse`, `rev-list`, `for-each-ref`, `symbolic-ref`, `merge-base`, `config --get`, `remote`, `worktree list/remove`, `branch -D`, `ls-files` | **safe** (refs and config reads; `ls-files` honours fsmonitor, off in `execGit`) |
 | `steward/git.go` (`diff --numstat`, `diff -U0`, `log`, `rev-list`, `merge-base`) and `steward/standards_git.go` (`diff`, `ls-tree`, `cat-file`) | read-only | **safe / fixed**: the two diffs already carry the flags; `gitCmd` now carries the shared hardening |
-| `gitstate` (`DefaultRunner`) | status / refs / config for the UI | fsmonitor off; **fixed**: environment scrubbed by `gitsafe.Env`; filters: **out of scope (D4)** |
+| `gitstate/runner.go` (`DefaultRunner`) | status / refs / config for the UI | fsmonitor off; **fixed**: environment scrubbed by `gitsafe.Env`; filters: **out of scope (D4)** |
 | `taskrunner/gitrules_detail.go:65` | `git diff --cached --name-only` | **fixed** (flags spelled) |
 | `validation/digest.go:33,155` `rev-parse`; `:121` `merge-base --is-ancestor` | refs | **safe** |
-| `wsapi/steward_collect.go:157`, `steward_collect_twoaxis.go:81,100` | `rev-parse`, `ls-tree`, `grep -q` (reads a commit's blobs, no textconv) | **safe** |
+| `wsapi/steward_collect.go:157`, `wsapi/steward_collect_twoaxis.go:81,100` | `rev-parse`, `ls-tree`, `grep -q` (reads a commit's blobs, no textconv) | **safe** |
 | `wsapi/fleet_read.go:99`, `wsapi/forge_auth.go:252` | `remote get-url` | **safe** |
 | `learning/probe/arm/diff.go:68` | `git diff --no-index --no-textconv --no-ext-diff` | **safe** (already flagged; pinned by a test here) |
 | `learning/probe/arm/materialise.go` | `cat-file`, `init`, `rev-parse`, `archive` of the real repo | **safe** (`archive` runs no driver; `export-subst` is a format expansion) |
 | `plugins/source.go:208-214` | `fetch`, `checkout --detach`, `rev-parse` in a fresh plugin work dir | **safe** (a fresh directory: no repository config of an agent) |
 | `cmd/smind/run_columns.go:101` | `git rev-list --count` | **safe** (CLI the user runs; refs only) |
-| `internal/qaframes/cmd/qaframes`, `internal/relay/bridge/devharness` | developer tools, not the daemon | **out of scope** |
+| `qaframes/cmd/qaframes/main.go`, `relay/bridge/devharness/main.go` | developer tools, not the daemon | **out of scope** |
 
 ## Acceptance criteria
 
