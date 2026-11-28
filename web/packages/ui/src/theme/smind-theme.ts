@@ -70,7 +70,7 @@
 import { defineTheme } from "@astryxdesign/core/theme";
 import { neutralTheme } from "@astryxdesign/theme-neutral";
 
-type Pair = readonly [light: string, dark: string];
+type Pair = [light: string, dark: string];
 
 /** Tailwind v4 neutral-800 / neutral-300, which index.css uses for --foreground. */
 const foreground: Pair = ["oklch(0.269 0 0)", "oklch(0.87 0 0)"];
