@@ -6,7 +6,7 @@ planRef: docs/plans/active/p0-git-stripped-mode.md
 acs:
   - id: AC1
     text: "Stripped mode: no armed program runs for any daemon-initiated operation."
-    covers: { tests: [real_git_daemon_mode_runs_no_armed_program, checkpoint_runs_no_hook_or_filter_in_a_poisoned_repo, diff_snapshot_runs_no_filter, worktree_add_runs_no_post_checkout_hook, runner_agent_commit_runs_no_hook], frames: [] }
+    covers: { tests: [gitstate_runner_runs_no_armed_program, validation_digest_runs_no_armed_program, execgit_picks_the_mode_from_the_context, real_git_daemon_mode_runs_no_armed_program, checkpoint_runs_no_hook_or_filter_in_a_poisoned_repo, diff_snapshot_runs_no_filter, worktree_add_runs_no_post_checkout_hook, runner_agent_commit_runs_no_hook], frames: [] }
   - id: AC2
     text: "Human mode: the armed programs run for the operations the Human starts."
     covers: { tests: [real_git_human_mode_runs_the_armed_programs, human_commit_runs_the_pre_commit_hook, human_stage_runs_the_clean_filter, human_push_runs_the_pre_push_hook, human_update_from_base_runs_the_merge_driver], frames: [] }
@@ -15,7 +15,7 @@ acs:
     covers: { tests: [stripped_neutralises_local_filter_merge_driver_ssh_askpass_pack, stripped_keeps_global_filter_and_credential_helper, stripped_local_override_of_a_global_filter_is_reasserted, stripped_trusts_exact_lfs_command_lines, stripped_credential_helper_reset_keeps_trusted_helpers, stripped_scan_parse_scope_and_origin, real_git_daemon_mode_keeps_a_global_filter], frames: [] }
   - id: AC4
     text: "The scan fails closed, exit 1 is no match, ref-only subcommands skip it, unknown ones are scanned."
-    covers: { tests: [stripped_scan_failure_fails_closed, stripped_scan_exit_one_is_no_match, stripped_skips_the_scan_for_ref_only_subcommands, stripped_scans_an_unknown_subcommand, stripped_args_static_prefix], frames: [] }
+    covers: { tests: [stripped_remote_update_is_scanned_but_remote_get_url_is_not, stripped_cat_file_filters_is_scanned, stripped_neutralises_a_local_gpg_program, stripped_adds_pack_program_flags_for_fetch_ls_remote_push, stripped_scan_failure_fails_closed, stripped_scan_exit_one_is_no_match, stripped_skips_the_scan_for_ref_only_subcommands, stripped_scans_an_unknown_subcommand, stripped_args_static_prefix], frames: [] }
   - id: AC5
     text: "eol attributes show no spurious change in stripped mode."
     covers: { tests: [real_git_eol_attributes_do_not_show_spurious_changes], frames: [] }
@@ -57,6 +57,13 @@ tests:
   - { name: human_push_runs_the_pre_push_hook, run: "TMPDIR=/tmp/c5-tmp go test ./internal/workspace/ -run \"^Test_human_push_runs_the_pre_push_hook$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: human_update_from_base_runs_the_merge_driver, run: "TMPDIR=/tmp/c5-tmp go test ./internal/workspace/ -run \"^Test_human_update_from_base_runs_the_merge_driver$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: task_commit_marks_human_only_for_a_non_run_scoped_caller, run: "TMPDIR=/tmp/c5-tmp go test ./internal/wsapi/ -run \"^Test_task_commit_marks_human_only_for_a_non_run_scoped_caller$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: gitstate_runner_runs_no_armed_program, run: "TMPDIR=/tmp/c5-tmp go test ./internal/gitstate/ -run \"^Test_gitstate_runner_runs_no_armed_program$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: validation_digest_runs_no_armed_program, run: "TMPDIR=/tmp/c5-tmp go test ./internal/validation/ -run \"^Test_validation_digest_runs_no_armed_program$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: execgit_picks_the_mode_from_the_context, run: "TMPDIR=/tmp/c5-tmp go test ./internal/workspace/ -run \"^Test_execgit_picks_the_mode_from_the_context$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: stripped_remote_update_is_scanned_but_remote_get_url_is_not, run: "TMPDIR=/tmp/c5-tmp go test ./internal/gitsafe/ -run \"^Test_stripped_remote_update_is_scanned_but_remote_get_url_is_not$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: stripped_cat_file_filters_is_scanned, run: "TMPDIR=/tmp/c5-tmp go test ./internal/gitsafe/ -run \"^Test_stripped_cat_file_filters_is_scanned$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: stripped_neutralises_a_local_gpg_program, run: "TMPDIR=/tmp/c5-tmp go test ./internal/gitsafe/ -run \"^Test_stripped_neutralises_a_local_gpg_program$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: stripped_adds_pack_program_flags_for_fetch_ls_remote_push, run: "TMPDIR=/tmp/c5-tmp go test ./internal/gitsafe/ -run \"^Test_stripped_adds_pack_program_flags_for_fetch_ls_remote_push$\" -timeout 300s -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: hygiene_and_scope, run: "go test ./internal/hygiene/ -count=1 && test -z \"$(git diff origin/develop...HEAD --name-only -- web mobile desktop)\"", timeoutSec: 1200 }
 mutations:
   - { id: M1, file: internal/gitsafe/stripped.go, change: "drop core.hooksPath from the static prefix", expectFail: [real_git_daemon_mode_runs_no_armed_program] }

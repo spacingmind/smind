@@ -122,7 +122,11 @@ GLM peers write the code from step briefs (one commit per step, at most two at a
 
 ## Progress
 
-- Spec and the mechanism measured first (this commit).
+- Spec and the mechanism measured first; the validation contract committed before code.
+- Code by GLM peers from step briefs, one commit per step, every diff reviewed and cherry-picked by the Lead: P1 the `gitsafe` core and the armed-repo fixture and real-git tests, P2 the workspace and wsapi plumbing, P3 the other choke points and the audit. GLM stopped at its output-token cap twice on the first, large P1 prompt (nothing saved; not a plan limit), so the work was re-sent in small single-commit steps, still on GLM.
+- A real-git test caught a wrong assumption of the spec: `-c remote.<n>.uploadpack=...` does not override the repository's program in any variant; the command-line flag does. The mechanism, the table above and D2 were corrected (the flag is inserted after `fetch`, `ls-remote`, `push`).
+- Lead review corrected two allow-list entries (`remote` and `cat-file` can run programs) and added `gpg.program`.
+- Lead mutations on committed code, each fails its named test: M1 (no `core.hooksPath`), M2 (local scope trusted), M3 (the human context ignored), M4 (`execGit` always baseline), M5 (a scan error swallowed), M6 (a classification row removed).
 
 ## Validation
 
