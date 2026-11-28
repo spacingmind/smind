@@ -64,12 +64,21 @@ function AstryxInput({
   const current = controlled ? String(value) : inner
   const invalid = ariaInvalid === true || ariaInvalid === "true"
   const inputRef = React.useRef<HTMLInputElement | null>(null)
+  const mountedRef = React.useRef(false)
   // React mirrors a controlled value into the value attribute; a password must
   // never sit in the DOM (a native uncontrolled input has no such attribute).
   const { text: textClass, box: boxClass } = splitClassName(cn(TEXT_DEFAULTS, className))
   React.useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
+    if (!mountedRef.current) {
+      mountedRef.current = true
+      if (autoFocus) {
+        // Dialog owns focus after showModal; focusing at mount causes an early blur.
+        el.setAttribute("data-autofocus", "")
+        if (el.closest("dialog") === null) el.focus()
+      }
+    }
     if (textClass) el.classList.add(...textClass.split(" "))
     if (type === "password") el.removeAttribute("value")
     // Astryx writes aria-invalid itself (from `status`, unused here).
@@ -121,7 +130,6 @@ function AstryxInput({
       // placeholder.
       label={"\u00a0"}
       isLabelHidden
-      hasAutoFocus={autoFocus}
       value={current}
       placeholder={placeholder}
       isDisabled={disabled}
