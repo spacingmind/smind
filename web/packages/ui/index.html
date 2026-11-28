@@ -2,6 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Cascade layer order (ADR-0064), declared before any stylesheet. Astryx injects its own
+      `@layer reset, astryx-base, astryx-theme;` at runtime (its Theme and CodeBlock modules); if that
+      style reaches the document first, the layers it names sort ahead of Tailwind's, and Tailwind's
+      preflight outranks every Astryx style. The first declaration of a layer name wins, so this must
+      stay the first style in <head>, and must equal the line at the top of src/index.css.
+    -->
+    <style>
+      @layer reset, theme, base, astryx-base, astryx-theme, components, utilities;
+    </style>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>sMind</title>
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
