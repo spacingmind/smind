@@ -1,0 +1,23 @@
+{
+  "name": "@smind/relay-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@smind/relay-client": "workspace:*",
+    "@noble/curves": "^2.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "*",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.11",
+    "fake-indexeddb": "^6.0.0"
+  },
+  "scripts": {
+    "test": "vitest run --exclude \"**/*.node.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "test:integration": "NODE_TLS_REJECT_UNAUTHORIZED=0 vitest run src/__tests__/integration"
+  }
+}
