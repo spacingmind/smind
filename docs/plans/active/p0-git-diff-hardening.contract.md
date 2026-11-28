@@ -50,11 +50,12 @@ tests:
   - { name: gitstate_runner_does_not_run_drivers_or_fsmonitor, run: "TMPDIR=/tmp/a2-tmp go test ./internal/gitstate/ -run gitstate_runner_does_not_run_drivers_or_fsmonitor -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 900 }
   - { name: hygiene_and_scope, run: "go test ./internal/hygiene/ -count=1 && test -z \"$(git diff origin/develop...HEAD --name-only -- web mobile desktop)\"", timeoutSec: 900 }
 mutations:
-  - { id: M1, file: internal/gitsafe/gitsafe.go, change: "drop --no-textconv from Args", expectFail: [gitsafe_args_orders_overrides_and_diff_flags, taskdiff_does_not_run_textconv_or_external_diff] }
-  - { id: M2, file: internal/gitsafe/gitsafe.go, change: "drop --no-ext-diff from Args", expectFail: [gitsafe_args_orders_overrides_and_diff_flags, taskdiff_does_not_run_textconv_or_external_diff] }
-  - { id: M3, file: internal/gitsafe/gitsafe.go, change: "drop the -c core.fsmonitor=false prefix", expectFail: [gitsafe_args_orders_overrides_and_diff_flags, workspace_status_does_not_run_fsmonitor] }
+  - { id: M1, file: internal/gitsafe/gitsafe.go, change: "drop the --no-ext-diff insertion from Args (layer one only: the call sites still spell the flag)", expectFail: [gitsafe_args_orders_overrides_and_diff_flags] }
+  - { id: M2, file: internal/gitsafe/gitsafe.go, change: "drop the --no-textconv insertion from Args (layer one only)", expectFail: [gitsafe_args_orders_overrides_and_diff_flags] }
+  - { id: M3, file: internal/gitsafe/gitsafe.go, change: "drop the -c core.fsmonitor=false prefix", expectFail: [gitsafe_args_orders_overrides_and_diff_flags, workspace_status_does_not_run_fsmonitor, validation_snapshot_does_not_run_fsmonitor, tripwire_snapshot_does_not_run_fsmonitor] }
   - { id: M4, file: internal/gitsafe/gitsafe.go, change: "Env keeps GIT_EXTERNAL_DIFF", expectFail: [gitsafe_env_drops_external_diff_and_sets_the_safe_defaults] }
   - { id: M5, file: internal/validation/digest.go, change: "validation.gitCmd bypasses gitsafe", expectFail: [validation_snapshot_does_not_run_fsmonitor, audit_choke_points_use_gitsafe] }
+  - { id: M6, file: internal/workspace/git.go, change: "remove BOTH layers at the exploitable sites: the --no-ext-diff/--no-textconv insertion in gitsafe.Args AND the spelled flags in taskDiff and taskFileDiff", expectFail: [taskdiff_does_not_run_textconv_or_external_diff, task_file_diff_does_not_run_drivers] }
 frames: []
 commands:
   - { id: C1, run: "go build ./... && go vet ./internal/gitsafe/ ./internal/workspace/ ./internal/validation/ ./internal/steward/", timeoutSec: 900 }

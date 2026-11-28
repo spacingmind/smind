@@ -19,11 +19,19 @@ An agent writes to its task's worktree, and through it to the repository's share
 
 Already in place before this PR: `core.fsmonitor=false` in `workspace.execGit` and `gitstate.DefaultRunner` (and in `taskrunner/gitrules_detail.go`, `wsapi/fleet_*`, `wsapi/forge_auth.go`); `--no-ext-diff --no-textconv` in `steward/git.go` and `learning/probe/arm/diff.go`. **Not** in place: the five `git diff` calls of `workspace/git.go`, `workspace/archive_branch.go:381`, `workspace/pr.go:171`, `workspace/sync.go:348`; no `fsmonitor` override on `validation/digest.go` `status`, `learning/probe/sandbox/tripwire.go` `status` (a status of an agent-edited probe sandbox), nor on the direct `exec.Command("git")` calls of `workspace/task_ref.go`; `GIT_EXTERNAL_DIFF` and `GIT_PAGER` are inherited from the daemon's own environment everywhere.
 
+## Measured facts (git 2.x, this machine, a repo with `diff.external`, a `diff=evil` textconv driver and `core.fsmonitor` armed with marker scripts)
+
+- `git diff` **patch output** runs `diff.external` (marker); with external diff off it runs the textconv driver (marker). `--no-ext-diff` stops the first, `--no-textconv` the second.
+- `git diff --numstat`, `--shortstat`, `--stat`, `--name-only`, `--name-status` and `git show -s` run **neither**: those call sites are inert today. They still carry the flags (a future `-p` or format change would otherwise silently become exploitable) and have a regression-pin test, but **no test of an inert site can fail when its flag is removed**. The real exposure in the daemon is the two patch calls: `workspace/git.go` taskDiff and taskFileDiff (the diff a user reads in the UI).
+- git suppresses the diff entirely when its stdout is `/dev/null`, so a naive probe of "does the driver run" under `> /dev/null` is meaningless; the tests capture the output.
+- `core.fsmonitor` runs for `status` and worktree diffs.
+
 ## Decisions
+
 
 - **D1 One shared hardening, `internal/gitsafe`** (stdlib only, no daemon import): `Args(args ...string) []string` returns the call's arguments with the overrides every daemon-side call carries (`-c core.fsmonitor=false` first) and, for the diff family (`diff`, `show`, `log`, `whatchanged`), `--no-ext-diff --no-textconv` right after the subcommand when the call did not already carry them; `Env(base []string) []string` returns `base` (or `os.Environ()` when nil) without `GIT_EXTERNAL_DIFF` and with `GIT_PAGER=cat`, `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`. It finds the subcommand by skipping git's own global options (`-c <k=v>`, `-C <dir>`, `--no-optional-locks`, `--git-dir=...`, any leading `-` option), so it is correct for the `git --no-optional-locks -C dir <verb>` shape steward and validation use.
 - **D2 Choke points use it**, so every present and future call through them is covered: `workspace.execGit` (every `runGit*` helper goes through it), `steward.gitCmd`, `validation.gitCmd` and its direct exec, `gitstate.DefaultRunner`, `sandbox.git` (tripwire), the direct calls in `workspace/task_ref.go`.
-- **D3 Per-call flags too** (belt and braces, and so the call sites read correctly): every `git diff` call of the daemon spells `--no-ext-diff --no-textconv` itself.
+- **D3 Per-call flags too, two independent layers** (belt and braces, and so the call sites read correctly): every `git diff` call of the daemon spells `--no-ext-diff --no-textconv` itself, and `gitsafe.Args` adds them if a call forgot. A mutation of ONE layer therefore passes the driver tests on purpose (the other layer still protects); the tests are killed by removing BOTH layers (see the mutations).
 - **D4 Out of scope, with the reason (listed in the audit below):** filter drivers, hooks, merge drivers, credential helpers. They are features a user relies on (git-lfs installs filters and a pre-push hook; husky installs hooks; credential helpers are how a push authenticates), and no single flag neutralises an unknown-named filter. Fixing them needs a design decision (a hardened clone, or an allowlist of configured drivers), not a flag: **reported as a follow-up with a recommendation (run the daemon's own non-user-initiated git in a stripped configuration, and decide whether a user-initiated commit should run the repo's hooks)**. The checkpoint commit and the `add -A` of the diff snapshot are the reachable cases; they are named.
 
 ## Audit: every daemon-side git call site (non-test), with a verdict
@@ -82,7 +90,12 @@ Verdict: **safe** (cannot run a configured program, or only a read of refs), **f
 
 ## Mutations (each by the Lead on committed code, then by the validator and the reviewers)
 
-M1 drop `--no-textconv` from `gitsafe.Args`; M2 drop `--no-ext-diff`; M3 drop the `-c core.fsmonitor=false` prefix; M4 drop `GIT_EXTERNAL_DIFF` removal from `gitsafe.Env`; M5 remove the explicit flag from `workspace/git.go` taskDiff **and** the helper insertion (both layers) -> `taskdiff_does_not_run_textconv_or_external_diff` must fail; M6 route `validation.gitCmd` around `gitsafe` -> `validation_snapshot_does_not_run_fsmonitor` must fail.
+- **M1** drop the `--no-ext-diff` insertion from `gitsafe.Args` -> `Test_gitsafe_args_orders_overrides_and_diff_flags` fails (the driver tests still pass: the call sites spell the flag: layer two).
+- **M2** drop the `--no-textconv` insertion from `gitsafe.Args` -> same.
+- **M3** drop the `-c core.fsmonitor=false` prefix from `gitsafe.Args` -> `Test_gitsafe_args_orders_overrides_and_diff_flags`, `Test_workspace_status_does_not_run_fsmonitor`, `Test_validation_snapshot_does_not_run_fsmonitor`, `Test_tripwire_snapshot_does_not_run_fsmonitor` fail.
+- **M4** `gitsafe.Env` keeps `GIT_EXTERNAL_DIFF` -> `Test_gitsafe_env_drops_external_diff_and_sets_the_safe_defaults` fails.
+- **M5** `validation.gitCmd` bypasses `gitsafe` -> `Test_validation_snapshot_does_not_run_fsmonitor` and `Test_audit_choke_points_use_gitsafe` fail.
+- **M6** remove BOTH layers at the exploitable sites (the insertion in `gitsafe.Args` and the spelled flags at the `taskDiff` and `taskFileDiff` call sites) -> `Test_taskdiff_does_not_run_textconv_or_external_diff` and `Test_task_file_diff_does_not_run_drivers` fail (measured: the external-diff marker appears).
 
 ## Staffing
 
