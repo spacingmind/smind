@@ -17,12 +17,21 @@ import { inlineScriptHashes, readMetaCsp } from "./demo-csp.mjs";
  * origin/develop 5e09caf1); CI passes `--baseline` and gets `RELATIVE` instead, so an unrelated PR that grows the web entry
  * chunk cannot turn the demo check red: only the demo's own additions count.
  */
+/**
+ * ADR-0064 size gate. The old limits (initial JS 1,150,000 B, initial CSS 35 KB = 35,840 B) are kept below as FINAL_BUDGET. While radix and
+ * Astryx coexist during the migration, BUDGET is raised TEMPORARILY to Wave 0's measured numbers plus a small margin (measured on the
+ * Wave 0 head: initial JS 1,259,181 B, initial CSS 51,051 B gzip). It is a ratchet: each later wave keeps or lowers these numbers (edit
+ * them down in the same PR), never up. The final wave (radix and cva removed) must set BUDGET back to FINAL_BUDGET, or justify an
+ * exception in ADR-0064.
+ */
+export const FINAL_BUDGET = { initialJsGzip: 1_150_000, initialCssGzip: 35 * 1024 };
+
 export const BUDGET = {
   /** The lazily imported chunk that holds the scripted daemon (dispatcher, scripts, scenario). */
   demoChunkGzip: 60 * 1024,
   /** Entry chunk plus anything index.html preloads. */
-  initialJsGzip: 1_150_000,
-  initialCssGzip: 35 * 1024,
+  initialJsGzip: 1_290_000,
+  initialCssGzip: 54 * 1024,
   /** Any other single JS chunk. */
   singleChunkGzip: 30 * 1024,
 };

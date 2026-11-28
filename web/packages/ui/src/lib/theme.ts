@@ -7,6 +7,8 @@
  * of the wrong theme before React mounts.
  */
 
+import { applyThemeAttributes } from "../theme/theme-attributes";
+
 export type ThemePreference = "light" | "dark" | "system";
 export type ResolvedTheme = "light" | "dark";
 
@@ -44,6 +46,8 @@ export function writeStoredThemePreference(pref: ThemePreference): void {
 /** Applies a resolved theme to the document by toggling the `dark` class on `<html>` -- the single place any code in this app should touch that class, so it can never disagree with what's persisted. */
 export function applyResolvedTheme(resolved: ResolvedTheme): void {
   document.documentElement.classList.toggle("dark", resolved === "dark");
+  // The built Astryx theme selects on these (ADR-0064); index.html sets the same pair before first paint.
+  applyThemeAttributes(document.documentElement, resolved, resolved === "dark");
 }
 
 /**

@@ -1,4 +1,17 @@
-@import "tailwindcss";
+/*
+ * Cascade layer order, lowest to highest priority:
+ *   reset -> theme -> base -> astryx-base -> astryx-theme -> components -> utilities
+ * Tailwind utilities sit last so they always win over Astryx styles: call sites
+ * can still adjust an Astryx wrapper with a utility class. This statement must
+ * stay the first one in the file so every later @import joins an existing layer.
+ */
+@layer reset, theme, base, astryx-base, astryx-theme, components, utilities;
+
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
+@import "@astryxdesign/core/reset.css";
+@import "./theme/smind-theme.css";
+@import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";

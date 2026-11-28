@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 
-import { BUDGET, checkDemoBuild, checkProductionBuild } from "./check-demo-build.mjs";
+import { BUDGET, FINAL_BUDGET, checkDemoBuild, checkProductionBuild } from "./check-demo-build.mjs";
 import { cspMetaTag, headersFile, inlineScriptHashes } from "./demo-csp.mjs";
 
 const BOOT = "(function(){var x=1;})();";
@@ -172,4 +172,11 @@ test("G-06 _headers keeps Cloudflare's beacon out of the HTML: no-transform on /
       assert.ok(errors.some((e) => e.startsWith("_headers:")), `${name}: ${errors.join(" | ")}`);
     });
   }
+});
+
+test("size_gate_is_a_ratchet_between_wave0_and_the_old_limits", () => {
+  // ADR-0064: BUDGET may only go down from Wave 0's ceiling, and never below the final target by mistake; the final wave sets it to FINAL_BUDGET.
+  assert.deepEqual(FINAL_BUDGET, { initialJsGzip: 1_150_000, initialCssGzip: 35 * 1024 });
+  assert.ok(BUDGET.initialJsGzip <= 1_290_000 && BUDGET.initialJsGzip >= FINAL_BUDGET.initialJsGzip);
+  assert.ok(BUDGET.initialCssGzip <= 54 * 1024 && BUDGET.initialCssGzip >= FINAL_BUDGET.initialCssGzip);
 });
