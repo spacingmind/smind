@@ -115,6 +115,14 @@ function Button({ asChild = false, ...props }: ButtonProps) {
   return <AstryxBackedButton {...props} />
 }
 
+/** Visible text of the children (strings and numbers, depth-first), trimmed. */
+function textOf(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join("")
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) return textOf(node.props.children)
+  return ""
+}
+
 function AstryxBackedButton({
   className,
   variant = "default",
@@ -129,8 +137,8 @@ function AstryxBackedButton({
   const iconOnly = String(sz).startsWith("icon")
   const tailwindOnly = TAILWIND_ONLY_VARIANTS.has(v as string)
   const aria = (rest as { "aria-label"?: string })["aria-label"]
-  const label =
-    aria ?? (typeof children === "string" || typeof children === "number" ? String(children) : "")
+  const title = (rest as { title?: string }).title
+  const label = aria ?? (textOf(children).trim() || (title ?? ""))
 
   // Astryx renders an always-present hidden role="status" live region that only
   // speaks while isLoading (never used here). Mark it presentational so it does
