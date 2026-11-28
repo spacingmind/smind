@@ -355,6 +355,8 @@ export const RULES: Record<string, DemoRule> = {
   "provider.usage": read((c) => c.session.scenario.usage.providerUsage),
   "account.usage": read((c) => c.session.scenario.usage.accountUsage),
   "scratch.usage": read({ totalBytes: 0, totalFiles: 0, dirs: 0, reclaimableDirs: 0, reclaimableBytes: 0 }),
+  // the demo daemon has no run history to probe, so every count is zero
+  "doctor.sessions": read({ runs: 0, withRef: 0, readable: 0, tooLarge: 0, gone: 0, checked: 0 }),
 
   // ---- creating things in the session (they exist until reload) -----------------------------------------------------
   "task.create": local((c) => newTask(c.session, c.params)),
@@ -479,6 +481,9 @@ export const REFUSED_METHODS = [
   "profile.rolePack.apply",
   "provider.addFromRecipe", "provider.addInstance", "provider.clearCooldown", "provider.clearSecret", "provider.reload",
   "provider.setDefaultModel", "provider.setEnv", "provider.setSecret", "provider.updateInstance",
+  // the relay devices and the mobile test push are local-only settings of a real daemon: the demo has none
+  "push.test",
+  "relay.device.approve", "relay.device.list", "relay.device.rename", "relay.device.revoke", "relay.device.window",
   "scratch.clean",
   "space.create", "space.delete",
   "run.revealToolHeredoc",

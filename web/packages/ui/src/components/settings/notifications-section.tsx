@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { SettingsGroup, SettingsRow } from "@/components/settings/settings-layout";
+import { MobilePushGroup } from "@/components/settings/mobile-push-group";
 import { Button } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-error";
 import { Switch } from "@/components/ui/switch";
@@ -131,6 +132,8 @@ function BrowserNotificationsSection() {
           </div>
         )}
       </SettingsGroup>
+
+      <MobilePushGroup />
     </div>
   );
 }
@@ -251,6 +254,8 @@ function DesktopNotificationsSection() {
           </div>
         )}
       </SettingsGroup>
+
+      <MobilePushGroup />
     </div>
   );
 }
