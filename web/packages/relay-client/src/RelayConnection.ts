@@ -1095,7 +1095,7 @@ export class RelayConnection {
           JSON.stringify({
             id: HELLO_REQUEST_ID,
             method: HELLO_METHOD,
-            params: buildDeviceHello(
+            params: await buildDeviceHello(
               identity,
               label,
               channel.transcriptHash!,

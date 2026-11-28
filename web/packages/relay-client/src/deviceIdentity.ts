@@ -137,7 +137,7 @@ export interface DeviceIdentity {
   /** The key-derived device id used as Frame.device_id. */
   readonly deviceId: string;
   /** Signs msg with the device key. */
-  sign(msg: Uint8Array): Uint8Array;
+  sign(msg: Uint8Array): Uint8Array | Promise<Uint8Array>;
 }
 
 /** Builds an identity from a 32-byte Ed25519 seed. */
@@ -247,7 +247,7 @@ export function sanitizeLabel(label: string): string {
  * verified by the handshake), the route's session id and the challenge the
  * daemon sent on this session, so it is valid for exactly one live session.
  */
-export function buildDeviceHello(
+export async function buildDeviceHello(
   identity: DeviceIdentity,
   label: string,
   th: Uint8Array,
@@ -255,12 +255,12 @@ export function buildDeviceHello(
   sessionId: Uint8Array,
   challenge: Uint8Array,
   password?: string,
-): DeviceHello {
+): Promise<DeviceHello> {
   const hello: DeviceHello = {
     v: HELLO_VERSION,
     device_pub: base64Encode(identity.publicKey),
     label: sanitizeLabel(label),
-    signature: base64Encode(identity.sign(helloSignedBytes(th, daemonPub, sessionId, challenge))),
+    signature: base64Encode(await identity.sign(helloSignedBytes(th, daemonPub, sessionId, challenge))),
   };
   if (password) hello.password = password;
   return hello;
