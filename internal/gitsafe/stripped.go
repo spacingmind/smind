@@ -32,7 +32,8 @@ import (
 // and so is remote as a plain member: remote update, remote add -f and
 // remote prune do network work that runs uploadpack, credential and ssh
 // programs, so only remote's read-only shapes qualify, which refOnlyCall
-// decides.
+// decides. tag is absent too: `tag -s` signs through gpg.program, which
+// commit.gpgsign=false does not stop.
 var refOnlySubcommands = map[string]bool{
 	"rev-parse":        true,
 	"rev-list":         true,
@@ -41,7 +42,6 @@ var refOnlySubcommands = map[string]bool{
 	"merge-base":       true,
 	"config":           true,
 	"branch":           true,
-	"tag":              true,
 	"show-ref":         true,
 	"ls-tree":          true,
 	"name-rev":         true,
