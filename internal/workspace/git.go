@@ -136,23 +136,46 @@ func runGitOutputEnvCtx(ctx context.Context, dir string, env []string, args ...s
 	return stdout, nil
 }
 
-// execGit runs git with the daemon's hardening and returns stdout and stderr
-// separately, so a caller that must not leak argv (the PR actions) can build
-// its error from stderr alone.
+// execGit runs git in one of two modes, picked from ctx (the single choke
+// point of every runGit* helper), and returns stdout and stderr separately,
+// so a caller that must not leak argv (the PR actions) can build its error
+// from stderr alone.
 //
-// The hardening itself is gitsafe's (internal/gitsafe): core.fsmonitor is
-// forced off (agent-editable repo config that git would execute as a
-// program), diff-family subcommands carry --no-ext-diff --no-textconv
-// (external diff and textconv are programs the repo's config can name), and
-// the environment drops GIT_EXTERNAL_DIFF and carries GIT_PAGER=cat,
-// GIT_TERMINAL_PROMPT=0 (a credential prompt must not hang the daemon) and
-// GIT_OPTIONAL_LOCKS=0 (read-only commands must not take index.lock under a
-// running agent). env != nil replaces the environment as before; gitsafe.Env
-// handles the nil case (the daemon's own environment).
+// Both modes start from gitsafe's baseline hardening (internal/gitsafe):
+// core.fsmonitor is forced off (agent-editable repo config that git would
+// execute as a program), diff-family subcommands carry --no-ext-diff
+// --no-textconv (external diff and textconv are programs the repo's config
+// can name), and the environment drops GIT_EXTERNAL_DIFF and carries
+// GIT_PAGER=cat, GIT_TERMINAL_PROMPT=0 (a credential prompt must not hang
+// the daemon) and GIT_OPTIONAL_LOCKS=0 (read-only commands must not take
+// index.lock under a running agent). env != nil replaces the environment as
+// before; gitsafe.Env handles the nil case (the daemon's own environment).
+//
+// The mode: a context marked human-initiated (WithHumanInitiated -- a
+// direct Human click or CLI command) keeps exactly that baseline, so the
+// repository's hooks, filters and drivers keep working. Every other context
+// -- the daemon starting git on its own -- runs stripped
+// (gitsafe.StrippedArgs/StrippedEnv), which neutralises those programs. A
+// stripped call whose config scan fails returns an error without the argv
+// (config values are never logged) and runs no git at all.
 func execGit(ctx context.Context, dir string, env []string, args ...string) (stdout, stderr string, err error) {
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args(args...)...)
+	human := IsHumanInitiated(ctx)
+	var argv []string
+	if human {
+		argv = gitsafe.Args(args...)
+	} else {
+		argv, err = gitsafe.StrippedArgs(ctx, dir, args...)
+		if err != nil {
+			return "", "", fmt.Errorf("git: %w", err)
+		}
+	}
+	cmd := exec.CommandContext(ctx, "git", argv...)
 	cmd.Dir = dir
-	cmd.Env = gitsafe.Env(env)
+	if human {
+		cmd.Env = gitsafe.Env(env)
+	} else {
+		cmd.Env = gitsafe.StrippedEnv(env)
+	}
 	// CommandContext kills only git itself; a grandchild (an fsmonitor hook,
 	// a credential helper) that outlives it keeps the stdout/stderr pipes
 	// open and Run would wait for it indefinitely. WaitDelay bounds that

@@ -13,10 +13,15 @@ import (
 // and leaves a background child holding its stdout/stderr open for 1.2 s --
 // the shape of a successful git whose output pipes stay busy (a hook, an
 // auto-gc, or a copy goroutine a starved CPU has not run yet).
+//
+// A daemon-initiated call (the default) scans the repository's config
+// through this same fake git first; that scan gets a silent exit 1 (git's
+// "no match") and no lingering child, so only the measured call below
+// carries the 1.2 s pipe hold.
 func fakeGitHoldingPipes(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()
-	script := "#!/bin/sh\n(sleep 1.2 &)\necho out\nexit 0\n"
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n\tif [ \"$a\" = \"config\" ]; then exit 1; fi\ndone\n(sleep 1.2 &)\necho out\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
