@@ -145,7 +145,9 @@ func TestOnRateLimitFallback_PrefaceAndTranscriptTailBounded(t *testing.T) {
 	e := newFallbackEnv(t, "")
 	pid, _ := fallbackProfiles(t, e.st)
 	r := e.failedRun(t, "failed-1", failedOpts{profileID: pid, prompt: "[message from task #3, chat #4]\nbuild it"})
-	long := strings.Repeat("日本語", 3000) // 9000 bytes: 4096 cuts mid-rune
+	// A fallback only starts when the run streamed no output (D5), so the only
+	// text left to quote is the agent's own "[error] ..." cause chunk.
+	long := "[error] " + strings.Repeat("日本語", 3000) // 9000+ bytes: 4096 cuts mid-rune
 	e.reg.record(r, Event{Type: taskrunner.EventTypeText, Text: long})
 
 	e.reg.applyRateLimitPolicy(r, futureFail(time.Hour))

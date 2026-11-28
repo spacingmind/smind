@@ -9,6 +9,7 @@ const KINDS = [
   'context_window_exceeded',
   'session_budget_exceeded',
   'too_many_denials',
+  'account_blocked',
   'cli_exited',
   'plan_window_exhausted',
   'transient_429',
@@ -37,6 +38,13 @@ describe('failureSentence', () => {
     expect(failureSentence('context_window_exceeded')).toBe("The conversation no longer fits the model's context window.");
     expect(failureSentence('session_budget_exceeded')).toBe("The provider's session budget for this run is used up.");
     expect(failureSentence('too_many_denials')).toBe('The agent kept asking for actions that were denied, so the provider stopped the run.');
+  });
+
+  it('account_blocked_is_in_the_mobile_failure_tables', () => {
+    // C5a D3: the drift contract with the daemon's Describe table.
+    expect(failureSentence('account_blocked')).toBe("The provider rejected this account's use under its plan terms.");
+    expect(failureSentence('account_blocked', { summary: 'Daemon wording wins.' })).toBe('Daemon wording wins.');
+    expect(FAILURE_FALLBACK_SENTENCE.account_blocked).toBe("The provider rejected this account's use under its plan terms.");
   });
 
   it('cli_exited reads as the readable sentence, not the raw CLI text', () => {

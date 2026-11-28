@@ -21,7 +21,8 @@ func IsLimitKind(kind string) bool {
 // never on cooldown.
 func IsHumanFix(kind string) bool {
 	return kind == KindAuthExpired || kind == KindModelNotInPlan ||
-		kind == KindContextWindowExceeded || kind == KindSessionBudgetExceeded || kind == KindTooManyDenials
+		kind == KindContextWindowExceeded || kind == KindSessionBudgetExceeded || kind == KindTooManyDenials ||
+		kind == KindAccountBlocked
 }
 
 // IsKnown reports whether kind is one of the kinds this daemon produces.
@@ -36,6 +37,7 @@ func AllKinds() []string {
 		KindPlanWindowExhausted, KindTransient429, KindRateLimited,
 		KindAuthExpired, KindModelNotInPlan,
 		KindContextWindowExceeded, KindSessionBudgetExceeded, KindTooManyDenials,
+		KindAccountBlocked,
 		KindCLIExited,
 	}
 }

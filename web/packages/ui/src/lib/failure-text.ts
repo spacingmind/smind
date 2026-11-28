@@ -16,6 +16,7 @@ export const FAILURE_FALLBACK_SENTENCE: Record<string, string> = {
   context_window_exceeded: "The conversation no longer fits the model's context window.",
   session_budget_exceeded: "The provider's session budget for this run is used up.",
   too_many_denials: "The agent kept asking for actions that were denied, so the provider stopped the run.",
+  account_blocked: "The provider rejected this account's use under its plan terms.",
   cli_exited: "The agent stopped before finishing; its session is saved, so you can continue where it left off.",
 };
 
@@ -30,6 +31,7 @@ export const FAILURE_SHORT_LABEL: Record<string, string> = {
   context_window_exceeded: "Context window full",
   session_budget_exceeded: "Session budget used up",
   too_many_denials: "Stopped after too many denials",
+  account_blocked: "Account blocked by the provider",
 };
 
 /** The class's short label, or "" for any other kind. */

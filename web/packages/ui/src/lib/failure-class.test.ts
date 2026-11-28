@@ -3,6 +3,7 @@ import { useProvidersViewStore } from "@/stores/providers-view-store";
 import {
   describeFailureCard,
   failureCountdown,
+  HUMAN_ACTION_KINDS,
   isActionableFailure,
   focusSettingsTarget,
   openFailureSettings,
@@ -14,7 +15,7 @@ const NOW = new Date("2026-11-01T10:00:00Z");
 
 describe("isActionableFailure", () => {
   it("is true for every class the daemon sends except cli_exited", () => {
-    for (const k of ["auth_expired", "plan_window_exhausted", "model_not_in_plan", "transient_429", "rate_limited", "context_window_exceeded", "session_budget_exceeded", "too_many_denials"]) expect(isActionableFailure(k)).toBe(true);
+    for (const k of ["auth_expired", "plan_window_exhausted", "model_not_in_plan", "transient_429", "rate_limited", "context_window_exceeded", "session_budget_exceeded", "too_many_denials", "account_blocked"]) expect(isActionableFailure(k)).toBe(true);
     for (const k of ["cli_exited", "", undefined, "martian"]) expect(isActionableFailure(k)).toBe(false);
   });
 });
@@ -95,6 +96,7 @@ describe("describeFailureCard", () => {
     ["context_window_exceeded", { kind: "new_chat", target: "chat:new", label: "Start a fresh chat for this task" }],
     ["session_budget_exceeded", { kind: "raise_budget", label: "Raise the session budget in the provider's settings, or start a fresh chat" }],
     ["too_many_denials", { kind: "review_policy", target: "settings:permission-policy", label: "Review the permission policy" }],
+    ["account_blocked", { kind: "switch_profile", target: "profile:1", label: "Switch to the fallback profile" }],
   ];
 
   it.each(HUMAN_FIX)("%s: the daemon's summary as the sentence, never a retry", (_kind, action) => {
@@ -124,6 +126,21 @@ describe("describeFailureCard", () => {
     const v = describeFailureCard({ ...base, failureKind: "cli_exited", failureAction: { kind: "continue", label: "Continue the run" } }, NOW);
     expect(v).toMatchObject({ tone: "warning", hint: null, countdown: null, control: null, controlLabel: null });
     expect(v?.message).toBe("The agent stopped before finishing; its session is saved, so you can continue where it left off.");
+  });
+
+  it("account_blocked_is_in_the_web_failure_tables", () => {
+    // C5a D3: a human-fix class, never retried or failed over; the card mirrors the session budget (the action label is the hint).
+    expect(HUMAN_ACTION_KINDS.has("account_blocked")).toBe(true);
+    expect(isActionableFailure("account_blocked")).toBe(true);
+    const v = describeFailureCard({ ...base, failureKind: "account_blocked", failureAction: HUMAN_FIX[3][1] }, NOW);
+    expect(v).toMatchObject({
+      tone: "danger",
+      message: "The provider rejected this account's use under its plan terms.",
+      hint: "Switch to the fallback profile",
+      countdown: null,
+      control: null,
+      controlLabel: null,
+    });
   });
 });
 
