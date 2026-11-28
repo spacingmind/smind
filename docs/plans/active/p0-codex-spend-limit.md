@@ -40,8 +40,10 @@ One GLM peer from a step-by-step brief, one commit per step. Lead: spec, review,
 
 ## Progress
 
-- Spec written.
+- Spec first, then one GLM peer (three commits, one per step), reviewed and cherry-picked by the Lead.
 
 ## Validation
 
-- Pending.
+- Mutations by the Lead on committed code: removing `apiKeySpendLimitExceeded` from the switch fails `TestFailureHint`, `TestFailureHint_SpendLimitsClassifyAsPlanWindow` and `TestFinish_CodexSpendLimitsFailOverLikeUsageLimit/apiKeySpendLimitExceeded`; adding `bioPolicy` to the usage-limit case fails `TestFailureHint/bioPolicy`.
+- `sh scripts/verify.sh` PASS, `go test ./internal/hygiene/` ok, `cd web/packages/ui && bunx tsc -b` clean, `crud-dialogs.test.tsx` 7 passed.
+- No contract: S-size, a failure-class mapping and one placeholder string; no wsapi, store, permission, relay or UI-behaviour change (ADR-0045 asks a contract for those).
