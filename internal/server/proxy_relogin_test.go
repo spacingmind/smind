@@ -162,3 +162,31 @@ func Test_proxy_does_not_hit_the_token_endpoint_again(t *testing.T) {
 		t.Errorf("upstream requests = %d, want 0", n)
 	}
 }
+
+// The FIRST request after a refresh token dies is served by another account:
+// the dead one is left out and the router runs once more (no 401, no second
+// token-endpoint call for the dead account on later requests).
+func Test_proxy_first_request_after_a_token_dies_is_served_by_another_account(t *testing.T) {
+	up := newBearerUpstream(t)
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, up.Server)))
+	f := &reloginRefresher{dead: map[string]bool{"rt-a": true}}
+	p.anthropicRefresher = f
+	addOAuthAccount(t, reg, providerAnthropic, "a", expiredCred("rt-a"))
+	addOAuthAccount(t, reg, providerAnthropic, "b", expiredCred("rt-b"))
+
+	for i := 0; i < 4; i++ {
+		if w := reloginRequest(p); w.Code != 200 {
+			t.Fatalf("request %d status = %d: %s", i, w.Code, w.Body.String())
+		}
+	}
+	if n := f.count("rt-a"); n > 1 {
+		t.Errorf("dead account refresher calls = %d, want at most 1", n)
+	}
+	up.mu.Lock()
+	defer up.mu.Unlock()
+	for _, got := range up.auths {
+		if got != "Bearer fresh-rt-b" {
+			t.Errorf("upstream bearer = %q, want B's token", got)
+		}
+	}
+}

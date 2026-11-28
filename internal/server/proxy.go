@@ -297,10 +297,10 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		enqueue(row)
 		writeProviderError(w, provider, status, err.Error())
 	}
-	reloginError := func(err error) {
+	reloginError := func(_ error) {
 		row.Status = http.StatusUnauthorized
 		row.Outcome = store.RequestLogOutcomeRouteError
-		row.Error = truncatedError(err)
+		row.Error = truncatedError(accounts.ErrNeedsRelogin) // never the provider's refresh response
 		row.DurationMs = time.Since(start).Milliseconds()
 		enqueue(row)
 		writeProviderAuthError(w, provider, http.StatusUnauthorized, loginExpiredMessage)
@@ -341,7 +341,7 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 	// serve anything: leave it out so the router never picks it.
 	live := make([]accounts.Account, 0, len(providerAccounts))
 	for _, a := range providerAccounts {
-		if !p.registry.NeedsRelogin(a.ID) {
+		if !p.registry.AccountNeedsRelogin(a) {
 			live = append(live, a)
 		}
 	}
@@ -356,52 +356,77 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 	// list may serve the request -- never an account whose list could
 	// exclude it. A parseable body that simply has no "model" narrows the
 	// same way.
-	var candidateIDs []int64
-	if metaOK || model != "" {
-		candidateIDs = selectModelCandidates(providerAccounts, model)
-	} else {
-		for _, a := range providerAccounts {
-			if len(a.Models) == 0 {
-				candidateIDs = append(candidateIDs, a.ID)
+	var (
+		account     accounts.Account
+		upstreamURL string
+		outReq      *http.Request
+	)
+	// An account the router picks may turn out to need signing in again only
+	// when its credential is refreshed (the first request after its refresh
+	// token dies): leave it out and route once more, so one dead account does
+	// not fail a request another account can serve.
+	for {
+		var candidateIDs []int64
+		if metaOK || model != "" {
+			candidateIDs = selectModelCandidates(providerAccounts, model)
+		} else {
+			for _, a := range providerAccounts {
+				if len(a.Models) == 0 {
+					candidateIDs = append(candidateIDs, a.ID)
+				}
 			}
 		}
-	}
-	if len(candidateIDs) == 0 {
-		writeRouteModelNotFound(w, &row, provider, start, enqueue,
-			modelRoutingError(provider, metaOK || model != "", model))
-		return
-	}
-
-	// Per-workspace hard/pool policy assignment needs the Workspace concept
-	// (Phase 2). Until then, every configured account of the right provider
-	// is a pool candidate; this is a documented Phase 1 simplification, not
-	// a bug.
-	account, err := p.router.Route(ctx, row.SessionKey, routing.PolicyPool, candidateIDs, routing.WithModel(model))
-	if err != nil {
-		routeError(http.StatusServiceUnavailable, fmt.Errorf("route request: %w", err))
-		return
-	}
-
-	var base string
-	if account.APIKey != nil {
-		base = account.APIKey.BaseURL
-	}
-	upstreamURL := resolveUpstreamURL(provider, base, r.URL.Path, r.URL.RawQuery)
-
-	outReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, forwardBody)
-	if err != nil {
-		routeError(http.StatusServiceUnavailable, fmt.Errorf("build upstream request: %w", err))
-		return
-	}
-	outReq.ContentLength = contentLength
-	forwardHeaders(outReq.Header, r.Header)
-
-	if err := p.injectCredentials(ctx, provider, account, refresher, outReq, r); err != nil {
-		if errors.Is(err, accounts.ErrNeedsRelogin) {
-			reloginError(err)
+		if len(candidateIDs) == 0 {
+			writeRouteModelNotFound(w, &row, provider, start, enqueue,
+				modelRoutingError(provider, metaOK || model != "", model))
 			return
 		}
-		routeError(http.StatusServiceUnavailable, fmt.Errorf("credential refresh: %w", err))
+
+		// Per-workspace hard/pool policy assignment needs the Workspace concept
+		// (Phase 2). Until then, every configured account of the right provider
+		// is a pool candidate; this is a documented Phase 1 simplification, not
+		// a bug.
+		var rerr error
+		account, rerr = p.router.Route(ctx, row.SessionKey, routing.PolicyPool, candidateIDs, routing.WithModel(model))
+		if rerr != nil {
+			routeError(http.StatusServiceUnavailable, fmt.Errorf("route request: %w", rerr))
+			return
+		}
+
+		var base string
+		if account.APIKey != nil {
+			base = account.APIKey.BaseURL
+		}
+		upstreamURL = resolveUpstreamURL(provider, base, r.URL.Path, r.URL.RawQuery)
+
+		var nerr error
+		outReq, nerr = http.NewRequestWithContext(ctx, r.Method, upstreamURL, forwardBody)
+		if nerr != nil {
+			routeError(http.StatusServiceUnavailable, fmt.Errorf("build upstream request: %w", nerr))
+			return
+		}
+		outReq.ContentLength = contentLength
+		forwardHeaders(outReq.Header, r.Header)
+
+		ierr := p.injectCredentials(ctx, provider, account, refresher, outReq, r)
+		if ierr == nil {
+			break
+		}
+		if errors.Is(ierr, accounts.ErrNeedsRelogin) {
+			rest := make([]accounts.Account, 0, len(providerAccounts))
+			for _, a := range providerAccounts {
+				if a.ID != account.ID {
+					rest = append(rest, a)
+				}
+			}
+			if len(rest) == 0 {
+				reloginError(accounts.ErrNeedsRelogin)
+				return
+			}
+			providerAccounts = rest
+			continue
+		}
+		routeError(http.StatusServiceUnavailable, fmt.Errorf("credential refresh: %w", ierr))
 		return
 	}
 

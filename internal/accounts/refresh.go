@@ -185,6 +185,22 @@ func (r *Registry) refreshIsDead(id int64, key string) bool {
 	return true
 }
 
+// clearDead forgets a remembered dead refresh token of account id.
+func (r *Registry) clearDead(id int64) {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	delete(r.deadRefresh, id)
+}
+
+// AccountNeedsRelogin is NeedsRelogin for an account already in hand (no
+// store read).
+func (r *Registry) AccountNeedsRelogin(acc Account) bool {
+	if acc.OAuth == nil {
+		return false
+	}
+	return r.refreshIsDead(acc.ID, refreshKey(acc.OAuth.RefreshToken))
+}
+
 // NeedsRelogin reports whether the account's current refresh token is the one
 // the provider refused for good. False for an unknown or api_key account.
 func (r *Registry) NeedsRelogin(id int64) bool {

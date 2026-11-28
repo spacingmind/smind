@@ -106,3 +106,23 @@ func Test_ensurefresh_new_credential_clears_the_mark(t *testing.T) {
 		t.Errorf("refresher calls = %d, want 2", n)
 	}
 }
+
+// A provider that does not rotate the refresh token hands back the SAME one at
+// the next sign-in: replacing the credential must still clear the mark.
+func Test_ensurefresh_same_refresh_token_after_a_new_sign_in_clears_the_mark(t *testing.T) {
+	r := newTestRegistry(t)
+	acc := expiredAccount(t, r, "refresh-same")
+	f := &deadTokenRefresher{err: &oauth2.RetrieveError{ErrorCode: "invalid_grant"}}
+	if _, err := r.EnsureFresh(context.Background(), acc.ID, f); !errors.Is(err, ErrNeedsRelogin) {
+		t.Fatalf("first: %v", err)
+	}
+	if !r.NeedsRelogin(acc.ID) {
+		t.Fatal("not marked")
+	}
+	if _, err := r.ReplaceOAuth(acc.ID, OAuthCredential{AccessToken: "n", RefreshToken: "refresh-same", ExpiresAt: time.Now().Add(time.Hour)}, "", true); err != nil {
+		t.Fatalf("ReplaceOAuth: %v", err)
+	}
+	if r.NeedsRelogin(acc.ID) {
+		t.Fatal("NeedsRelogin = true after a new sign-in with the same refresh token")
+	}
+}
