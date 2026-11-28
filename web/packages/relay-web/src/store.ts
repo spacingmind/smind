@@ -24,6 +24,8 @@ export interface RelayStore {
   loadPairing(): Promise<StoredPairing | null>;
   savePairing(p: StoredPairing): Promise<void>;
   deletePairing(): Promise<void>;
+  /** Writes the identity and the pairing in ONE transaction: both or neither. */
+  savePaired(identity: StoredIdentity, pairing: StoredPairing): Promise<void>;
   close(): void;
 }
 
@@ -62,22 +64,38 @@ export async function openRelayStore(
     return (v as T | undefined) ?? null;
   };
 
-  const write = (store: string, fn: (s: IDBObjectStore) => void): Promise<void> =>
+  const write = (stores: string | string[], fn: (tx: IDBTransaction) => void): Promise<void> =>
     new Promise((resolve, reject) => {
-      const tx = db.transaction(store, 'readwrite');
+      const tx = db.transaction(stores, 'readwrite');
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error ?? new Error('transaction aborted'));
-      fn(tx.objectStore(store));
+      try {
+        fn(tx);
+      } catch (e) {
+        // A request that throws (e.g. a value that cannot be cloned) must not
+        // leave an earlier put in the same transaction to commit.
+        try {
+          tx.abort();
+        } catch {
+          // already finished
+        }
+        reject(e);
+      }
     });
 
   return {
     loadIdentity: () => read<StoredIdentity>(IDENTITY, IDENTITY_KEY),
-    saveIdentity: (i) => write(IDENTITY, (s) => void s.put(i, IDENTITY_KEY)),
-    deleteIdentity: () => write(IDENTITY, (s) => void s.delete(IDENTITY_KEY)),
+    saveIdentity: (i) => write(IDENTITY, (tx) => void tx.objectStore(IDENTITY).put(i, IDENTITY_KEY)),
+    deleteIdentity: () => write(IDENTITY, (tx) => void tx.objectStore(IDENTITY).delete(IDENTITY_KEY)),
     loadPairing: () => read<StoredPairing>(PAIRINGS, PAIRING_KEY),
-    savePairing: (p) => write(PAIRINGS, (s) => void s.put(p, PAIRING_KEY)),
-    deletePairing: () => write(PAIRINGS, (s) => void s.delete(PAIRING_KEY)),
+    savePairing: (p) => write(PAIRINGS, (tx) => void tx.objectStore(PAIRINGS).put(p, PAIRING_KEY)),
+    deletePairing: () => write(PAIRINGS, (tx) => void tx.objectStore(PAIRINGS).delete(PAIRING_KEY)),
+    savePaired: (i, p) =>
+      write([IDENTITY, PAIRINGS], (tx) => {
+        tx.objectStore(IDENTITY).put(i, IDENTITY_KEY);
+        tx.objectStore(PAIRINGS).put(p, PAIRING_KEY);
+      }),
     close: () => db.close(),
   };
 }

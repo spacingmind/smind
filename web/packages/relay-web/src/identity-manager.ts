@@ -1,6 +1,6 @@
 import type { DeviceIdentity } from '@smind/relay-client/src/deviceIdentity';
 import { generateWebIdentityKey, identityFromWebKey } from './identity';
-import type { RelayStore, StoredPairing } from './store';
+import type { RelayStore, StoredIdentity, StoredPairing } from './store';
 
 export class NotPairedError extends Error {
   constructor() {
@@ -29,12 +29,14 @@ export async function loadIdentityForConnect(
   return { identity: identityFromWebKey(rec, subtle), pairing };
 }
 
-/** The only function that generates a device key. */
-export async function createIdentityForPairing(
-  store: RelayStore,
+/**
+ * The only function that generates a device key. It persists nothing: the
+ * caller saves the record together with the pairing (RelayStore.savePaired),
+ * so a failed save never leaves a new key beside an old pairing.
+ */
+export async function newIdentityForPairing(
   subtle: SubtleCrypto = crypto.subtle,
-): Promise<DeviceIdentity> {
+): Promise<{ record: StoredIdentity; identity: DeviceIdentity }> {
   const key = await generateWebIdentityKey(subtle);
-  await store.saveIdentity({ ...key, createdAt: Date.now() });
-  return identityFromWebKey(key, subtle);
+  return { record: { ...key, createdAt: Date.now() }, identity: identityFromWebKey(key, subtle) };
 }

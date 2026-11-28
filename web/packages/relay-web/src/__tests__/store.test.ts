@@ -5,7 +5,7 @@ import { openRelayStore, type StoredPairing } from '../store';
 import {
   NotPairedError,
   RepairRequiredError,
-  createIdentityForPairing,
+  newIdentityForPairing,
   loadIdentityForConnect,
 } from '../identity-manager';
 
@@ -22,8 +22,8 @@ describe('relay store', () => {
   it('identity_key_survives_reload', async () => {
     const factory = new IDBFactory();
     const a = await openRelayStore(factory);
-    const created = await createIdentityForPairing(a);
-    await a.savePairing(pairing);
+    const { record, identity: created } = await newIdentityForPairing();
+    await a.savePaired(record, pairing);
     a.close();
 
     const b = await openRelayStore(factory);
@@ -50,6 +50,22 @@ describe('relay store', () => {
     expect(err).toBeInstanceOf(RepairRequiredError);
     expect(err.reason).toBe('identity_missing');
     expect(await s.loadIdentity()).toBeNull();
+    s.close();
+  });
+
+  it('savepaired_is_atomic', async () => {
+    const factory = new IDBFactory();
+    const s = await openRelayStore(factory);
+    const a = await newIdentityForPairing();
+    await s.savePaired(a.record, pairing);
+
+    const b = await newIdentityForPairing();
+    // The identity put succeeds, then the pairing put throws (a function cannot be cloned): nothing may change.
+    const bad = { ...pairing, label: 'B', offerUrl: (() => 1) as unknown as string };
+    await expect(s.savePaired(b.record, bad)).rejects.toBeDefined();
+    const id = await s.loadIdentity();
+    expect(Array.from(id!.publicKey)).toEqual(Array.from(a.record.publicKey));
+    expect((await s.loadPairing())!.label).toBe('laptop');
     s.close();
   });
 });

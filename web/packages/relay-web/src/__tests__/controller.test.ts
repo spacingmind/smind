@@ -131,4 +131,29 @@ describe('controller', () => {
     expect(await store.loadPairing()).toBeNull();
     expect(await store.loadIdentity()).toBeNull();
   });
+
+  it('pair_failure_keeps_the_previous_identity_and_pairing', async () => {
+    const relay = new FakeRelay();
+    const real = await openRelayStore(new IDBFactory());
+    let failSave = false;
+    const store = {
+      ...real,
+      savePaired: (i: Parameters<typeof real.savePaired>[0], p: Parameters<typeof real.savePaired>[1]) =>
+        failSave ? Promise.reject(new Error('disk full')) : real.savePaired(i, p),
+    };
+    const c = new RelayController({ store, net: relay, timings });
+    controllers.push(c);
+    await c.pair(offerFor(relay).url, 'A');
+    await c.whenConnected();
+    const idA = (await real.loadIdentity())!;
+    const pairA = (await real.loadPairing())!;
+
+    failSave = true;
+    await expect(c.pair(offerFor(relay).url, 'B')).rejects.toThrow('disk full');
+    const idNow = (await real.loadIdentity())!;
+    expect(Array.from(idNow.publicKey)).toEqual(Array.from(idA.publicKey));
+    expect((await real.loadPairing())!.label).toBe(pairA.label);
+    expect(c.state.kind).toBe('connected');
+    expect(await new WsClient(await c.socket()).call('workspace.list')).toEqual([]);
+  });
 });

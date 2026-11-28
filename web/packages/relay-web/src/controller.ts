@@ -11,7 +11,7 @@ import {
 } from '@smind/relay-client/src/RelayConnection';
 import type { KeepaliveTiming } from '@smind/relay-client/src/keepalive';
 import { parsePairingURL } from '@smind/relay-client/src/pairing';
-import { createIdentityForPairing, loadIdentityForConnect, NotPairedError, RepairRequiredError } from './identity-manager';
+import { loadIdentityForConnect, newIdentityForPairing, NotPairedError, RepairRequiredError } from './identity-manager';
 import { RelaySocket } from './relay-socket';
 import type { RelayStore } from './store';
 
@@ -103,11 +103,9 @@ export class RelayController {
   }
 
   async pair(offerUrl: string, label: string): Promise<void> {
-    parsePairingURL(offerUrl);
-    this.detach();
-    const identity = await createIdentityForPairing(this.o.store, this.o.subtle);
     const offer = parsePairingURL(offerUrl);
-    await this.o.store.savePairing({
+    const { record, identity } = await newIdentityForPairing(this.o.subtle);
+    await this.o.store.savePaired(record, {
       offerUrl,
       daemonId: offer.daemonId,
       relay: offer.relay,
@@ -115,6 +113,9 @@ export class RelayController {
       label,
       pairedAt: Date.now(),
     });
+    // Only now is the previous connection replaced: any failure above leaves the
+    // old identity, the old pairing and the old connection as they were.
+    this.detach();
     this.start(offerUrl, identity, label);
   }
 
