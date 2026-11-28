@@ -265,7 +265,7 @@ func taskDiff(worktreePath, base string) (string, error) {
 	}
 	defer cleanup()
 
-	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-color", "--cached", base)
+	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", base)
 	if err != nil {
 		return "", fmt.Errorf("diff against base %s: %w", base, err)
 	}
@@ -287,7 +287,7 @@ func taskChangedFiles(worktreePath, base string) ([]TaskFile, error) {
 	}
 	defer cleanup()
 
-	out, err := runGitOutputEnv(worktreePath, env, "diff", "--name-status", "--cached", base)
+	out, err := runGitOutputEnv(worktreePath, env, "diff", "--no-ext-diff", "--no-textconv", "--name-status", "--cached", base)
 	if err != nil {
 		return nil, fmt.Errorf("diff names against base %s: %w", base, err)
 	}
@@ -334,7 +334,7 @@ func taskFileDiff(worktreePath, base, path string) (string, error) {
 	}
 	defer cleanup()
 
-	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-color", "--cached", base, "--", path)
+	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-ext-diff", "--no-textconv", "--no-color", "--cached", base, "--", path)
 	if err != nil {
 		return "", fmt.Errorf("diff %q against base %s: %w", path, base, err)
 	}
@@ -387,7 +387,7 @@ func stagedPaths(worktreePath string) (map[string]bool, error) {
 // than letting git's "nothing to commit" stderr leak: that case is an
 // expected, caller-presentable condition, not a plumbing failure.
 func gitTaskCommit(worktreePath, message string) (CommitResult, error) {
-	names, err := runGitOutput(worktreePath, "diff", "--cached", "--name-only")
+	names, err := runGitOutput(worktreePath, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--name-only")
 	if err != nil {
 		return CommitResult{}, fmt.Errorf("read staged files: %w", err)
 	}
@@ -439,7 +439,7 @@ func taskDiffStat(worktreePath, base string) (files, insertions, deletions int, 
 	}
 	defer cleanup()
 
-	out, err := runGitOutputEnv(worktreePath, env, "diff", "--shortstat", "--cached", base)
+	out, err := runGitOutputEnv(worktreePath, env, "diff", "--no-ext-diff", "--no-textconv", "--shortstat", "--cached", base)
 	if err != nil {
 		return 0, 0, 0, fmt.Errorf("diff shortstat against base %s: %w", base, err)
 	}

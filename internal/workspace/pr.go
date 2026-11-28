@@ -168,7 +168,7 @@ func (m *Manager) PRPreview(ctx context.Context, id int64, baseBranch string) (P
 	}
 	if len(shas) > 0 {
 		// Best effort: a failing stat leaves the preview without it.
-		if out, _, derr := execGit(ctx, tg.worktree, nil, "diff", "--shortstat", tg.forkPoint, "refs/heads/"+tg.branch); derr == nil {
+		if out, _, derr := execGit(ctx, tg.worktree, nil, "diff", "--no-ext-diff", "--no-textconv", "--shortstat", tg.forkPoint, "refs/heads/"+tg.branch); derr == nil {
 			if m := shortstatRe.FindStringSubmatch(out); m != nil {
 				info.Diff.Files, _ = strconv.Atoi(m[1])
 				info.Diff.Insertions, _ = strconv.Atoi(m[2])
