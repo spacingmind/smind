@@ -56,7 +56,7 @@ mutations:
   - { id: M1, file: internal/runs/failure/classify.go, change: "retryHint ignores a RetryInfo fragment in the text and quota ignores the 429 body", expectFail: [retry_hint_order_and_text_forms, usage_429_retryinfo_body_sets_the_wait] }
   - { id: M2, file: internal/runs/failover.go, change: "restore transientRetryAfterMin 5s / transientRetryAfterMax 5m", expectFail: [transient_retry_honours_provider_delay_between_1s_and_1h] }
   - { id: M3, file: internal/runs/failure/classify.go, change: "drop the subscription-sharing regexp", expectFail: [subscription_sharing_text_is_account_blocked] }
-  - { id: M4, file: internal/runs/failure/kinds.go, change: "remove account_blocked from IsHumanFix", expectFail: [account_blocked_is_human_fix_and_known, account_blocked_never_retried_failed_over_or_cooled] }
+  - { id: M4, file: internal/runs/failure/kinds.go, change: "remove account_blocked from IsHumanFix (exit code 7 and the failure hook)", expectFail: [account_blocked_is_human_fix_and_known] }
   - { id: M5, file: internal/runs/failover.go, change: "remove the streamed-output guard before startFallbackSuccessor", expectFail: [no_fallback_after_the_first_streamed_delta] }
 frames: []
 commands:
