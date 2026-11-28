@@ -15,6 +15,31 @@ function files(dir: string): string[] {
 const stripComments = (s: string) =>
   s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
 
+/** The top-level comma-separated arguments of every `generateKey(` call in text. */
+function generateKeyCalls(text: string): string[][] {
+  const calls: string[][] = [];
+  const re = /generateKey\s*\(/g;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const args: string[] = [];
+    let depth = 1;
+    let cur = '';
+    let i = m.index + m[0].length;
+    for (; i < text.length && depth > 0; i++) {
+      const c = text[i];
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') depth--;
+      if (depth === 0) break;
+      if (c === ',' && depth === 1) {
+        args.push(cur.trim());
+        cur = '';
+      } else cur += c;
+    }
+    if (cur.trim() !== '') args.push(cur.trim());
+    calls.push(args);
+  }
+  return calls;
+}
+
 describe('guards', () => {
   it('relay_web_has_no_extractable_key_or_logging', () => {
     const banned: Array<[string, RegExp]> = [
@@ -37,5 +62,18 @@ describe('guards', () => {
       for (const [name, re] of banned) if (re.test(text)) hits.push(`${f}: ${name}`);
     }
     expect(hits).toEqual([]);
+  });
+
+  it('generate_key_extractable_argument_is_the_literal_false', () => {
+    let calls = 0;
+    const bad: string[] = [];
+    for (const f of files(SRC)) {
+      for (const args of generateKeyCalls(stripComments(readFileSync(f, 'utf8')))) {
+        calls++;
+        if (args[1] !== 'false') bad.push(`${f}: generateKey(${args.join(', ')})`);
+      }
+    }
+    expect(calls).toBeGreaterThan(0);
+    expect(bad).toEqual([]);
   });
 });
