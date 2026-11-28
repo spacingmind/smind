@@ -12,24 +12,16 @@ export default defineConfig(({ mode }) => {
   const demo = mode === "demo";
   return {
     plugins: [
-      ...astryxStylex({
-        stylexOptions: {
-          dev: process.env.NODE_ENV === "development",
-          runtimeInjection: false,
-          propertyValidationMode: "throw",
-          treeshakeCompensation: true,
-          unstable_moduleResolution: { type: "commonJS", rootDir: __dirname },
-        },
-      }),
+      // Astryx source build (ADR-0064). rootDir is the workspace root: the packages are hoisted into web/node_modules,
+      // and the plugin resolves and class-prefixes @astryxdesign/* from <rootDir>/node_modules/@astryxdesign.
+      ...astryxStylex({ rootDir: path.resolve(__dirname, "../..") }),
       react(),
       tailwindcss(), ...(demo ? [demoSecurityPlugin()] : []),
     ],
     base: "./",
     define: { __SMIND_DEMO__: JSON.stringify(demo) },
-    optimizeDeps: { exclude: ["@astryxdesign/core", "@astryxdesign/theme-neutral"] },
     resolve: {
       alias: {
-        "@astryxdesign/core": path.resolve(__dirname, "../../node_modules/@astryxdesign/core/src"),
         "@": path.resolve(__dirname, "./src"),
       },
     },
