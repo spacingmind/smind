@@ -56,6 +56,9 @@ The loop:
                            actions: a human must review the permission policy;
                            do not retry the same run, do not widen permissions
                            from inside the run (action review_policy).
+     account_blocked       the provider rejected how the account is used; do
+                           not retry or fail over (a human checks the account;
+                           the action may offer the fallback profile).
      cli_exited            the CLI died; its session is stored: send
                            "continue".
    task wait exits 6 for the limit classes and 7 when a human must fix setup.

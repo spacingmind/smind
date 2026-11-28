@@ -70,7 +70,7 @@ func TestNextAction_SummaryOnEveryClass(t *testing.T) {
 	reset := now.Add(2 * time.Hour)
 	next := now.Add(30 * time.Second)
 	ctxs := []ActionContext{
-		{Provider: "glm", ProviderLabel: "GLM", Model: "opus", AllowedModels: []string{"sonnet"}, Window: "5h", ResetAt: &reset, Now: now, Attempt: 1, Max: 2, NextAt: &next},
+		{Provider: "glm", ProviderLabel: "GLM", FallbackProfileID: 9, Model: "opus", AllowedModels: []string{"sonnet"}, Window: "5h", ResetAt: &reset, Now: now, Attempt: 1, Max: 2, NextAt: &next},
 	}
 	for _, kind := range AllKinds() {
 		if a := NextAction(kind, ctxs[0]); a == nil || a.Summary == "" {

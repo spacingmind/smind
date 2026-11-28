@@ -303,9 +303,9 @@ func TestFinish_Transient429RetryRunsAreCounted(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("retry items = %d, want 1", len(items))
 	}
-	// Retry-After wins but is clamped to >= 5s.
-	if d := time.Until(*items[0].NotBefore); d < 3*time.Second || d > 8*time.Second {
-		t.Fatalf("backoff = %v, want the clamped 5s hint", d)
+	// The provider's hint wins, clamped to [1s, 1h].
+	if d := time.Until(*items[0].NotBefore); d < 500*time.Millisecond || d > 3*time.Second {
+		t.Fatalf("backoff = %v, want the 1s hint", d)
 	}
 	if err := (func() error { _, err := e.st.ReleaseHeldRetries("glm", time.Now()); return err })(); err != nil {
 		t.Fatal(err)
@@ -410,5 +410,38 @@ func TestEnqueueRetry_DoesNotStackThePreface(t *testing.T) {
 	}
 	if got := strings.Count(items[0].Prompt, "Retrying after"); got != 1 || !strings.HasSuffix(items[0].Prompt, "build it") {
 		t.Fatalf("prompt = %q, want exactly one preface and the original prompt", items[0].Prompt)
+	}
+}
+
+func Test_account_blocked_never_retried_failed_over_or_cooled(t *testing.T) {
+	t.Parallel()
+	e := newFallbackEnv(t, "")
+	fbMain, _ := fallbackProfiles(t, e.st)
+	wait := profileWith(t, e.st, "wait")
+	errBlocked := errors.New("codex prompt: Subscription sharing is not allowed on this account")
+	for name, pid := range map[string]int64{"fallback": fbMain, "wait": wait} {
+		r := e.failedRun(t, "ab-"+name, failedOpts{profileID: pid})
+		e.reg.finish(r, errBlocked)
+		st := r.statusLocked()
+		if st.FailureKind != failure.KindAccountBlocked {
+			t.Fatalf("%s: kind = %q", name, st.FailureKind)
+		}
+		// The run's own action cannot know the fallback profile (wire layers
+		// rebuild it); with the profile's fallback the action is a switch.
+		if fb := e.reg.FallbackProfileFor(pid); name == "fallback" {
+			act := failure.NextAction(st.FailureKind, failure.ActionContext{FallbackProfileID: fb})
+			if fb == 0 || act == nil || act.Kind != failure.ActionSwitchProfile {
+				t.Fatalf("%s: action = %+v (fallback %d), want switch_profile", name, act, fb)
+			}
+		}
+		if n := len(extraChats(t, e, r.taskID)); n != 0 {
+			t.Fatalf("%s: fallback chats = %d, want 0", name, n)
+		}
+		if n := len(retryItems(t, e.st, r.chatID)); n != 0 {
+			t.Fatalf("%s: retry items = %d, want 0", name, n)
+		}
+		if _, ok, _ := e.st.GetProviderCooldown("glm", time.Now()); ok {
+			t.Fatalf("%s: provider cooldown set", name)
+		}
 	}
 }

@@ -366,7 +366,7 @@ func runFailedItem(fr FailedRun, title string) (Item, bool) {
 	attention := "normal"
 	switch fr.Kind {
 	case failure.KindAuthExpired, failure.KindModelNotInPlan,
-		failure.KindContextWindowExceeded, failure.KindSessionBudgetExceeded, failure.KindTooManyDenials:
+		failure.KindContextWindowExceeded, failure.KindSessionBudgetExceeded, failure.KindTooManyDenials, failure.KindAccountBlocked:
 		attention = "high"
 	case failure.KindPlanWindowExhausted, failure.KindRateLimited:
 	case failure.KindTransient429:

@@ -508,8 +508,8 @@ func TestIsHumanFix_NewClasses(t *testing.T) {
 
 func TestAllKinds_AreKnown(t *testing.T) {
 	all := AllKinds()
-	if len(all) != 9 {
-		t.Fatalf("AllKinds() = %v, want 9 kinds", all)
+	if len(all) != 10 {
+		t.Fatalf("AllKinds() = %v, want 10 kinds", all)
 	}
 	seen := map[string]bool{}
 	for _, k := range all {
@@ -520,5 +520,95 @@ func TestAllKinds_AreKnown(t *testing.T) {
 			t.Errorf("AllKinds lists %q twice", k)
 		}
 		seen[k] = true
+	}
+}
+
+func Test_retry_hint_reads_a_retrydelay_in_a_quoted_error_string(t *testing.T) {
+	for _, s := range []string{`{\"retryDelay\":\"30s\"}`, `{"retryDelay": "30s"}`} {
+		if got := retryHint(Input{Err: s}, time.Time{}); got != 30*time.Second {
+			t.Errorf("%q: hint = %v, want 30s", s, got)
+		}
+	}
+}
+
+func Test_retry_hint_order_and_text_forms(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Input
+		want time.Duration
+	}{
+		{"field wins over text", Input{RetryAfter: 7 * time.Second, Err: "retry-after: 45 try again in 3 minutes"}, 7 * time.Second},
+		{"retry-after text", Input{Err: "429 retry-after: 45"}, 45 * time.Second},
+		{"retry-after fraction", Input{Err: "Retry-After=1.5"}, 1500 * time.Millisecond},
+		{"retryDelay in text", Input{Err: `429 {"error":{"details":[{"retryDelay": "12s"}]}}`}, 12 * time.Second},
+		{"try again", Input{Err: "try again in 3 minutes"}, 3 * time.Minute},
+		{"garbage", Input{Err: "boom"}, 0},
+		{"retry-after beats retryDelay", Input{Err: `"retryDelay": "12s" retry-after: 45`}, 45 * time.Second},
+		{"retryDelay beats try again", Input{Err: `try again in 3 minutes "retryDelay": "12s"`}, 12 * time.Second},
+		{"zero retry-after falls through", Input{Err: `retry-after: 0 try again in 2 seconds`}, 2 * time.Second},
+	}
+	for _, c := range cases {
+		if got := retryHint(c.in, time.Time{}); got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func Test_subscription_sharing_text_is_account_blocked(t *testing.T) {
+	for _, s := range []string{
+		"Subscription Sharing is not allowed",
+		"your account was flagged for subscription sharing",
+		"subscription_sharing",
+		"subscription-shared",
+		"quota exceeded: subscription sharing detected",
+	} {
+		got := Classify(Input{Provider: "glm", Err: s}, time.Time{})
+		if got.Kind != KindAccountBlocked {
+			t.Errorf("%q: kind = %q, want account_blocked", s, got.Kind)
+		}
+	}
+}
+
+// Structured data names its own class: a rejected signal or a typed backend
+// code beats the shared-subscription phrase in the error text.
+func Test_subscription_sharing_text_loses_to_a_signal_and_a_typed_code(t *testing.T) {
+	sig := &Signal{Status: "rejected", Type: "five_hour"}
+	if got := Classify(Input{Err: "rate_limit_error: see docs on subscription sharing", Signal: sig}, time.Time{}); got.Kind != KindPlanWindowExhausted {
+		t.Errorf("rejected signal: kind = %q, want plan_window_exhausted", got.Kind)
+	}
+	if got := Classify(Input{Err: "unauthorized 401: subscription sharing policy", Code: CodeUnauthorized}, time.Time{}); got.Kind != KindAuthExpired {
+		t.Errorf("typed code: kind = %q, want auth_expired", got.Kind)
+	}
+}
+
+func Test_subscription_word_alone_is_not_account_blocked(t *testing.T) {
+	for _, s := range []string{"Your subscription renews on May 1", "subscription required: upgrade"} {
+		if got := Classify(Input{Err: s}, time.Time{}); got.Kind == KindAccountBlocked {
+			t.Errorf("%q: kind = account_blocked", s)
+		}
+	}
+}
+
+func Test_account_blocked_is_human_fix_and_known(t *testing.T) {
+	k := KindAccountBlocked
+	if !IsHumanFix(k) || !IsKnown(k) {
+		t.Fatal("account_blocked must be a known human-fix kind")
+	}
+	found := false
+	for _, a := range AllKinds() {
+		found = found || a == k
+	}
+	if !found {
+		t.Fatal("account_blocked missing from AllKinds")
+	}
+	if Describe(k) == "" || Guidance(k) == "" {
+		t.Fatal("Describe/Guidance empty")
+	}
+	act := NextAction(k, ActionContext{FallbackProfileID: 5, FallbackProfileName: "backup"})
+	if act == nil || act.Kind != ActionSwitchProfile || act.Target != "profile:5" || act.Label != "Switch to backup" {
+		t.Fatalf("action = %+v", act)
+	}
+	if NextAction(k, ActionContext{}) != nil {
+		t.Fatal("no fallback must give no action")
 	}
 }
