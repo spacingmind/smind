@@ -80,11 +80,13 @@ func TestTeardown_NotRunWhenCheckpointFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Make the checkpoint fail: an untracked file plus a pre-commit hook
-	// that rejects every commit.
-	hooks := filepath.Join(w.Path, ".git", "hooks")
-	_ = os.MkdirAll(hooks, 0o755)
-	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+	// Make the checkpoint fail. The daemon's checkpoint runs stripped, so a
+	// repo the agent poisoned (a rejecting pre-commit hook, which this test
+	// used before) no longer fails it -- nothing config-named runs. Break
+	// the worktree's .git pointer instead: every git call in the worktree
+	// fails, status first.
+	if err := os.WriteFile(filepath.Join(*task.WorktreePath, ".git"),
+		[]byte("gitdir: "+filepath.ToSlash(filepath.Join(t.TempDir(), "gone"))), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(*task.WorktreePath, "dirty.txt"), []byte("x"), 0o644); err != nil {

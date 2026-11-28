@@ -34,6 +34,9 @@ const (
 	// KindTooManyDenials: the provider stopped the run after too many denied
 	// actions; a human reviews the permission policy.
 	KindTooManyDenials = "too_many_denials"
+	// KindAccountBlocked: the provider rejected how the account is used (for
+	// example a shared subscription); only a person can act.
+	KindAccountBlocked = "account_blocked"
 	// KindCLIExited: the CLI ended its stream without a result.
 	KindCLIExited = "cli_exited"
 )
@@ -129,12 +132,15 @@ var (
 	// Sources: refs/codex protocol error.rs ("Selected model is at capacity",
 	// "We're currently experiencing high demand", "rate limit exceeded: ..."),
 	// Anthropic overloaded_error (529).
-	reTransient = regexp.MustCompile(`(?i)overloaded_error|selected model is at capacity|experiencing high demand|rate limit exceeded:|\boverloaded\b`)
-	reTryAgain  = regexp.MustCompile(`(?i)try again in (\d+)\s*(seconds?|secs?|s|minutes?|mins?|m)\b`)
+	reTransient           = regexp.MustCompile(`(?i)overloaded_error|selected model is at capacity|experiencing high demand|rate limit exceeded:|\boverloaded\b`)
+	reRetryAfterText      = regexp.MustCompile(`(?i)retry-after[:=]\s*(\d+(?:\.\d+)?)`)
+	reSubscriptionSharing = regexp.MustCompile(`(?i)subscription[ _-]?shar(?:ing|ed)`)
+	reTryAgain            = regexp.MustCompile(`(?i)try again in (\d+)\s*(seconds?|secs?|s|minutes?|mins?|m)\b`)
 )
 
 // Classify classifies a failed run. Unknown never classifies and no time is
-// ever guessed. Precedence: a rejected signal or an explicit plan-usage text
+// ever guessed. Precedence: a rejected signal, then (with no typed code) a
+// shared-subscription rejection (account_blocked), then an explicit plan-usage text
 // (plan_window_exhausted) beats a typed backend code, which beats auth text,
 // which beats model text, which beats the generic 429 words (transient_429
 // when there is a Retry-After or an overload body, else the residual
@@ -151,6 +157,12 @@ func Classify(in Input, now time.Time) Result {
 			res.ResetAt = &t
 			res.ResetInferred = false
 		}
+	}
+	// A provider's rejection of how the account is used (a shared
+	// subscription) beats every TEXT class, but never structured data: a
+	// rejected signal (above) or a typed backend code names its own class.
+	if !sigHit && in.Code == "" && reSubscriptionSharing.MatchString(in.Err) {
+		return Result{Kind: KindAccountBlocked}
 	}
 	txt := classifyText(in.Err, now, in.Vendor)
 	if sigHit {
@@ -205,10 +217,19 @@ func Classify(in Input, now time.Time) Result {
 }
 
 // retryHint is the provider's wait hint: the backend's Retry-After, else a
+// "retry-after: N" (seconds) or RetryInfo retryDelay in the text, else a
 // "try again in N seconds/minutes" in the text; 0 = none.
 func retryHint(in Input, _ time.Time) time.Duration {
 	if in.RetryAfter > 0 {
 		return in.RetryAfter
+	}
+	if m := reRetryAfterText.FindStringSubmatch(in.Err); m != nil {
+		if f, err := strconv.ParseFloat(m[1], 64); err == nil && f > 0 && f <= 1e9 {
+			return time.Duration(f * float64(time.Second))
+		}
+	}
+	if d, ok := retryInfoFromText(in.Err); ok {
+		return d
 	}
 	if m := reTryAgain.FindStringSubmatch(in.Err); m != nil {
 		n, err := strconv.Atoi(m[1])

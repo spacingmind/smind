@@ -22,6 +22,7 @@ var goSitePolicy = map[string]sitePolicy{
 	"wsapi.dispatch":                   {"contain", "one request: dispatch's own recover answers the caller with an internal error and the connection lives; this wrapper is a net"},
 	"runs.drive":                       {"contain", "drive's own recover records and finishes the run as an error; this wrapper is a net"},
 	"quota.fetch":                      {"contain", "one-shot usage fetch: a panic leaves the cached usage stale, as the recover() the poller already had; logged"},
+	"quota.spreadSkip":                 {"contain", "ends the post-resume spread wait when a forced refresh joins the flight: it only closes a context; a panic cannot touch usage state, logged"},
 	"quota.providerFetch":              {"contain", "one-shot provider usage fetch: a panic leaves the cached usage stale; logged"},
 	"quota.refreshAll":                 {"contain", "one-shot refresh fan-out: a panic leaves the cached usage stale; logged"},
 	"wsapi.usageFetch":                 {"contain", "one-shot usage fetch behind a request: a panic leaves the cache stale; logged"},

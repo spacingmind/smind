@@ -48,7 +48,7 @@ func TestFailureText_PerClass(t *testing.T) {
 			t.Errorf("runStatusText(%q) is empty", kind)
 		}
 		switch kind {
-		case failure.KindContextWindowExceeded, failure.KindSessionBudgetExceeded, failure.KindTooManyDenials:
+		case failure.KindContextWindowExceeded, failure.KindSessionBudgetExceeded, failure.KindTooManyDenials, failure.KindAccountBlocked:
 			if !strings.Contains(got, strings.ReplaceAll(kind, "_", " ")) {
 				t.Errorf("runStatusText(%q) = %q, want the class in words", kind, got)
 			}
@@ -105,5 +105,23 @@ func TestMCPInstructions_ListEveryClass(t *testing.T) {
 	}
 	if strings.Contains(mcpInstructions, "A failed run with failureKind rate_limited hit a provider quota") {
 		t.Error("the old single-class rate_limited paragraph is still there")
+	}
+}
+
+func Test_failure_text_covers_account_blocked(t *testing.T) {
+	now := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	act := failure.NextAction(failure.KindAccountBlocked, failure.ActionContext{FallbackProfileID: 4, FallbackProfileName: "Backup"})
+	got := runStatusText(runSummaryRow{Status: "error", FailureKind: failure.KindAccountBlocked, FailureAction: act}, now)
+	if !strings.Contains(got, "account blocked by the provider") || !strings.Contains(got, " · next: Switch to Backup") {
+		t.Errorf("runStatusText = %q", got)
+	}
+	if got := runStatusText(runSummaryRow{Status: "error", FailureKind: failure.KindAccountBlocked}, now); !strings.Contains(got, "account blocked by the provider") || strings.Contains(got, "next:") {
+		t.Errorf("no action: %q", got)
+	}
+	if !strings.Contains(mcpInstructions, "account_blocked") {
+		t.Error("mcpInstructions does not mention account_blocked")
+	}
+	if got := waitExitCode(runSummaryRow{Status: "error", FailureKind: failure.KindAccountBlocked}); got != 7 {
+		t.Errorf("waitExitCode = %d, want 7", got)
 	}
 }

@@ -436,6 +436,7 @@ describe("describeRunFooter failure classes", () => {
     ["context_window_exceeded", "new_chat", "Start a fresh chat for this task", "The conversation no longer fits the model's context window.", "Context window full"],
     ["session_budget_exceeded", "raise_budget", "Raise the session budget in the provider's settings, or start a fresh chat", "The provider's session budget for this run is used up.", "Session budget used up"],
     ["too_many_denials", "review_policy", "Review the permission policy", "The agent kept asking for actions that were denied, so the provider stopped the run.", "Stopped after too many denials"],
+    ["account_blocked", "switch_profile", "Switch to the fallback profile", "The provider rejected this account's use under its plan terms.", "Account blocked by the provider"],
   ])("%s: the short class label, danger tone, never Retry or Continue (even with the disposition)", (kind, actionKind, label, summary, short) => {
     const v = describeRunFooter(freshRun({ status: "error", failureKind: kind, failureAction: act(actionKind, { label, summary }), disposition: "needs-continue" }), { now: NOW, modelLabel: "" });
     expect(v).toMatchObject({ kind: "abnormal", sentence: short, tone: "danger", action: null });

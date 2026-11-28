@@ -1,6 +1,10 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": true
+    "strict": true,
+    "paths": {
+      "@smind/relay-client/*": ["../web/packages/relay-client/*"],
+      "@noble/*": ["./node_modules/@noble/*"]
+    }
   }
 }

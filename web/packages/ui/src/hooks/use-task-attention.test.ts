@@ -326,6 +326,7 @@ describe("useTaskAttention failure classes (run failure classes)", () => {
       ["context_window_exceeded", "Start a fresh chat for this task"],
       ["session_budget_exceeded", "Raise the session budget in the provider's settings, or start a fresh chat"],
       ["too_many_denials", "Review the permission policy"],
+      ["account_blocked", "Switch to the fallback profile"],
     ]) {
       const client = new FakeWsClient();
       const { result } = renderHook(() => useTaskAttention(client, null, null));

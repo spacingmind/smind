@@ -64,6 +64,7 @@ describe("isHumanFixLine with the human-action classes", () => {
     expect(isHumanFixLine('- task #1 "t" run r-1: error · context_window_exceeded · next: Start a fresh chat for this task · cost not reported')).toBe(true);
     expect(isHumanFixLine("- task #1 \"t\" run r-1: error · session_budget_exceeded · next: Raise the session budget in the provider's settings, or start a fresh chat")).toBe(true);
     expect(isHumanFixLine('- task #1 "t" run r-1: error · too_many_denials · next: Review the permission policy')).toBe(true);
+    expect(isHumanFixLine('- task #1 "t" run r-1: error · account_blocked · next: Switch to the fallback profile')).toBe(true);
   });
 
   it("stays quiet for a done line, an unknown kind and a transient throttle", () => {

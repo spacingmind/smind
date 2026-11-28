@@ -141,7 +141,7 @@ describe('describeRunFooter', () => {
     });
 
     describe('human-action classes (R3a): the footer explains, never offers Continue', () => {
-      const kinds = ['context_window_exceeded', 'session_budget_exceeded', 'too_many_denials'] as const;
+      const kinds = ['context_window_exceeded', 'session_budget_exceeded', 'too_many_denials', 'account_blocked'] as const;
 
       it('the sentence is the daemon summary when the run carries one', () => {
         for (const kind of kinds) {
@@ -166,12 +166,26 @@ describe('describeRunFooter', () => {
           tone: 'warning',
           action: null,
         });
+        expect(describeRunFooter({ Status: 'error', FailureKind: 'account_blocked', FailureAction: { kind: 'switch_profile', label: 'Switch to the fallback profile' } }, now)).toEqual({
+          sentence: "The provider rejected this account's use under its plan terms.",
+          tone: 'warning',
+          action: null,
+        });
       });
 
       it('no Continue even when the disposition says needs-continue (a person must act, not the agent)', () => {
         for (const kind of kinds) {
           expect(describeRunFooter({ Status: 'error', FailureKind: kind, Disposition: 'needs-continue' }, now)?.action).toBeNull();
         }
+      });
+
+      it('account_blocked_is_in_the_mobile_failure_tables', () => {
+        // C5a D3: a human-fix kind, never continued; the daemon's summary wins, else the fallback sentence.
+        expect(describeRunFooter({ Status: 'error', FailureKind: 'account_blocked', Disposition: 'needs-continue' }, now)).toEqual({
+          sentence: "The provider rejected this account's use under its plan terms.",
+          tone: 'warning',
+          action: null,
+        });
       });
     });
 

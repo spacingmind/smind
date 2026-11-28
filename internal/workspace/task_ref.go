@@ -88,11 +88,16 @@ func validateRefName(dir, ref string, isBranch bool) error {
 // `git rev-parse --verify --quiet --end-of-options <ref>^{commit}`. The
 // --end-of-options separator (plus validateRefName's leading '-' check)
 // guarantees the user-supplied ref can only ever be parsed as a rev, never
-// as an option.
+// as an option. A task created from a ref is daemon-initiated, so the call
+// runs stripped; a scan that fails closed reports the ref as unresolvable.
 func gitRefCommitExists(dir, ref string) bool {
-	cmd := exec.Command("git", gitsafe.Args("rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")...)
+	argv, err := gitsafe.StrippedArgs(context.Background(), dir, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return false
+	}
+	cmd := exec.Command("git", argv...)
 	cmd.Dir = dir
-	cmd.Env = gitsafe.Env(nil)
+	cmd.Env = gitsafe.StrippedEnv(nil)
 	return cmd.Run() == nil
 }
 
@@ -113,10 +118,16 @@ func splitRemoteBranch(ref string) (remote, branch string, ok bool) {
 }
 
 // remoteConfigured reports whether remote is a configured git remote.
+// Daemon-initiated (task creation), so the call runs stripped; a scan that
+// fails closed reports the remote as not configured.
 func remoteConfigured(dir, remote string) bool {
-	cmd := exec.Command("git", gitsafe.Args("remote", "get-url", "--", remote)...)
+	argv, err := gitsafe.StrippedArgs(context.Background(), dir, "remote", "get-url", "--", remote)
+	if err != nil {
+		return false
+	}
+	cmd := exec.Command("git", argv...)
 	cmd.Dir = dir
-	cmd.Env = gitsafe.Env(nil)
+	cmd.Env = gitsafe.StrippedEnv(nil)
 	return cmd.Run() == nil
 }
 
@@ -124,14 +135,19 @@ func remoteConfigured(dir, remote string) bool {
 // (explicit refspec, no shell) and discards the outcome: refreshing the
 // remote-tracking ref is best-effort, and a failure (offline, timeout,
 // auth) must fall back to the ref that's already there rather than fail
-// task creation.
+// task creation. Daemon-initiated, so it runs stripped; a scan that fails
+// closed is just one more way the fetch can be skipped.
 func fetchRemoteBranchBestEffort(dir, remote, branch string) {
 	ctx, cancel := context.WithTimeout(context.Background(), remoteFetchTimeout)
 	defer cancel()
 	refspec := fmt.Sprintf("+refs/heads/%s:refs/remotes/%s/%s", branch, remote, branch)
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args(netGitArgs(ctx, dir, remote, "fetch", remote, refspec)...)...)
+	argv, err := gitsafe.StrippedArgs(ctx, dir, netGitArgs(ctx, dir, remote, "fetch", remote, refspec)...)
+	if err != nil {
+		return
+	}
+	cmd := exec.CommandContext(ctx, "git", argv...)
 	cmd.Dir = dir
-	cmd.Env = gitsafe.Env(nil)
+	cmd.Env = gitsafe.StrippedEnv(nil)
 	_ = cmd.Run()
 }
 

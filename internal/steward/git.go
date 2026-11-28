@@ -251,12 +251,21 @@ func SecretScan(addedByPath map[string][]string) map[string]int {
 // gitCmd builds a git call for dir. GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE are
 // dropped so the caller's environment cannot override `-C dir`, and
 // --no-optional-locks keeps the call from touching the worktree's index.
-// gitsafe carries the rest of the hardening: no fsmonitor, no external diff
-// or textconv on the diff family, and no GIT_EXTERNAL_DIFF from the daemon's
-// own environment.
+// gitsafe.StrippedArgs carries the rest of the hardening: no fsmonitor, no
+// external diff or textconv on the diff family, and the stripped-mode
+// overrides that stop git running a program the repository's own state
+// names. When that mode's config scan fails the call fails closed: the
+// returned Cmd carries the error in Err, so Run/Output return it without
+// git ever starting.
 func gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args(append([]string{"--no-optional-locks", "-C", dir}, args...)...)...)
-	for _, e := range gitsafe.Env(nil) {
+	full, err := gitsafe.StrippedArgs(ctx, dir, append([]string{"--no-optional-locks", "-C", dir}, args...)...)
+	if err != nil {
+		cmd := exec.CommandContext(ctx, "git")
+		cmd.Err = err
+		return cmd
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
+	for _, e := range gitsafe.StrippedEnv(nil) {
 		if strings.HasPrefix(e, "GIT_DIR=") || strings.HasPrefix(e, "GIT_WORK_TREE=") || strings.HasPrefix(e, "GIT_INDEX_FILE=") {
 			continue
 		}

@@ -99,7 +99,7 @@ interface Vectors {
   negative: Negative[];
 }
 
-const v: Vectors = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', '..', 'internal', 'relay', 'e2ee', 'testdata', 'e2ee_v2_vectors.json'), 'utf8'));
+const v: Vectors = JSON.parse(readFileSync(join(__dirname, '..', '..', '..', '..', '..', 'internal', 'relay', 'e2ee', 'testdata', 'e2ee_v2_vectors.json'), 'utf8'));
 
 const fromHex = (s: string): Uint8Array => {
   const out = new Uint8Array(s.length / 2);

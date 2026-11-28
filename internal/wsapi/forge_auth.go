@@ -243,16 +243,21 @@ func (f *forgeAuth) authenticatedFor(ctx context.Context, host string) bool {
 // per-invocation credential helper for a network git call, only when
 // remote's URL is https and the forge is signed in to its host. It reads the
 // URL with `git remote get-url` (so url.insteadOf applies, as it does to the
-// connection) and edits no configuration.
+// connection) and edits no configuration. The read runs stripped (ref-only:
+// static overrides only) and fails closed to "no helper" on any error.
 func (f *forgeAuth) networkGit(ctx context.Context, dir, remote string) []string {
 	if remote == "" || strings.HasPrefix(remote, "-") {
 		return nil
 	}
 	gctx, cancel := context.WithTimeout(ctx, forgeGitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(gctx, "git", gitsafe.Args("-c", "core.fsmonitor=false", "remote", "get-url", "--", remote)...)
+	full, err := gitsafe.StrippedArgs(gctx, dir, "-c", "core.fsmonitor=false", "remote", "get-url", "--", remote)
+	if err != nil {
+		return nil
+	}
+	cmd := exec.CommandContext(gctx, "git", full...)
 	cmd.Dir = dir
-	cmd.Env = gitsafe.Env(nil)
+	cmd.Env = gitsafe.StrippedEnv(nil)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil

@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { base64Decode, base64Encode } from '../base64';
 import {
   buildDeviceHello,
+  DeviceIdentity,
   ChallengeVersionError,
   deviceIdFor,
   HELLO_VERSION,
@@ -53,7 +54,7 @@ interface Vector {
 }
 
 const vector: Vector = JSON.parse(
-  readFileSync(join(__dirname, '..', '..', '..', '..', 'internal', 'relay', 'devices', 'testdata', 'device_hello_vector.json'), 'utf8'),
+  readFileSync(join(__dirname, '..', '..', '..', '..', '..', 'internal', 'relay', 'devices', 'testdata', 'device_hello_vector.json'), 'utf8'),
 );
 
 function fromHex(s: string): Uint8Array {
@@ -97,13 +98,26 @@ describe('device_hello v2 cross-language vector', () => {
     expect(base64Encode(challenge)).toBe(vector.challenge_message.params.challenge);
   });
 
+  it('buildDeviceHello_awaits_an_async_signer', async () => {
+    const sync = identityFromSeed(fromHex(vector.seed_hex));
+    const asyncIdentity: DeviceIdentity = {
+      deviceId: sync.deviceId,
+      publicKey: sync.publicKey,
+      sign: (msg) => Promise.resolve(sync.sign(msg)),
+    };
+    const expected = await buildDeviceHello(sync, vector.label, th, daemonPub, sessionId, challenge);
+    const hello = await buildDeviceHello(asyncIdentity, vector.label, th, daemonPub, sessionId, challenge);
+    expect(hello).toEqual(expected);
+    expect(hello).toEqual(vector.hello);
+  });
+
   it('the vector transcript hash is what the E2EE v2 client computes for the vector keys, and the signed bytes use it', () => {
     expect(hex(transcriptHash(daemonPub, daemonEphPub, mobilePub))).toBe(vector.transcript_hash_hex);
     expect(hex(helloSignedBytes(th, daemonPub, sessionId, challenge))).toBe(vector.signed_bytes_hex);
   });
 
-  it('device_hello v2 signature verifies against the Go vector (and matches it byte for byte)', () => {
-    const hello = buildDeviceHello(identity, vector.label, th, daemonPub, sessionId, challenge);
+  it('device_hello v2 signature verifies against the Go vector (and matches it byte for byte)', async () => {
+    const hello = await buildDeviceHello(identity, vector.label, th, daemonPub, sessionId, challenge);
     expect(hello).toEqual(vector.hello);
     expect(hello.v).toBe(2);
     // Ed25519 is deterministic, so the signature is the Go one...
@@ -225,7 +239,7 @@ describe('device key persistence', () => {
   it('never puts the seed in the hello, nor on the identity object', async () => {
     const seed = fromHex(vector.seed_hex);
     const identity = identityFromSeed(seed);
-    const hello = buildDeviceHello(identity, 'x', new Uint8Array(32), new Uint8Array(32), utf8('s'), new Uint8Array(32));
+    const hello = await buildDeviceHello(identity, 'x', new Uint8Array(32), new Uint8Array(32), utf8('s'), new Uint8Array(32));
     expect(JSON.stringify(hello)).not.toContain(base64Encode(seed));
     // Serialising or logging the identity (or whatever holds it) must not reveal the seed.
     expect(Object.keys(identity).sort()).toEqual(['deviceId', 'publicKey', 'sign']);

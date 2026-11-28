@@ -561,7 +561,7 @@ describe("RunTimeline", () => {
 
   it("Re-run hides on a human-action failure (a person must act first), stays for every other error and for done runs", () => {
     const onRerun = vi.fn();
-    for (const failureKind of ["context_window_exceeded", "session_budget_exceeded", "too_many_denials"]) {
+    for (const failureKind of ["context_window_exceeded", "session_budget_exceeded", "too_many_denials", "account_blocked"]) {
       const { unmount } = render(
         <ul>
           <RunTimeline run={run([], { status: "error", err: "boom", failureKind })} onRerun={onRerun} />

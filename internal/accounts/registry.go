@@ -60,7 +60,11 @@ type Registry struct {
 	// refreshMu guards refreshLocks. Entries are kept for the Registry's
 	// lifetime rather than dropped when unused: account counts are small
 	// and pinning avoids lock-reuse races.
-	refreshMu    sync.Mutex
+	refreshMu sync.Mutex
+	// deadRefresh maps an account id to the key of its refresh token that the
+	// provider refused for good (see refreshKey). In memory only. Guarded by
+	// refreshMu.
+	deadRefresh  map[int64]string
 	refreshLocks map[int64]chan struct{}
 }
 
@@ -202,6 +206,9 @@ func (r *Registry) ReplaceOAuth(id int64, cred OAuthCredential, adoptIdentity st
 	if err != nil {
 		return store.Account{}, err
 	}
+	// A new sign-in clears "needs sign-in" even when the provider handed back
+	// the same refresh token.
+	r.clearDead(id)
 	if !sameAccount {
 		if fn := r.getCredentialReplacedHook(); fn != nil {
 			fn(id)
@@ -350,6 +357,7 @@ func (r *Registry) ReplaceCredential(id int64, credential, baseURL string) (stor
 	if err != nil {
 		return store.Account{}, err
 	}
+	r.clearDead(id)
 	if fn := r.getCredentialReplacedHook(); fn != nil {
 		fn(id)
 	}
@@ -367,6 +375,7 @@ func (r *Registry) Delete(id int64) error {
 	if err := r.store.DeleteAccount(id); err != nil {
 		return err
 	}
+	r.clearDead(id)
 	if n := r.getNotifier(); n != nil {
 		n.NotifyAccountRemoved(id)
 	}
