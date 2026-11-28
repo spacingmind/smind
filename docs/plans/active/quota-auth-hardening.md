@@ -65,11 +65,16 @@ GLM peers write all code from step briefs, one commit per step, at most two at a
 
 ## Progress
 
-- Spec written (this commit).
+- Spec written first; the C5b validation contract committed before code. C5a (failure classes) is a separate pull request, sequential, not stacked.
+- C5b code written by peers (`peer-sonnet`: the GLM profile was inside a logged plan-window limit, runs `cb9f0f77...` and `2e88a656...`, reset about 20:24 local) from step briefs, one commit per step; every diff reviewed by the Lead. Peer P: terminal refresh token memory in `internal/accounts`, the proxy routing around a needs-sign-in account, the fetcher making no usage call for one. Peer Q: the resume watch and the post-resume spread in the poller.
+- Lead review found a real defect the peer's injected-clock tests could not see: the resume watch's default wall clock was `time.Now()`, whose `Sub` uses the monotonic reading, so a real sleep would never have been detected. Fixed with `Round(0)` and a test pinning the default clock.
 
 ## Validation
 
-- Pending.
+- Lead mutations on committed code, each fails its named test: M1 no memory of a dead refresh token (accounts test), M2 a transient error remembered as dead, M3 the proxy no longer filters needs-sign-in accounts, M4 no post-resume spread, M5 a forced refresh delayed after a resume (fails by hanging: the injected sleep never returns; run with a short `-timeout`), M6 the gap test compares wall time only, M7 the default wall clock keeps its monotonic reading.
+- Contract correction: removing the dead-token check from `EnsureFresh` does not fail the proxy test, because the proxy filter routes around the account before any refresh; M1 names only the accounts test.
+- Provider-call counts asserted: the refresher is called once for a terminal error and never again (accounts and proxy tests), a needs-sign-in account makes zero usage calls, N spread fetches make exactly N provider calls.
+- Validator verdict and `go test` / `verify.sh` results: in the PR body.
 
 ## Decisions for the Human
 
