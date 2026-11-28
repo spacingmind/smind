@@ -10,7 +10,6 @@
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/preflight.css" layer(base);
 @import "@astryxdesign/core/reset.css";
-@import "@astryxdesign/core/astryx.css";
 @import "./theme/smind-theme.css";
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";

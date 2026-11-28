@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { astryxStylex } from "@astryxdesign/build/vite";
 import { demoSecurityPlugin } from "./scripts/vite-plugin-demo-security";
 
 // `vite build --mode demo` (ADR-0051) builds the real UI against the scripted in-browser daemon in
@@ -10,11 +11,25 @@ import { demoSecurityPlugin } from "./scripts/vite-plugin-demo-security";
 export default defineConfig(({ mode }) => {
   const demo = mode === "demo";
   return {
-    plugins: [react(), tailwindcss(), ...(demo ? [demoSecurityPlugin()] : [])],
+    plugins: [
+      ...astryxStylex({
+        stylexOptions: {
+          dev: process.env.NODE_ENV === "development",
+          runtimeInjection: false,
+          propertyValidationMode: "throw",
+          treeshakeCompensation: true,
+          unstable_moduleResolution: { type: "commonJS", rootDir: __dirname },
+        },
+      }),
+      react(),
+      tailwindcss(), ...(demo ? [demoSecurityPlugin()] : []),
+    ],
     base: "./",
     define: { __SMIND_DEMO__: JSON.stringify(demo) },
+    optimizeDeps: { exclude: ["@astryxdesign/core", "@astryxdesign/theme-neutral"] },
     resolve: {
       alias: {
+        "@astryxdesign/core": path.resolve(__dirname, "../../node_modules/@astryxdesign/core/src"),
         "@": path.resolve(__dirname, "./src"),
       },
     },
