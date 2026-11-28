@@ -75,6 +75,8 @@ func failureText(kind, window string, resetAt *time.Time, inferred bool, action 
 		head = "session budget exceeded"
 	case failure.KindTooManyDenials:
 		head = "too many denials"
+	case failure.KindAccountBlocked:
+		head = "account blocked by the provider"
 	default:
 		head = kind
 	}

@@ -376,3 +376,11 @@ mirror's reported cost (`store.TreeKnownCost`). The B-series notification and th
 callee's per-origin `maxLiveAgents` bounds them). Details: `docs/plans/active/fleet-hosts.md` "F4 design".
 
 > Amendment 2026-11-01 (F1): the provider cooldown is also a picker gate (`cooling_down`, action `clear_cooldown`) and the non-human fast-fail is now the typed `gated` error. See ADR-0050 amendment.
+
+## Amendment 2026-11-28: no automatic fallback after streamed output
+
+**Amended 2026-11-28, Accepted by the Human** (the original text above is unchanged; this note narrows the `fallback` row of the Part B policy table).
+
+The `fallback` policy no longer starts the failed run's prompt on the fallback profile when the failed run had already streamed assistant output. Replaying a half-answered prompt into a different agent repeats work and can undo or double changes the first agent already made to the workspace. In that case the daemon starts nothing, writes a log line, and the failure keeps its `switch_profile` action, so the person (or the parent, through the B3 line) switches by hand. The rule is: **a fallback is never started after the first streamed delta.** The agent's own "[error] ..." failure chunk is not output.
+
+Unchanged: a failure with no streamed output still falls back as described; `wait` and the transient retry stay on the same chat and are not affected; one hop, human-authored profiles and every other guard stand. Built in the C5a change (`internal/runs/failover.go`, the flag is read before the history budget can evict the run's history); pinned by `Test_no_fallback_after_the_first_streamed_delta`, `Test_no_fallback_after_streamed_output_even_when_the_history_is_evicted`, `Test_fallback_still_starts_without_streamed_output` and `Test_wait_retry_still_queued_after_streamed_output`.

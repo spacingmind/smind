@@ -65,6 +65,14 @@ GLM peers write all code from step briefs, one commit per step, at most two at a
 
 ## Progress
 
+- Spec written first; the C5a validation contract committed before code.
+- C5a code (RetryInfo/Retry-After hint, usage-429 body, transient bounds, `account_blocked`, no fallback after streamed output, CLI/web/mobile tables, e2e card) written by peers from step briefs, one commit per step, each diff reviewed and cherry-picked by the Lead. The first two C5a Go/web peers ran on the GLM profile and hit its plan window (`plan_window_exhausted`, 5-hour window, reset about 20:24 local); the remaining steps (Go steps 4-6) and the other peers ran on `peer-sonnet` after that logged limit.
+- Reviewer 1 (parsers/classifier) found one P1: the `account_blocked` phrase was checked first in `Classify` and beat a rejected signal and a typed code. Fixed: a rejected signal or a typed code wins, the phrase beats only text classes. Also fixed: an escaped `retryDelay` in a quoted error string, a zero-length delay reported as found, and a cap test that could not fail (now valid JSON with the RetryInfo after 12 KiB of padding).
+- Reviewer 2 (guard and regressions) found one P1: `finish()` calls `retain()` before the policy, and `retain()` can evict the run's own history under the history budget, so the guard could miss streamed output. Fixed: `streamedAtFinish` is read before `retain`; new test with a 1-byte history budget. A P3 stays: the person is not told why no automatic fallback happened (the manual switch is still offered; a log line records it).
+- C5b (the refresh path, items 2 and 3) is a separate pull request, sequential, not stacked.
+
+### C5b progress
+
 - Spec written first; the C5b validation contract committed before code. C5a (failure classes) is a separate pull request, sequential, not stacked.
 - C5b code written by peers (`peer-sonnet`: the GLM profile was inside a logged plan-window limit, runs `cb9f0f77...` and `2e88a656...`, reset about 20:24 local) from step briefs, one commit per step; every diff reviewed by the Lead. Peer P: terminal refresh token memory in `internal/accounts`, the proxy routing around a needs-sign-in account, the fetcher making no usage call for one. Peer Q: the resume watch and the post-resume spread in the poller.
 - Reviewer 1 (refresh memory and proxy) found three P2s, all fixed with tests: the first request after a token dies still failed with 401 though another account was healthy (the proxy now routes once more without the dead account); a new sign-in that hands back the SAME refresh token left the account marked (clearDead in ReplaceOAuth, ReplaceCredential and Delete); the request log row could hold the provider's refresh response text (it now holds only the fixed sentence). A P3 (a store read per account per request) was fixed too; a second P3 (an account marked dead inside the pre-expiry buffer is refused by the proxy at once) is accepted.
@@ -72,6 +80,12 @@ GLM peers write all code from step briefs, one commit per step, at most two at a
 - Lead review found a real defect the peer's injected-clock tests could not see: the resume watch's default wall clock was `time.Now()`, whose `Sub` uses the monotonic reading, so a real sleep would never have been detected. Fixed with `Round(0)` and a test pinning the default clock.
 
 ## Validation
+
+- Lead mutations on committed code (each fails its named test): M1 RetryInfo ignored (hint and quota body), M2 old 5 s / 5 min bounds, M3 phrase dropped, M4 `account_blocked` out of `IsHumanFix`, M5 streamed-output guard removed; plus the 8 KiB cap raised (cap test) and the precedence guard removed (`..._loses_to_a_signal_and_a_typed_code`).
+- `go test ./internal/runs/... ./internal/quota/... ./internal/inbox/... ./cmd/smind/ ./internal/hygiene/`, web tables (41 tests), mobile table test, e2e `failure-classes` (12 across light and dark), `sh scripts/verify.sh` PASS.
+- Frames: `account_blocked` run error box, light and dark, 1280 (web harness, real daemon socket rewritten as the other classes do): in the PR body.
+
+### C5b validation
 
 - Lead mutations on committed code, each fails its named test: M1 no memory of a dead refresh token (accounts test), M2 a transient error remembered as dead, M3 (retired: a pre-filter of needs-sign-in accounts became redundant with the reroute loop; the first validator pass found no test could tell them apart, so the filter was removed), M4 no post-resume spread, M5 a forced refresh delayed after a resume (fails by hanging: the injected sleep never returns; run with a short `-timeout`), M6 the gap test compares wall time only, M7 the default wall clock keeps its monotonic reading, M8 the proxy answers 401 on the first dead account, M9 a new sign-in does not clear the mark, M10 a forced refresh joining a spread flight keeps waiting.
 - The first C5b validator run (validation 63) failed only on that surviving M3; every other test, mutation and command passed.
@@ -81,6 +95,6 @@ GLM peers write all code from step briefs, one commit per step, at most two at a
 
 ## Decisions for the Human
 
-1. **Item 5 reverses part of ADR-0041 F3.** A limit that hits mid-turn (after output) will no longer auto-continue on the fallback profile; the fallback is offered as a manual switch. Recommendation: keep, because the fallback replays the prompt into a different agent after the first one may already have changed your workspace. If you would rather keep the auto-continue and only guard the same-request replays (which the proxy never does), say so and I revert D5.
+1. **Item 5 reverses part of ADR-0041 F3 (AGREED by the Human 2026-11-28; the ADR carries an "Amendment 2026-11-28" note).** A limit that hits mid-turn (after output) will no longer auto-continue on the fallback profile; the fallback is offered as a manual switch. Recommendation: keep, because the fallback replays the prompt into a different agent after the first one may already have changed your workspace. If you would rather keep the auto-continue and only guard the same-request replays (which the proxy never does), say so and I revert D5.
 2. **Wording of the "subscription sharing" match.** Recognised by the phrase; the research note has no verbatim message. If you have one real rejection text, it should become a test row.
 3. **Restart forgets "needs re-login".** One extra refresh attempt per such account after a daemon restart (bounded). A persisted flag would need a schema change; recommendation: not now.

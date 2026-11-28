@@ -402,7 +402,7 @@ func chatHasSession(st *store.Store, chatID int64) bool {
 // context window, a spent provider session budget or a denial-stopped run.
 func resumableKind(kind string) bool {
 	return failure.IsKnown(kind) && kind != failure.KindContextWindowExceeded &&
-		kind != failure.KindSessionBudgetExceeded && kind != failure.KindTooManyDenials
+		kind != failure.KindSessionBudgetExceeded && kind != failure.KindTooManyDenials && kind != failure.KindAccountBlocked
 }
 
 // restartStopReason is the stop reason for a run the daemon's going down cut
@@ -477,6 +477,10 @@ func rehydrateMeta(st *store.Store, row store.Run) *run {
 // run is a Registry's internal bookkeeping for one Run: identity fields
 // are immutable after Start, everything else is guarded by mu.
 type run struct {
+	// streamedAtFinish: the run had streamed assistant text when finish ran,
+	// before retain could evict its history (the fallback guard reads it).
+	streamedAtFinish bool
+
 	id       string
 	taskID   int64
 	chatID   int64
@@ -1952,6 +1956,12 @@ func (reg *Registry) finish(r *run, err error) {
 	for _, q := range subs {
 		q.closeQueue()
 	}
+
+	// Read before retain: retain may evict this run's history under the
+	// budget, and the fallback guard must not lose sight of streamed output.
+	r.mu.Lock()
+	r.streamedAtFinish = r.streamedTextLocked()
+	r.mu.Unlock()
 
 	reg.retain(r.id)
 

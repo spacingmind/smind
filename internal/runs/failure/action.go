@@ -121,6 +121,15 @@ func nextActionOf(kind string, c ActionContext) *Action {
 		return &Action{Kind: ActionRaiseBudget, Label: "Raise the session budget in the provider's settings, or start a fresh chat"}
 	case KindTooManyDenials:
 		return &Action{Kind: ActionReviewPolicy, Target: "settings:permission-policy", Label: "Review the permission policy"}
+	case KindAccountBlocked:
+		if c.FallbackProfileID == 0 {
+			return nil
+		}
+		label := "Switch to the fallback profile"
+		if c.FallbackProfileName != "" {
+			label = "Switch to " + c.FallbackProfileName
+		}
+		return &Action{Kind: ActionSwitchProfile, Target: fmt.Sprintf("profile:%d", c.FallbackProfileID), Label: label}
 	case KindCLIExited:
 		return &Action{Kind: ActionContinue, Label: "Continue the run"}
 	}
@@ -175,6 +184,8 @@ func Guidance(kind string) string {
 		return "The provider's own session budget for this run is used up (not smind's tree budget). A human raises it in the provider's settings or starts a fresh chat; do not retry and do not fall back."
 	case KindTooManyDenials:
 		return "The provider stopped the run after too many denied actions. A human should review the permission policy; do not retry the same run and do not widen permissions from inside the run."
+	case KindAccountBlocked:
+		return "The provider rejected how this account is being used (for example, a shared subscription). Do not retry and do not fail over: another run on the same account is refused the same way. A human checks the account's plan and how it is used; the action offers the fallback profile if one is set."
 	case KindCLIExited:
 		return "The agent CLI ended without a result; its session is stored. Send a follow-up prompt such as \"continue\"."
 	}
@@ -203,6 +214,8 @@ func Describe(kind string) string {
 		return "The provider's session budget for this run is used up."
 	case KindTooManyDenials:
 		return "The agent kept asking for actions that were denied, so the provider stopped the run."
+	case KindAccountBlocked:
+		return "The provider rejected this account's use under its plan terms."
 	case KindCLIExited:
 		return "The agent stopped before finishing; its session is saved, so you can continue where it left off."
 	}

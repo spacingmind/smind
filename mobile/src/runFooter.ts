@@ -63,8 +63,8 @@ const CAP: Record<string, string> = {
 /** runs.FailureKindRateLimited (ADR-0041). */
 const RATE_LIMITED = 'rate_limited';
 
-/** The human-action failure classes (R3a AC1): a person must fix these, so they are never continued or retried from here. */
-const HUMAN_FIX_KINDS: ReadonlySet<string> = new Set(['context_window_exceeded', 'session_budget_exceeded', 'too_many_denials']);
+/** The human-action failure classes (R3a AC1, C5a D3): a person must fix these, so they are never continued or retried from here. */
+const HUMAN_FIX_KINDS: ReadonlySet<string> = new Set(['context_window_exceeded', 'session_budget_exceeded', 'too_many_denials', 'account_blocked']);
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -125,8 +125,8 @@ export function describeRunFooter(
     return view;
   }
   // R3a: a human-action class (the conversation outgrew the context window, the provider's session
-  // budget is spent, or the permission policy stopped the run) needs a person, so the footer only
-  // explains: no Continue, whatever the disposition says.
+  // budget is spent, the permission policy stopped the run, or the provider blocked the account) needs
+  // a person, so the footer only explains: no Continue, whatever the disposition says.
   if (run.Status === 'error' && run.FailureKind !== undefined && HUMAN_FIX_KINDS.has(run.FailureKind)) {
     return { sentence: failureSentence(run.FailureKind, run.FailureAction), tone: 'warning', action: null };
   }

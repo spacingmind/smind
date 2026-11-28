@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import { HUMAN_ACTION_KINDS } from "@/lib/failure-class";
 import { FAILURE_FALLBACK_SENTENCE, FAILURE_SHORT_LABEL, failureSentence, failureShortLabel } from "@/lib/failure-text";
 
 describe("FAILURE_FALLBACK_SENTENCE", () => {
-  it("has one plain sentence for each of the nine classes", () => {
+  it("has one plain sentence for each of the ten classes", () => {
     expect(Object.keys(FAILURE_FALLBACK_SENTENCE).sort()).toEqual(
       [
         "plan_window_exhausted",
@@ -14,6 +15,7 @@ describe("FAILURE_FALLBACK_SENTENCE", () => {
         "context_window_exceeded",
         "session_budget_exceeded",
         "too_many_denials",
+        "account_blocked",
         "cli_exited",
       ].sort(),
     );
@@ -28,6 +30,7 @@ describe("FAILURE_FALLBACK_SENTENCE", () => {
     expect(FAILURE_FALLBACK_SENTENCE.context_window_exceeded).toBe("The conversation no longer fits the model's context window.");
     expect(FAILURE_FALLBACK_SENTENCE.session_budget_exceeded).toBe("The provider's session budget for this run is used up.");
     expect(FAILURE_FALLBACK_SENTENCE.too_many_denials).toBe("The agent kept asking for actions that were denied, so the provider stopped the run.");
+    expect(FAILURE_FALLBACK_SENTENCE.account_blocked).toBe("The provider rejected this account's use under its plan terms.");
     expect(FAILURE_FALLBACK_SENTENCE.cli_exited).toBe(
       "The agent stopped before finishing; its session is saved, so you can continue where it left off.",
     );
@@ -61,6 +64,7 @@ describe("FAILURE_SHORT_LABEL", () => {
       context_window_exceeded: "Context window full",
       session_budget_exceeded: "Session budget used up",
       too_many_denials: "Stopped after too many denials",
+      account_blocked: "Account blocked by the provider",
     });
     for (const label of Object.values(FAILURE_SHORT_LABEL)) {
       expect(label).toMatch(/^[A-Z]/);
@@ -76,9 +80,21 @@ describe("failureShortLabel", () => {
     expect(failureShortLabel("context_window_exceeded")).toBe("Context window full");
     expect(failureShortLabel("session_budget_exceeded")).toBe("Session budget used up");
     expect(failureShortLabel("too_many_denials")).toBe("Stopped after too many denials");
+    expect(failureShortLabel("account_blocked")).toBe("Account blocked by the provider");
     expect(failureShortLabel("auth_expired")).toBe("");
     expect(failureShortLabel("martian")).toBe("");
     expect(failureShortLabel(undefined)).toBe("");
     expect(failureShortLabel(null)).toBe("");
+  });
+});
+
+describe("account_blocked (C5a D3)", () => {
+  it("account_blocked_is_in_the_web_failure_tables", () => {
+    // The drift contract: the sentence, the short label and the human-action set (quota-auth-hardening D3, AC8).
+    expect(FAILURE_FALLBACK_SENTENCE.account_blocked).toBe("The provider rejected this account's use under its plan terms.");
+    expect(FAILURE_SHORT_LABEL.account_blocked).toBe("Account blocked by the provider");
+    expect(HUMAN_ACTION_KINDS.has("account_blocked")).toBe(true);
+    expect(failureSentence("account_blocked")).toBe("The provider rejected this account's use under its plan terms.");
+    expect(failureShortLabel("account_blocked")).toBe("Account blocked by the provider");
   });
 });
