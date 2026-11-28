@@ -349,6 +349,26 @@ func streamPartial(r *run) {
 	r.mu.Unlock()
 }
 
+// The history budget may evict the run's own history in finish() before the
+// policy runs; the guard must still see the output that was streamed.
+func Test_no_fallback_after_streamed_output_even_when_the_history_is_evicted(t *testing.T) {
+	t.Parallel()
+	e := newFallbackEnv(t, "")
+	e.reg.SetHistoryBudget(1)
+	fbMain, _ := fallbackProfiles(t, e.st)
+	r := e.failedRun(t, "evicted", failedOpts{profileID: fbMain})
+	streamPartial(r)
+	e.reg.finish(r, &codex.TurnError{Info: "usageLimitExceeded", Message: "limit"})
+	for _, s := range e.reg.List(0) {
+		if s.FailoverOf == "evicted" {
+			t.Fatalf("a fallback successor started after streamed output (history evicted before the policy ran)")
+		}
+	}
+	if n := len(extraChats(t, e, r.taskID)); n != 0 {
+		t.Fatalf("fallback chats = %d, want 0", n)
+	}
+}
+
 func Test_no_fallback_after_the_first_streamed_delta(t *testing.T) {
 	t.Parallel()
 	e := newFallbackEnv(t, "")

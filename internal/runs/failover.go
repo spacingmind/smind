@@ -82,7 +82,7 @@ func (reg *Registry) applyRateLimitPolicy(r *run, fail failure.Result) {
 		case "wait":
 			reg.enqueueRateLimitRetry(r, fail)
 		case "fallback":
-			if r.streamedText() {
+			if r.streamedOutput() {
 				log.Printf("runs: fallback for run %s: the run had already streamed output; not replaying it on another profile (the action offers the switch)", r.id)
 				return
 			}
@@ -287,6 +287,18 @@ func (reg *Registry) startFallbackSuccessor(r *run, prof store.AgentProfile) {
 func (r *run) streamedText() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.streamedTextLocked()
+}
+
+// streamedOutput is streamedText as finish saw it before retain could evict
+// the history, or as the history stands now.
+func (r *run) streamedOutput() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.streamedAtFinish || r.streamedTextLocked()
+}
+
+func (r *run) streamedTextLocked() bool {
 	for _, e := range r.history {
 		if e.Type == taskrunner.EventTypeText && strings.TrimSpace(e.Text) != "" && !strings.HasPrefix(strings.TrimSpace(e.Text), "[error]") {
 			return true

@@ -24,7 +24,7 @@ acs:
     covers: { tests: [account_blocked_never_retried_failed_over_or_cooled], frames: [] }
   - id: AC7
     text: "No fallback after the first streamed delta; control and wait unchanged."
-    covers: { tests: [no_fallback_after_the_first_streamed_delta, fallback_still_starts_without_streamed_output, wait_retry_still_queued_after_streamed_output], frames: [] }
+    covers: { tests: [no_fallback_after_the_first_streamed_delta, no_fallback_after_streamed_output_even_when_the_history_is_evicted, fallback_still_starts_without_streamed_output, wait_retry_still_queued_after_streamed_output], frames: [] }
   - id: AC8
     text: "account_blocked in every failure-kind table."
     covers: { tests: [failure_text_covers_account_blocked, account_blocked_is_in_the_web_failure_tables, account_blocked_is_in_the_mobile_failure_tables, account_blocked_class_card_e2e], frames: [] }
@@ -46,6 +46,7 @@ tests:
   - { name: usage_429_body_read_is_capped_and_one_call, run: "TMPDIR=/tmp/c5-tmp go test ./internal/quota/ -run usage_429_body_read_is_capped_and_one_call -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: transient_retry_honours_provider_delay_between_1s_and_1h, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/ -run transient_retry_honours_provider_delay_between_1s_and_1h -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: account_blocked_never_retried_failed_over_or_cooled, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/ -run account_blocked_never_retried_failed_over_or_cooled -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: no_fallback_after_streamed_output_even_when_the_history_is_evicted, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/ -run no_fallback_after_streamed_output_even_when_the_history_is_evicted -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: no_fallback_after_the_first_streamed_delta, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/ -run no_fallback_after_the_first_streamed_delta -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: fallback_still_starts_without_streamed_output, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/ -run fallback_still_starts_without_streamed_output -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: wait_retry_still_queued_after_streamed_output, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/ -run wait_retry_still_queued_after_streamed_output -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
@@ -60,6 +61,7 @@ mutations:
   - { id: M3, file: internal/runs/failure/classify.go, change: "drop the subscription-sharing regexp", expectFail: [subscription_sharing_text_is_account_blocked] }
   - { id: M4, file: internal/runs/failure/kinds.go, change: "remove account_blocked from IsHumanFix (exit code 7 and the failure hook)", expectFail: [account_blocked_is_human_fix_and_known] }
   - { id: M5, file: internal/runs/failover.go, change: "remove the streamed-output guard before startFallbackSuccessor", expectFail: [no_fallback_after_the_first_streamed_delta] }
+  - { id: M6, file: internal/runs/registry.go, change: "finish does not record streamedAtFinish before retain (an evicted history hides the streamed output)", expectFail: [no_fallback_after_streamed_output_even_when_the_history_is_evicted] }
 frames: []
 commands:
   - { id: C1, run: "go build ./... && go vet ./internal/runs/... ./internal/quota/ ./cmd/smind/", timeoutSec: 900 }
