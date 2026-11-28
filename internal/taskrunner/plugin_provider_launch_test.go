@@ -423,6 +423,9 @@ func TestPluginProvider_SlashID_NeverUsedAsPathOrRef(t *testing.T) {
 // the same argv, exactly as before PD2.
 func TestPluginProvider_CoreProviderLaunchUnchanged(t *testing.T) {
 	leakEnv(t)
+	// The proxy launch defaults rewrite the proxy names in the child, so an
+	// ambient proxy would break the "inherits the daemon env verbatim" check.
+	clearProxyEnv(t)
 	wm, task := newTestTask(t, "env-dump")
 	r := New(wm, WithACPCommand(ProviderGLM, []string{fakeACPAgentPath}))
 	if _, _, err := collectRedactedRun(t, r, task, ProviderGLM, ""); err != nil {

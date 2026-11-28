@@ -97,6 +97,7 @@ func readLaunchArgv(t *testing.T, task store.Task) []string {
 }
 
 func TestProviderEnv_SecretResolvedLastWins(t *testing.T) {
+	clearProxyEnv(t)
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "daemon-value")
 	r, task := secretInstanceRunner(t,
 		providers.Spec{ID: "zai", Extends: providers.IDClaudeNative,
@@ -119,6 +120,7 @@ func TestProviderEnv_SecretResolvedLastWins(t *testing.T) {
 }
 
 func TestProviderEnv_PassthroughCopiesDaemonEnv(t *testing.T) {
+	clearProxyEnv(t)
 	t.Setenv("ANTHROPIC_API_KEY", passSentinel)
 	r, _ := secretInstanceRunner(t,
 		providers.Spec{ID: "zai", Extends: providers.IDClaudeNative, PassthroughEnv: []string{"ANTHROPIC_API_KEY"}},
