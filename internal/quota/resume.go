@@ -37,7 +37,9 @@ type resumeWatch struct {
 // arguments select those defaults.
 func newResumeWatch(wall func() time.Time, mono func() time.Duration) *resumeWatch {
 	if wall == nil {
-		wall = time.Now
+		// Round(0) strips the monotonic reading: Sub of two times that both
+		// carry one uses it, which would hide the time spent asleep.
+		wall = func() time.Time { return time.Now().Round(0) }
 	}
 	if mono == nil {
 		start := time.Now()
@@ -51,7 +53,7 @@ func newResumeWatch(wall func() time.Time, mono func() time.Duration) *resumeWat
 func (w *resumeWatch) observe() bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	wallNow, monoNow := w.wall(), w.mono()
+	wallNow, monoNow := w.wall().Round(0), w.mono()
 	resumed := w.seen && (wallNow.Sub(w.prevWall))-(monoNow-w.prevMono) > resumeGap
 	w.seen, w.prevWall, w.prevMono = true, wallNow, monoNow
 	if resumed {

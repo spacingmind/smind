@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,5 +37,22 @@ func Test_resumewatch_detects_wall_gap_not_idle(t *testing.T) {
 	}
 	if w.active(wall.Add(resumeWindow)) {
 		t.Fatal("window must end after 2 minutes")
+	}
+}
+
+// Test_resumewatch_default_wall_clock_has_no_monotonic_reading pins the real
+// clock choice: a wall time that carries a monotonic reading would make the
+// wall step equal the monotonic step, and a sleep would never be seen.
+func Test_resumewatch_default_wall_clock_has_no_monotonic_reading(t *testing.T) {
+	t.Parallel()
+	w := newResumeWatch(nil, nil)
+	if s := w.wall().String(); strings.Contains(s, "m=") {
+		t.Fatalf("default wall clock carries a monotonic reading: %s", s)
+	}
+	// observe also strips it from an injected clock that has one.
+	w2 := newResumeWatch(time.Now, nil)
+	w2.observe()
+	if s := w2.prevWall.String(); strings.Contains(s, "m=") {
+		t.Fatalf("observe kept a monotonic reading: %s", s)
 	}
 }
