@@ -429,13 +429,13 @@ func (p *Poller) run(id int64, a *acct, fl *flight, acc accounts.Account, forced
 	if !forced && p.resume.active(p.clock()) {
 		d := time.Duration(p.jitter() * float64(wakeSpreadMax))
 		sctx, cancel := context.WithCancel(p.ctx)
-		go func() {
+		crash.Go("quota.spreadSkip", func() {
 			select {
 			case <-fl.skip:
 				cancel()
 			case <-sctx.Done():
 			}
-		}()
+		})
 		err := p.sleep(sctx, d)
 		cancel()
 		if err != nil && p.ctx.Err() != nil { // the poller closed (a skip leaves p.ctx alive)
