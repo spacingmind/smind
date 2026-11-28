@@ -109,6 +109,10 @@ async function pick(label: string, optionText: string): Promise<void> {
   await flush();
 }
 
+// The picker trigger is an Astryx Button that wraps its children in its own spans, so
+// the label span is no longer a direct child: find our own truncating label span.
+const pickerLabel = (trigger: HTMLElement) => trigger.querySelector("span.truncate");
+
 describe("RunConfigToolbar pills", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -169,14 +173,14 @@ describe("RunConfigToolbar pills", () => {
       expect(trigger.className).toContain("md:h-7");
       expect(trigger.className).toContain("max-sm:[&>svg:last-child]:hidden");
       // Radix's SelectValue ignores className, so Select pills hide the label from the trigger; the picker trigger hides its own span.
-      if (trigger.dataset.testid === "composer-model-picker") expect(trigger.querySelector(":scope > span")?.className).toContain("max-sm:hidden");
+      if (trigger.dataset.testid === "composer-model-picker") expect(pickerLabel(trigger)?.className).toContain("max-sm:hidden");
       else expect(trigger.className).toContain("max-sm:[&>span]:hidden!");
     }
   });
 
   it("home_chip_labels_visible_below_sm keeps the task composer's pills icon-only by default", () => {
     renderToolbar();
-    expect(screen.getByTestId("composer-model-picker").querySelector(":scope > span")?.className).toContain("max-sm:hidden");
+    expect(pickerLabel(screen.getByTestId("composer-model-picker"))?.className).toContain("max-sm:hidden");
     expect(screen.getByLabelText("Permission mode").className).toContain("max-sm:[&>span]:hidden!");
     expect(screen.getByLabelText("Thinking level").className).toContain("max-sm:[&>span]:hidden!");
   });
