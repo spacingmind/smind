@@ -412,3 +412,36 @@ func TestEnqueueRetry_DoesNotStackThePreface(t *testing.T) {
 		t.Fatalf("prompt = %q, want exactly one preface and the original prompt", items[0].Prompt)
 	}
 }
+
+func Test_account_blocked_never_retried_failed_over_or_cooled(t *testing.T) {
+	t.Parallel()
+	e := newFallbackEnv(t, "")
+	fbMain, _ := fallbackProfiles(t, e.st)
+	wait := profileWith(t, e.st, "wait")
+	errBlocked := errors.New("codex prompt: Subscription sharing is not allowed on this account")
+	for name, pid := range map[string]int64{"fallback": fbMain, "wait": wait} {
+		r := e.failedRun(t, "ab-"+name, failedOpts{profileID: pid})
+		e.reg.finish(r, errBlocked)
+		st := r.statusLocked()
+		if st.FailureKind != failure.KindAccountBlocked {
+			t.Fatalf("%s: kind = %q", name, st.FailureKind)
+		}
+		// The run's own action cannot know the fallback profile (wire layers
+		// rebuild it); with the profile's fallback the action is a switch.
+		if fb := e.reg.FallbackProfileFor(pid); name == "fallback" {
+			act := failure.NextAction(st.FailureKind, failure.ActionContext{FallbackProfileID: fb})
+			if fb == 0 || act == nil || act.Kind != failure.ActionSwitchProfile {
+				t.Fatalf("%s: action = %+v (fallback %d), want switch_profile", name, act, fb)
+			}
+		}
+		if n := len(extraChats(t, e, r.taskID)); n != 0 {
+			t.Fatalf("%s: fallback chats = %d, want 0", name, n)
+		}
+		if n := len(retryItems(t, e.st, r.chatID)); n != 0 {
+			t.Fatalf("%s: retry items = %d, want 0", name, n)
+		}
+		if _, ok, _ := e.st.GetProviderCooldown("glm", time.Now()); ok {
+			t.Fatalf("%s: provider cooldown set", name)
+		}
+	}
+}

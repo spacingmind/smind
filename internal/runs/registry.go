@@ -402,7 +402,7 @@ func chatHasSession(st *store.Store, chatID int64) bool {
 // context window, a spent provider session budget or a denial-stopped run.
 func resumableKind(kind string) bool {
 	return failure.IsKnown(kind) && kind != failure.KindContextWindowExceeded &&
-		kind != failure.KindSessionBudgetExceeded && kind != failure.KindTooManyDenials
+		kind != failure.KindSessionBudgetExceeded && kind != failure.KindTooManyDenials && kind != failure.KindAccountBlocked
 }
 
 // restartStopReason is the stop reason for a run the daemon's going down cut

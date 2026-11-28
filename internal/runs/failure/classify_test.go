@@ -508,8 +508,8 @@ func TestIsHumanFix_NewClasses(t *testing.T) {
 
 func TestAllKinds_AreKnown(t *testing.T) {
 	all := AllKinds()
-	if len(all) != 9 {
-		t.Fatalf("AllKinds() = %v, want 9 kinds", all)
+	if len(all) != 10 {
+		t.Fatalf("AllKinds() = %v, want 10 kinds", all)
 	}
 	seen := map[string]bool{}
 	for _, k := range all {
@@ -543,5 +543,52 @@ func Test_retry_hint_order_and_text_forms(t *testing.T) {
 		if got := retryHint(c.in, time.Time{}); got != c.want {
 			t.Errorf("%s: got %v want %v", c.name, got, c.want)
 		}
+	}
+}
+
+func Test_subscription_sharing_text_is_account_blocked(t *testing.T) {
+	for _, s := range []string{
+		"Subscription Sharing is not allowed",
+		"your account was flagged for subscription sharing",
+		"subscription_sharing",
+		"subscription-shared",
+		"quota exceeded: subscription sharing detected",
+	} {
+		got := Classify(Input{Provider: "glm", Err: s}, time.Time{})
+		if got.Kind != KindAccountBlocked {
+			t.Errorf("%q: kind = %q, want account_blocked", s, got.Kind)
+		}
+	}
+}
+
+func Test_subscription_word_alone_is_not_account_blocked(t *testing.T) {
+	for _, s := range []string{"Your subscription renews on May 1", "subscription required: upgrade"} {
+		if got := Classify(Input{Err: s}, time.Time{}); got.Kind == KindAccountBlocked {
+			t.Errorf("%q: kind = account_blocked", s)
+		}
+	}
+}
+
+func Test_account_blocked_is_human_fix_and_known(t *testing.T) {
+	k := KindAccountBlocked
+	if !IsHumanFix(k) || !IsKnown(k) {
+		t.Fatal("account_blocked must be a known human-fix kind")
+	}
+	found := false
+	for _, a := range AllKinds() {
+		found = found || a == k
+	}
+	if !found {
+		t.Fatal("account_blocked missing from AllKinds")
+	}
+	if Describe(k) == "" || Guidance(k) == "" {
+		t.Fatal("Describe/Guidance empty")
+	}
+	act := NextAction(k, ActionContext{FallbackProfileID: 5, FallbackProfileName: "backup"})
+	if act == nil || act.Kind != ActionSwitchProfile || act.Target != "profile:5" || act.Label != "Switch to backup" {
+		t.Fatalf("action = %+v", act)
+	}
+	if NextAction(k, ActionContext{}) != nil {
+		t.Fatal("no fallback must give no action")
 	}
 }

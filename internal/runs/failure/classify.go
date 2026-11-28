@@ -34,6 +34,9 @@ const (
 	// KindTooManyDenials: the provider stopped the run after too many denied
 	// actions; a human reviews the permission policy.
 	KindTooManyDenials = "too_many_denials"
+	// KindAccountBlocked: the provider rejected how the account is used (for
+	// example a shared subscription); only a person can act.
+	KindAccountBlocked = "account_blocked"
 	// KindCLIExited: the CLI ended its stream without a result.
 	KindCLIExited = "cli_exited"
 )
@@ -129,9 +132,10 @@ var (
 	// Sources: refs/codex protocol error.rs ("Selected model is at capacity",
 	// "We're currently experiencing high demand", "rate limit exceeded: ..."),
 	// Anthropic overloaded_error (529).
-	reTransient      = regexp.MustCompile(`(?i)overloaded_error|selected model is at capacity|experiencing high demand|rate limit exceeded:|\boverloaded\b`)
-	reRetryAfterText = regexp.MustCompile(`(?i)retry-after[:=]\s*(\d+(?:\.\d+)?)`)
-	reTryAgain       = regexp.MustCompile(`(?i)try again in (\d+)\s*(seconds?|secs?|s|minutes?|mins?|m)\b`)
+	reTransient           = regexp.MustCompile(`(?i)overloaded_error|selected model is at capacity|experiencing high demand|rate limit exceeded:|\boverloaded\b`)
+	reRetryAfterText      = regexp.MustCompile(`(?i)retry-after[:=]\s*(\d+(?:\.\d+)?)`)
+	reSubscriptionSharing = regexp.MustCompile(`(?i)subscription[ _-]?shar(?:ing|ed)`)
+	reTryAgain            = regexp.MustCompile(`(?i)try again in (\d+)\s*(seconds?|secs?|s|minutes?|mins?|m)\b`)
 )
 
 // Classify classifies a failed run. Unknown never classifies and no time is
@@ -141,6 +145,9 @@ var (
 // when there is a Retry-After or an overload body, else the residual
 // rate_limited).
 func Classify(in Input, now time.Time) Result {
+	if reSubscriptionSharing.MatchString(in.Err) {
+		return Result{Kind: KindAccountBlocked}
+	}
 	var res Result
 	sigHit := false
 	if s := in.Signal; s != nil && s.Status == "rejected" && s.Type != "overage" {
