@@ -59,6 +59,10 @@ describe('relay sources use only the explicit CSPRNG', () => {
     }
   };
   walk(srcRoot);
+  // The moved modules live in the shared package; mobile's old paths are one-line shims.
+  const pkgRoot = join(srcRoot, '..', '..', 'web', 'packages', 'relay-client', 'src');
+  walk(pkgRoot);
+  const rel = (f: string) => (f.startsWith(pkgRoot) ? join('relay', relative(pkgRoot, f)) : relative(srcRoot, f));
   walk(join(srcRoot, '..', 'scripts'));
   walk(join(srcRoot, '..', 'app')); // the Expo Router routes (ADR-0036) replaced App.tsx
   files.push(join(srcRoot, '..', 'index.ts'));
@@ -76,19 +80,19 @@ describe('relay sources use only the explicit CSPRNG', () => {
 
   it.each(forbidden)('no source uses %s (%s)', (re) => {
     const hits = files.filter((f) => re.test(code(f)));
-    expect(hits.map((f) => relative(srcRoot, f))).toEqual([]);
+    expect(hits.map((f) => rel(f))).toEqual([]);
   });
 
   it('Math.random appears only as the retry-backoff jitter', () => {
-    const hits = files.filter((f) => /\bMath\.random\b/.test(code(f))).map((f) => relative(srcRoot, f));
+    const hits = files.filter((f) => /\bMath\.random\b/.test(code(f))).map((f) => rel(f));
     expect(hits).toEqual([join('relay', 'RelayConnection.ts')]);
-    const lines = code(join(srcRoot, 'relay', 'RelayConnection.ts')).split('\n').filter((l) => l.includes('Math.random'));
+    const lines = code(join(pkgRoot, 'RelayConnection.ts')).split('\n').filter((l) => l.includes('Math.random'));
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatch(/ms \* \(0\.8 \+ Math\.random\(\) \* 0\.4\)/);
   });
 
   it('expo-crypto is imported only by platformRandom.ts, and index.ts imports it first', () => {
-    const hits = files.filter((f) => /from 'expo-crypto'/.test(code(f))).map((f) => relative(srcRoot, f));
+    const hits = files.filter((f) => /from 'expo-crypto'/.test(code(f))).map((f) => rel(f));
     expect(hits).toEqual([join('relay', 'platformRandom.ts')]);
     const index = readFileSync(join(srcRoot, '..', 'index.ts'), 'utf8');
     const firstImport = index.split('\n').find((l) => l.startsWith('import '));

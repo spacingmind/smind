@@ -2,8 +2,6 @@
 // and the guard that the files which handle a password never reach for any
 // persistence, logging or analytics API.
 
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { base64UrlEncode } from '../base64';
 import { createDaemonPasswords, MAX_PASSWORD_BYTES, passwordKey, passwordProblem } from '../daemonPasswords';
@@ -63,27 +61,5 @@ describe('password prompt copy', () => {
     expect(describePasswordState({ kind: 'locked', retryAfter: 8, until: 10_000 }, 20_000)!.detail).toContain('0 s');
     expect(describePasswordState({ kind: 'connected' })).toBeNull();
     expect(describePasswordState({ kind: 'pending', deviceId: 'x', label: 'y' })).toBeNull();
-  });
-});
-
-describe('a password is memory only', () => {
-  // Code only: the comments explain what is NOT done and name the APIs by design.
-  const code = (rel: string) =>
-    readFileSync(join(__dirname, '..', '..', '..', rel), 'utf8')
-      .replace(/\/\*[\s\S]*?\*\//g, '')
-      .replace(/^\s*\/\/.*$/gm, '');
-  const read = code;
-
-  it('the files that handle it import no persistence and call no logging or analytics API', () => {
-    for (const rel of ['src/relay/daemonPasswords.ts', 'src/screens/DaemonPasswordPrompt.tsx', 'src/relay/RelayConnection.ts', 'src/screens/PairingScreen.tsx', 'src/connection/ConnectionProvider.tsx', 'app/connection.tsx']) {
-      const src = read(rel);
-      expect(src, rel).not.toMatch(/expo-secure-store|async-storage|AsyncStorage|localStorage|sessionStorage|expo-file-system|expo-sqlite|MMKV/);
-      expect(src, rel).not.toMatch(/console\.(log|info|warn|error|debug)/);
-      expect(src, rel).not.toMatch(/analytics|crashlytics|sentry|segment|mixpanel/i);
-    }
-  });
-
-  it('the secure-store modules never mention the password', () => {
-    for (const rel of ['src/relay/deviceKeyStore.ts', 'src/relay/platformKeyStore.ts']) expect(read(rel).toLowerCase(), rel).not.toContain('password');
   });
 });

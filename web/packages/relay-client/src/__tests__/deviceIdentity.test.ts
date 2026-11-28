@@ -53,7 +53,7 @@ interface Vector {
 }
 
 const vector: Vector = JSON.parse(
-  readFileSync(join(__dirname, '..', '..', '..', '..', 'internal', 'relay', 'devices', 'testdata', 'device_hello_vector.json'), 'utf8'),
+  readFileSync(join(__dirname, '..', '..', '..', '..', '..', 'internal', 'relay', 'devices', 'testdata', 'device_hello_vector.json'), 'utf8'),
 );
 
 function fromHex(s: string): Uint8Array {
