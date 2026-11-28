@@ -77,10 +77,16 @@ func (c *stewardCollector) twoAxisInputs(ctx context.Context, dir, diffBase, hea
 	return out
 }
 
-// gitListDir lists the entry names of a directory at head.
+// gitListDir lists the entry names of a directory at head. ls-tree is
+// ref-only (no config scan), but the call still runs stripped; a scan
+// failure fails closed as an error, never a plain git call.
 func gitListDir(ctx context.Context, dir, head, path string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("--no-optional-locks", "-C", dir, "ls-tree", "--name-only", head, path+"/")...)
-	cmd.Env = gitsafe.Env(nil)
+	full, err := gitsafe.StrippedArgs(ctx, dir, "--no-optional-locks", "-C", dir, "ls-tree", "--name-only", head, path+"/")
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Env = gitsafe.StrippedEnv(nil)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -95,12 +101,18 @@ func gitListDir(ctx context.Context, dir, head, path string) ([]string, error) {
 }
 
 // gitHasTestFunc reports whether a Go test function of that name exists in a
-// *_test.go file at head (a hint for the Spec pass, never a gate).
+// *_test.go file at head (a hint for the Spec pass, never a gate). It runs
+// stripped; a stripped-mode failure fails closed as "no such function",
+// never a plain git call.
 func gitHasTestFunc(ctx context.Context, dir, head, name string) bool {
 	if !testFuncNameRe.MatchString(name) {
 		return false
 	}
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("--no-optional-locks", "-C", dir, "grep", "-q", "-F", "func "+name+"(", head, "--", "*_test.go")...)
-	cmd.Env = gitsafe.Env(nil)
+	full, err := gitsafe.StrippedArgs(ctx, dir, "--no-optional-locks", "-C", dir, "grep", "-q", "-F", "func "+name+"(", head, "--", "*_test.go")
+	if err != nil {
+		return false
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Env = gitsafe.StrippedEnv(nil)
 	return cmd.Run() == nil
 }

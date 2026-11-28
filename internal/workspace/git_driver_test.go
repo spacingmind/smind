@@ -124,7 +124,7 @@ func Test_staged_names_do_not_run_drivers(t *testing.T) {
 
 	// The same staged-names read as a `git diff --cached --name-only`
 	// (gitTaskCommit), one of the plan's audited diff call sites.
-	res, err := gitTaskCommit(r.Dir, "staged names")
+	res, err := gitTaskCommit(context.Background(), r.Dir, "staged names")
 	if err != nil {
 		t.Fatalf("gitTaskCommit() error = %v", err)
 	}

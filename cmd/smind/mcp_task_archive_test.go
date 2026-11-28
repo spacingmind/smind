@@ -58,25 +58,22 @@ func TestMCPTools_TaskArchivePreservesUncommittedWork(t *testing.T) {
 }
 
 // TestMCPTools_TaskArchiveCheckpointFailureKeepsWorktree proves a failing
-// checkpoint (a failing pre-commit hook) aborts the archive leaving both
-// the worktree directory and the task intact.
+// checkpoint aborts the archive leaving both the worktree directory and the
+// task intact. The checkpoint is daemon-initiated git, which runs with the
+// repository's hooks off (P0 stripped mode), so the failure is made with an
+// index.lock the worktree's own git dir already holds instead of a failing
+// pre-commit hook.
 func TestMCPTools_TaskArchiveCheckpointFailureKeepsWorktree(t *testing.T) {
 	env := newMCPSession(t)
-	_, wtPath, branch := createTaskViaMCP(t, env, "Hooked")
+	_, wtPath, branch := createTaskViaMCP(t, env, "Locked")
 	taskID := taskIDOf(t, env, branch)
 
-	// A pre-commit hook that always fails makes the checkpoint commit
-	// fail, which must abort the archive before any removal.
-	// Hooks live in the common git dir, which a worktree shares.
-	commonDir := mcpGit(t, wtPath, "rev-parse", "--git-common-dir")
-	if !filepath.IsAbs(commonDir) {
-		commonDir = filepath.Join(wtPath, commonDir)
-	}
-	if err := os.MkdirAll(filepath.Join(commonDir, "hooks"), 0o755); err != nil {
-		t.Fatalf("mkdir hooks: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(commonDir, "hooks", "pre-commit"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
-		t.Fatalf("write pre-commit hook: %v", err)
+	// A leftover index.lock in the worktree's git dir makes `git add -A`
+	// fail, so the checkpoint fails, which must abort the archive before any
+	// removal.
+	gitDir := mcpGit(t, wtPath, "rev-parse", "--absolute-git-dir")
+	if err := os.WriteFile(filepath.Join(gitDir, "index.lock"), nil, 0o644); err != nil {
+		t.Fatalf("write index.lock: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(wtPath, "dirty.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatalf("write dirty file: %v", err)

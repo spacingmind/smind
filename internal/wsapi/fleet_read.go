@@ -93,12 +93,18 @@ func (s *fleetSource) ListWorkspaces() ([]serve.WorkspaceInfo, error) {
 	return out, nil
 }
 
-// fleetOriginURL is the origin remote of the repo at path, "" on any error.
+// fleetOriginURL is the origin remote of the repo at path, "" on any error
+// (including a stripped-mode failure: fail closed, never a plain git call;
+// remote get-url is ref-only, so it carries only the static overrides).
 func fleetOriginURL(path string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), gitRemoteTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("-c", "core.fsmonitor=false", "-C", path, "remote", "get-url", "--", "origin")...)
-	cmd.Env = gitsafe.Env(nil)
+	full, err := gitsafe.StrippedArgs(ctx, path, "-c", "core.fsmonitor=false", "-C", path, "remote", "get-url", "--", "origin")
+	if err != nil {
+		return ""
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Env = gitsafe.StrippedEnv(nil)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
