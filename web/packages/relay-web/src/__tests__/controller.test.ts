@@ -5,8 +5,8 @@ import { deviceIdFor } from '@smind/relay-client/src/deviceIdentity';
 import { RelayConnection } from '@smind/relay-client/src/RelayConnection';
 import { FakeRelay } from '@smind/relay-client/src/__tests__/fakeRelay';
 import { WsClient } from '../../../ui/src/lib/ws-client';
-import { RelayController, RelayStateError, type ControllerState } from '../controller';
-import { NotPairedError, RepairRequiredError } from '../identity-manager';
+import { InvalidOfferError, RelayController, RelayStateError, type ControllerState } from '../controller';
+import { NotPairedError, RepairRequiredError, newIdentityForPairing } from '../identity-manager';
 import { openRelayStore } from '../store';
 
 const SECRET = new Uint8Array(32).map((_, i) => 0xa0 + (i % 16));
@@ -234,5 +234,54 @@ describe('controller', () => {
     await c.whenConnected();
     opened[0].conn.close(); // not the controller's doing
     expect(c.state).toEqual({ kind: 'failed', message: 'the relay connection closed' });
+  });
+
+  it('damaged_records_mean_repair_not_connect', async () => {
+    const relay = new FakeRelay();
+    const good = await newIdentityForPairing();
+    const goodPairing = { offerUrl: offerFor(relay).url, daemonId: 'd', relay: 'r', relayFingerprint: '', label: 'l', pairedAt: 1 };
+    const extractable = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const pub = new Uint8Array(32).fill(1);
+    const cases: Array<[string, unknown, unknown]> = [
+      ['identity privateKey is a string', { privateKey: 'str', publicKey: pub, createdAt: 1 }, goodPairing],
+      ['identity key is extractable', { privateKey: (extractable as CryptoKeyPair).privateKey, publicKey: pub, createdAt: 1 }, goodPairing],
+      ['pairing offerUrl is a number', good.record, { ...goodPairing, offerUrl: 5 }],
+    ];
+    for (const [name, identity, pairing] of cases) {
+      const real = await openRelayStore(new IDBFactory());
+      await real.saveIdentity(identity as never);
+      await real.savePairing(pairing as never);
+      const c = new RelayController({ store: real, net: relay, timings });
+      controllers.push(c);
+      const err = await c.resume().catch((e) => e);
+      expect(err, name).toBeInstanceOf(RepairRequiredError);
+      expect((err as RepairRequiredError).reason, name).toBe('record_invalid');
+      expect(c.state.kind, name).toBe('needs-repair');
+      // nothing was deleted: the damaged records are still there
+      expect([(await real.inspectIdentity()).status, (await real.inspectPairing()).status].includes('absent'), name).toBe(false);
+    }
+  });
+
+  it('invalid_offer_error_never_echoes_the_payload', async () => {
+    const relay = new FakeRelay();
+    const real = await openRelayStore(new IDBFactory());
+    const c = new RelayController({ store: real, net: relay, timings });
+    controllers.push(c);
+    const link = (json: string) => 'https://app.test/#offer=' + base64UrlEncode(new TextEncoder().encode(json));
+    const secret = 'TOPSECRETVALUE123';
+    const links = [
+      link(`{"v":1,"id":"d","sec":"${secret}", oops`),
+      link(`{"v":9,"id":"d","pk":"x","relay":"r","sec":"${secret}"}`),
+      link(`{"v":1,"sec":"${secret}"}`),
+      'not a link at all',
+    ];
+    for (const l of links) {
+      const err = (await c.pair(l, 'x').catch((e) => e)) as Error;
+      expect(err).toBeInstanceOf(InvalidOfferError);
+      expect(err.message).toBe('this is not a valid pairing link');
+      expect(String(err)).not.toContain(secret);
+      expect(err.cause).toBeUndefined();
+    }
+    expect(await real.loadPairing()).toBeNull();
   });
 });

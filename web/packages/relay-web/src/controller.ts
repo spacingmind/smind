@@ -26,6 +26,14 @@ export type ControllerState =
   | { kind: 'password'; reason: 'required' | 'incorrect' }
   | { kind: 'failed'; message: string; versionMismatch?: boolean };
 
+/** The pasted pairing link is not usable; the message is fixed and never quotes the link. */
+export class InvalidOfferError extends Error {
+  constructor() {
+    super('this is not a valid pairing link');
+    this.name = 'InvalidOfferError';
+  }
+}
+
 /** socket()/whenConnected() could not get a connected relay: `state` says why. */
 export class RelayStateError extends Error {
   constructor(readonly state: ControllerState) {
@@ -109,7 +117,13 @@ export class RelayController {
   }
 
   pair(offerUrl: string, label: string): Promise<void> {
-    const offer = parsePairingURL(offerUrl);
+    let offer: ReturnType<typeof parsePairingURL>;
+    try {
+      offer = parsePairingURL(offerUrl);
+    } catch {
+      // The parser's messages can quote part of the decoded payload (which holds the admission secret): say nothing of it.
+      return Promise.reject(new InvalidOfferError());
+    }
     return this.run(async () => {
       const { record, identity } = await newIdentityForPairing(this.o.subtle);
       await this.o.store.savePaired(record, {

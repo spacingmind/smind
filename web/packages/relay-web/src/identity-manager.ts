@@ -10,23 +10,29 @@ export class NotPairedError extends Error {
 }
 
 export class RepairRequiredError extends Error {
-  reason: 'identity_missing' = 'identity_missing';
-  constructor() {
-    super("this browser's device key is gone (cleared site data or browser eviction): pair again");
+  readonly reason: 'identity_missing' | 'record_invalid';
+  constructor(reason: 'identity_missing' | 'record_invalid' = 'identity_missing') {
+    super(
+      reason === 'identity_missing'
+        ? "this browser's device key is gone (cleared site data or browser eviction): pair again"
+        : "this browser's saved pairing is damaged: pair again",
+    );
     this.name = 'RepairRequiredError';
+    this.reason = reason;
   }
 }
 
-/** Never creates a key: a missing identity under a pairing means re-pair. */
+/** Never creates a key: a missing or damaged record under a pairing means re-pair (nothing is deleted). */
 export async function loadIdentityForConnect(
   store: RelayStore,
   subtle: SubtleCrypto = crypto.subtle,
 ): Promise<{ identity: DeviceIdentity; pairing: StoredPairing }> {
-  const pairing = await store.loadPairing();
-  if (!pairing) throw new NotPairedError();
-  const rec = await store.loadIdentity();
-  if (!rec) throw new RepairRequiredError();
-  return { identity: identityFromWebKey(rec, subtle), pairing };
+  const pairing = await store.inspectPairing();
+  const rec = await store.inspectIdentity();
+  if (pairing.status === 'invalid' || rec.status === 'invalid') throw new RepairRequiredError('record_invalid');
+  if (pairing.status === 'absent') throw new NotPairedError();
+  if (rec.status === 'absent') throw new RepairRequiredError('identity_missing');
+  return { identity: identityFromWebKey(rec.value, subtle), pairing: pairing.value };
 }
 
 /**

@@ -11,27 +11,37 @@ export interface OfferWindow {
 }
 
 export function consumeOfferFromLocation(win: OfferWindow): string | null {
-  const hash = win.location.hash.replace(/^#/, '');
-  if (!new URLSearchParams(hash).has('offer')) return null;
-
   const href = win.location.href;
-  let url: string | null = null;
-  try {
-    parsePairingURL(href);
-    url = href;
-  } catch {
-    url = null;
-  }
+  const hash = win.location.hash.replace(/^#/, '');
+  const inHash = new URLSearchParams(hash).has('offer');
 
   const cut = href.indexOf('#');
   const noHash = cut === -1 ? href : href.slice(0, cut);
-  let clean = noHash;
+  let path = noHash;
+  let queryHadOffer = false;
   try {
     const u = new URL(noHash);
-    clean = u.pathname + u.search;
+    if (u.searchParams.has('offer')) {
+      queryHadOffer = true;
+      u.searchParams.delete('offer');
+    }
+    const q = u.searchParams.toString();
+    path = u.pathname + (queryHadOffer ? (q ? '?' + q : '') : u.search);
   } catch {
     // a relative href is already path-only
   }
-  win.history.replaceState(null, '', clean);
+  if (!inHash && !queryHadOffer) return null;
+
+  // An offer is only accepted from the fragment; one in the query string is scrubbed and ignored.
+  let url: string | null = null;
+  if (inHash) {
+    try {
+      parsePairingURL(href);
+      url = href;
+    } catch {
+      url = null;
+    }
+  }
+  win.history.replaceState(null, '', path);
   return url;
 }

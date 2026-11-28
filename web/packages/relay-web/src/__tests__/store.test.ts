@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import { ed25519 } from '@noble/curves/ed25519.js';
-import { openRelayStore, type StoredPairing } from '../store';
+import { openDatabase, openRelayStore, type StoredPairing } from '../store';
 import {
   NotPairedError,
   RepairRequiredError,
@@ -67,5 +67,41 @@ describe('relay store', () => {
     expect(Array.from(id!.publicKey)).toEqual(Array.from(a.record.publicKey));
     expect((await s.loadPairing())!.label).toBe('laptop');
     s.close();
+  });
+
+  it('a_late_open_after_blocked_is_closed', async () => {
+    vi.useFakeTimers();
+    try {
+      const closed: string[] = [];
+      const req: Record<string, unknown> = {};
+      const factory = { open: () => req } as unknown as IDBFactory;
+      const p = openDatabase(factory, () => undefined, 5_000);
+      const settled = p.then(
+        () => 'resolved',
+        (e: Error) => e.message,
+      );
+      (req.onblocked as () => void)();
+      await vi.advanceTimersByTimeAsync(4_999);
+      // still waiting: not rejected yet
+      let early = false;
+      void settled.then(() => (early = true));
+      await Promise.resolve();
+      expect(early).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(await settled).toMatch(/blocked by another tab/);
+      // the database opens only now: it must be closed straight away
+      req.result = { close: () => closed.push('closed') };
+      (req.onsuccess as () => void)();
+      expect(closed).toEqual(['closed']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a_closed_store_rejects_with_a_clear_error', async () => {
+    const s = await openRelayStore(new IDBFactory());
+    s.close();
+    await expect(s.loadIdentity()).rejects.toThrow('the relay store is closed');
+    await expect(s.savePairing(pairing)).rejects.toThrow('the relay store is closed');
   });
 });

@@ -42,4 +42,21 @@ describe('offer fragment', () => {
     expect(consumeOfferFromLocation(none.win)).toBeNull();
     expect(none.calls).toEqual([]);
   });
+
+  it('fragment_helper_scrubs_an_offer_in_the_query_but_does_not_accept_it', () => {
+    const payload = offerPayload();
+    const q = fakeWin(`https://app.test/p?offer=${payload}&keep=1`);
+    expect(consumeOfferFromLocation(q.win)).toBeNull();
+    expect(q.calls).toEqual(['/p?keep=1']);
+
+    const only = fakeWin(`https://app.test/p?offer=${payload}`);
+    expect(consumeOfferFromLocation(only.win)).toBeNull();
+    expect(only.calls).toEqual(['/p']);
+
+    // both: the fragment's offer is accepted, and neither stays in the address
+    const href = `https://app.test/p?offer=zzz&keep=1#offer=${payload}`;
+    const both = fakeWin(href);
+    expect(consumeOfferFromLocation(both.win)).toBe(href);
+    expect(both.calls).toEqual(['/p?keep=1']);
+  });
 });
