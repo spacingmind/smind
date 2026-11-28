@@ -177,8 +177,13 @@ function AstryxBackedButton({
       isIconOnly={iconOnly}
       icon={iconOnly ? children : undefined}
       className={cn(
-        tailwindOnly && buttonVariants({ variant: v, size: sz }),
+        // Astryx's own fills/borders/paddings differ from the previous look, so every
+        // variant and size gets the same Tailwind classes as before on top (utilities
+        // win over Astryx's cascade layers); Astryx still renders the element and
+        // supplies behaviour, focus handling and a11y.
+        buttonVariants({ variant: v, size: sz }),
         SIZE_OVERRIDE_CLASS[sz as string],
+        iconOnly && "p-0", // Astryx keeps its text padding on icon buttons
         className
       )}
     >
