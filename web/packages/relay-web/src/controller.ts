@@ -75,7 +75,12 @@ function mapState(s: ConnState): ControllerState {
   }
 }
 
-const TERMINAL = new Set(['revoked', 'failed', 'password', 'pending', 'needs-repair', 'unpaired']);
+// States that end a wait for the connection. pending (not approved yet) and
+// password (the person must type one) are NOT in it: like
+// RelayConnection.whenConnected, a wait goes on through them; socket() alone
+// refuses at once when it is called while the device is in one of them.
+const TERMINAL = new Set(['revoked', 'failed', 'needs-repair', 'unpaired']);
+const NEEDS_PERSON = new Set(['pending', 'password']);
 
 export class RelayController {
   private readonly o: ControllerOptions;
@@ -130,6 +135,7 @@ export class RelayController {
   }
 
   async socket(): Promise<RelaySocket> {
+    if (NEEDS_PERSON.has(this.current.kind)) throw new RelayStateError(this.current);
     const conn = await this.waitConnected();
     return new RelaySocket(conn);
   }
