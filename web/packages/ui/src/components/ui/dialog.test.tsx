@@ -121,4 +121,21 @@ describe("dialog on Astryx", () => {
     fireEvent.click(dlg2);
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
+
+  it("dialog_stays_clickable_when_a_radix_layer_disables_body_pointer_events", () => {
+    // Radix sets `body { pointer-events: none }` while one of its modal layers is open (the 390px sidebar sheet).
+    // A native <dialog> inherits it, so the content must set `pointer-events: auto` itself, as Radix's content did.
+    document.body.style.pointerEvents = "none";
+    try {
+      render(
+        <Dialog open onOpenChange={() => {}}>
+          <DialogContent><DialogTitle>T</DialogTitle></DialogContent>
+        </Dialog>,
+      );
+      const dlg = document.querySelector('[data-slot="dialog-content"]') as HTMLElement;
+      expect(dlg.className).toContain("pointer-events-auto");
+    } finally {
+      document.body.style.pointerEvents = "";
+    }
+  });
 });

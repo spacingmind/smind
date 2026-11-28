@@ -69,7 +69,11 @@ describe("astryx wave 0 scope", () => {
   it("no_call_site_changed_for_the_four_wrappers", () => {
     const root = git("rev-parse", "--show-toplevel").trim();
     const allowedComponents = new Set(
-      WRAPPERS.flatMap((w) => [`${UI}/components/ui/${w}.tsx`, `${UI}/components/ui/${w}.test.tsx`]),
+      [
+        ...WRAPPERS.flatMap((w) => [`${UI}/components/ui/${w}.tsx`, `${UI}/components/ui/${w}.test.tsx`]),
+        // The shared sheet (the 390px sidebar drawer) must not dismiss itself when an Astryx dialog opens above it.
+        `${UI}/components/ui/sheet.tsx`,
+      ],
     );
 
     // The recorded list matches what the wrappers export now.

@@ -76,4 +76,12 @@ describe("Button on Astryx", () => {
     expect(el).toHaveAttribute("data-slot", "button");
     expect(el).toHaveAttribute("data-variant", "outline");
   });
+
+  it("button_leaves_no_live_region_that_defeats_aria_hidden", () => {
+    // Radix's hideOthers keeps any node that holds an aria-live region visible to assistive tech behind a modal;
+    // Astryx renders one in every button (only used for isLoading, never here), so the wrapper must remove it.
+    const { container } = render(<Button>Retry</Button>)
+    expect(container.querySelector("[aria-live]")).toBeNull()
+    expect(container.querySelector('[role="status"]')).toBeNull()
+  });
 });

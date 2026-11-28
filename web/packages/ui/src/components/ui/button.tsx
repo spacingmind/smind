@@ -164,8 +164,13 @@ function AstryxBackedButton({
   )
   React.useLayoutEffect(() => {
     localRef.current
-      ?.querySelectorAll(':scope > [role="status"]')
-      .forEach((n) => n.setAttribute("role", "presentation"))
+      ?.querySelectorAll(':scope > [role="status"], :scope > [aria-live]')
+      .forEach((n) => {
+        n.setAttribute("role", "presentation")
+        // Also drop aria-live: Radix's hideOthers (aria-hidden) never hides a node that holds a live region, so
+        // while a Radix modal is open every Astryx button would stay in the accessibility tree behind it.
+        n.removeAttribute("aria-live")
+      })
   })
 
   return (

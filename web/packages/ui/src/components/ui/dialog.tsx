@@ -1,4 +1,5 @@
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { Dialog as SheetPrimitive } from "radix-ui"
 import { Dialog as AstryxDialog } from "@astryxdesign/core/Dialog"
 
@@ -197,7 +198,10 @@ function DialogContent({
   // and keeps its children queryable. Costs the exit animation.
   if (!open) return null
 
-  return (
+  // Portal to <body>, as Radix's DialogContent did. An Astryx <dialog> renders in place; inside the app root it
+  // would sit under the `aria-hidden` that a Radix modal (Settings, the mobile sidebar sheet) puts on that root,
+  // and so be hidden from assistive tech while it is the thing on top. A node added to <body> later is not hidden.
+  return createPortal(
     <AstryxDialog
       {...(rest as object)}
       ref={setRef}
@@ -210,7 +214,11 @@ function DialogContent({
       // surface keeps our radius and grid so child layout is unchanged.
       // m-auto: the Tailwind preflight `* { margin: 0 }` outranks Astryx's margin:auto
       // when the cascade layers are mis-ordered; the utility centers it either way.
-      className={cn("m-auto w-full max-w-[calc(100%-2rem)] rounded-2xl sm:max-w-lg", className, sheetResets(className))}
+      // pointer-events-auto: a Radix modal layer (the mobile sidebar sheet, a popover) sets
+      // `body { pointer-events: none }` and each Radix content restores `auto` on itself. A native
+      // <dialog> in the top layer inherits `none` from the body, so every click inside it would land on
+      // <html>. Restoring `auto` here is the Radix DialogContent behaviour this wrapper replaces.
+      className={cn("pointer-events-auto m-auto w-full max-w-[calc(100%-2rem)] rounded-2xl sm:max-w-lg", className, sheetResets(className))}
     >
       <div className={cn("grid gap-4 p-6", childLayoutClasses(className))}>{children}</div>
       {showCloseButton && (
@@ -222,7 +230,8 @@ function DialogContent({
           <span className="sr-only">Close</span>
         </SheetPrimitive.Close>
       )}
-    </AstryxDialog>
+    </AstryxDialog>,
+    document.body
   )
 }
 
