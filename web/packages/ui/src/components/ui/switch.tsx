@@ -47,6 +47,7 @@ function Switch({
   React.useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
+    el.setAttribute("data-slot", "switch") // the role=switch element, as with Radix
     el.setAttribute("aria-checked", String(on))
     el.setAttribute("data-state", on ? "checked" : "unchecked")
     // Astryx disables with aria-disabled only; mirror Radix's native attribute.
@@ -71,7 +72,6 @@ function Switch({
       {...(rest as object)}
       ref={setRef}
       id={id}
-      data-slot="switch"
       data-state={on ? "checked" : "unchecked"}
       label={"\u00a0"} // empty label: its text would duplicate the visible one; aria-label is forwarded to the input
       isLabelHidden

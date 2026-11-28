@@ -63,14 +63,14 @@ describe("Switch on Astryx", () => {
     const el = screen.getByRole("switch", { name: "Flag" });
     expect(el).toHaveAttribute("aria-checked", "false");
     expect(el).toHaveAttribute("data-state", "unchecked");
-    expect(container.querySelector('[data-slot="switch"]')).toHaveAttribute("data-state", "unchecked");
+    expect(el).toHaveAttribute("data-slot", "switch");
+    expect(container.querySelectorAll('[data-slot="switch"]')).toHaveLength(1);
     expect(container.querySelector(".my-extra")).not.toBeNull();
 
     fireEvent.click(el);
     expect(onCheckedChange).toHaveBeenLastCalledWith(true);
     expect(screen.getByRole("switch", { name: "Flag" })).toHaveAttribute("data-state", "checked");
     expect(screen.getByRole("switch", { name: "Flag" })).toHaveAttribute("aria-checked", "true");
-    expect(container.querySelector('[data-slot="switch"]')).toHaveAttribute("data-state", "checked");
 
     fireEvent.click(screen.getByRole("switch", { name: "Flag" }));
     expect(onCheckedChange).toHaveBeenLastCalledWith(false);

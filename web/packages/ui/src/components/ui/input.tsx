@@ -35,6 +35,7 @@ function AstryxInput({
   autoFocus,
   ref,
   "aria-invalid": ariaInvalid,
+  "aria-busy": ariaBusy,
   ...rest
 }: React.ComponentProps<"input">) {
   const [inner, setInner] = React.useState(String(defaultValue ?? ""))
@@ -51,6 +52,9 @@ function AstryxInput({
     if (!el) return
     if (type === "password") el.removeAttribute("value")
     // Astryx writes aria-invalid itself (from `status`, unused here).
+    // Same for aria-busy (Astryx derives it from isLoading).
+    if (ariaBusy === undefined || ariaBusy === false) el.removeAttribute("aria-busy")
+    else el.setAttribute("aria-busy", String(ariaBusy))
     if (invalid) el.setAttribute("aria-invalid", "true")
     else if (ariaInvalid === undefined || ariaInvalid === false) el.removeAttribute("aria-invalid")
     else el.setAttribute("aria-invalid", String(ariaInvalid))

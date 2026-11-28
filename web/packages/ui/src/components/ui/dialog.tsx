@@ -204,6 +204,7 @@ function DialogContent({
       isOpen={open}
       onOpenChange={(next) => setOpen(next)}
       data-slot="dialog-content"
+      role="dialog" // explicit, as Radix had it (a native <dialog> only has the implicit role)
       // Positioning, animation and focus handling now belong to Astryx; the
       // surface keeps our radius and grid so child layout is unchanged.
       className={cn("w-full max-w-[calc(100%-2rem)] rounded-2xl sm:max-w-lg", className)}
