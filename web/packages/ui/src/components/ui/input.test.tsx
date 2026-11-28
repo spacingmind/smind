@@ -5,6 +5,18 @@ import { describe, expect, it, vi } from "vitest";
 import { Input } from "@/components/ui/input";
 
 describe("Input on Astryx", () => {
+  it("input_autofocus_inside_a_dialog_is_not_focused_at_mount_and_is_marked_for_the_dialog", () => {
+    const ref = createRef<HTMLInputElement>();
+    render(<dialog><Input ref={ref} autoFocus /></dialog>);
+    expect(document.activeElement).not.toBe(ref.current);
+    expect(ref.current).toHaveAttribute("data-autofocus", "");
+  });
+
+  it("input_autofocus_outside_a_dialog_is_focused_on_mount", () => {
+    render(<Input aria-label="Autofocused" autoFocus />);
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Autofocused" }));
+  });
+
   it("input_forwards_props_and_aria_invalid", () => {
     const seen: string[] = [];
     const onChange = vi.fn((e: { target: { value: string } }) => seen.push(e.target.value));
