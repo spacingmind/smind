@@ -1,0 +1,78 @@
+# Quota and auth hardening (C5): five items, two pull requests
+
+Status: active. Size M-L. **High-risk**: daemon failure classification and run failover, plus the account refresh path and the provider usage endpoints (rate-limited: ADR-0028's daemon call budget, single-flight and cache-only routing are rules this work must not loosen). Each pull request has a validation contract (ADR-0045), a validator on its exact head and two fresh reviewers.
+
+**Two natural halves, so two pull requests, sequential, not stacked** (each from fresh `develop`):
+
+- **C5a, failure classes** (items 1, 4, 5): `internal/runs/failure`, `internal/runs`, the usage-endpoint 429 body in `internal/quota`, and the failure-kind tables of the CLI, the web client and the mobile client (one new kind).
+- **C5b, account refresh** (items 2, 3): `internal/accounts`, `internal/server/proxy.go`, `internal/quota`.
+
+They touch different packages except `internal/quota` (a different file each) and need no ordering between them. C5a ships first.
+
+## What the code already does (read first; nothing below duplicates it)
+
+| Item | Already handled, with file:line | The real gap |
+|---|---|---|
+| 1 Retry-After | The usage endpoints read `Retry-After` as seconds or an HTTP date on a 429 (`internal/quota/fetchhttp.go:105,127`) and the poller clamps it to **[5 min, 6 h]** (`internal/quota/budget.go:20-21,151`: ADR-0028 §3, "deliberately not configurable"). The passive proxy observer turns a bare 429 `Retry-After` into a routing back-off of `min(Retry-After, 60 s)` (`internal/quota/passive_detect.go:279`). | **`RetryInfo` is read nowhere** (no `google.rpc.RetryInfo`). A usage-endpoint 429 body is never read, so a provider that sends only `RetryInfo` gets the default wait. The run-level hint (`failure.retryHint`, `internal/runs/failure/classify.go:209`) knows only "try again in N seconds/minutes" in the text and `Input.RetryAfter`, which `taskrunner.FailureHint` never sets for Codex (always 0). The automatic transient-429 retry clamps whatever it is told to **[5 s, 5 min]** (`internal/runs/failover.go:47-48`): a provider that says "wait 20 minutes" is retried after 5. |
+| 2 Expired refresh token | The usage fetcher already treats a terminal refresh error (`invalid_grant`, `refresh_token_expired`, ...) as "login expired" (`internal/quota/fetcher.go:156-175`, `ProblemExpired`). | The **proxy** path (`internal/server/proxy.go:598` `injectCredentials` -> `Registry.EnsureFresh`) has no memory of it: **every request** with a dead refresh token calls the provider's token endpoint again and answers 503; the router still picks the account. `EnsureFresh` (`internal/accounts/refresh.go:109`) has no terminal state. |
+| 3 Sleep / wake | The usage poller starts no timer: it only fetches when a client asks (`internal/quota/poller.go:60-65`), keeps a per-account call budget, and clamps persisted state against a clock jump (`internal/quota/budget.go:50`). The proxy refreshes only on use. | After a wake, a client that lists account usage (`internal/wsapi/account_usage.go:287`) touches every account at once; each stale one fetches, and each expired token refreshes, in one burst, possibly before the network is back. Nothing detects a resume. |
+| 4 "Subscription sharing" rejections | Nothing (`grep -i "subscription.shar"` finds no hit in `internal/`, `cmd/`, `web/`, `mobile/`). | A message-only rejection with no code classifies as a generic failure, and an automatic fallback or retry could start on it. |
+| 5 No failover after the first streamed delta | The **proxy** forwards one request to one account and never replays it (`internal/server/proxy.go:362-420`: no failover loop): already satisfied there. The **run-level** fallback (`internal/runs/failover.go:226` `startFallbackSuccessor`, ADR-0041 F3) starts the fallback on the failed run's profile **even when the run had already streamed output** (it quotes the tail of that output into the new prompt). | The run-level fallback after streamed output. See D5: this reverses part of ADR-0041 F3 as instructed; flagged for the Human. |
+
+## Decisions (made by the brief, recorded here)
+
+- **D1 One hint parser per layer, no third copy.** `failure.ParseRetryInfo(body []byte) (time.Duration, bool)` reads a `google.rpc.RetryInfo` detail (`error.details[]` with `"@type":"type.googleapis.com/google.rpc.RetryInfo"` and `retryDelay` as `"3.5s"` or `{"seconds":3,"nanos":500000000}`; also a top-level `details`). `failure.retryHint` additionally reads `Retry-After: <seconds>` and a `retryDelay":"Ns"` fragment out of the error text. `internal/quota` keeps its own header parser (usage semantics) and calls `failure.ParseRetryInfo` for a 429 body. Both are pure and stdlib-only.
+- **D2 Bounds.** Existing bounds that belong to a call budget or a routing rule stay as they are: usage endpoints **[5 min, 6 h]**, passive routing back-off **60 s cap**. The automatic transient-429 retry (run level) becomes **floor 1 s, cap 1 h** (`transientRetryAfterMin = 1 * time.Second`, `transientRetryAfterMax = time.Hour`), so the provider's own delay is honoured. The backoff steps for a 429 with no hint (30 s, then 2 min) and the 2-attempt cap do not change.
+- **D3 A new failure kind, `account_blocked`**, for a "subscription sharing" style rejection: a human-fix class (`failure.IsHumanFix`), so it is **never retried, never failed over, never waited on, never put on provider cooldown** (no failover storm). Sentence (the one table `failure.Describe`, mirrored in the CLI, web and mobile tables): "The provider rejected this account's use under its plan terms." Guidance: "Do not retry and do not fail over: another run on the same account is refused the same way. A human checks the account's plan and how it is used; the action offers the fallback profile if one is set." Action: `switch_profile` to the fallback profile when the profile has one; none otherwise. Recognised by text: a case-insensitive `subscription[ _-]?shar(ing|ed)` anywhere in the run's error text (Codex turn errors, proxy `response.failed` / SSE `error` frames and handshake errors all reach the run as error text). **The research note gives the shapes but not the exact wording; the match is deliberately by the phrase, and has not been checked against a live rejection (no live provider call was made).**
+- **D4 Terminal refresh is remembered in memory, keyed by the refresh token.** `accounts.ErrNeedsRelogin`; `Registry.EnsureFresh` marks the account dead for that exact refresh token (a hash, never the token) on a terminal refresh error and then returns `ErrNeedsRelogin` **without calling the refresher**; a replaced credential (sign in again) changes the key and clears it; a daemon restart allows one new attempt per account (bounded, not persisted: no schema change). The proxy leaves such accounts out of the candidates and, when none remains, answers a provider-shaped 401 `authentication_error` with the sentence "This account's login has expired. Sign in to it again in sMind." (the run classifier already maps `authentication_error` to `auth_expired`). The usage fetcher answers `ProblemExpired` without any endpoint call. `isTerminalRefreshError` moves to `accounts` (exported) and `quota` uses it.
+- **D5 No run-level fallback after streamed output** (item 5, as instructed). `startFallbackSuccessor` is skipped when the failed run's history holds any assistant output. The run still ends as a plan-limit failure with its normal action (the fallback profile is offered as a **manual** `switch_profile`; a stored session offers "continue" at the reset as today). Not changed: the **same-chat** retries (`wait` at the reset time, the transient-429 retry): they re-send into the same chat with a preface that tells the agent its earlier attempt may have made progress, they are not "elsewhere". **Consequence for the Human:** a limit hit mid-turn (after output) no longer auto-continues on the fallback profile; only a limit that rejects the turn at the start still does. See "Decisions for the Human".
+- **D6 Wake detection by clock gap.** The poller compares the wall-clock step with the monotonic step between two requests (`resumeWatch`, both clocks injectable): a difference over **60 s** is a resume. For **2 minutes** after one, a **non-forced** fetch waits a random 0-30 s first (`wakeSpread`, outside the global in-flight slot, cancelled with the poller), so accounts are spread and the network has come back; a forced refresh (a person pressed it) is not delayed. No provider call is added: the same fetches happen, later and spread. An expired token after a resume is refreshed as usual and **never** reported as "login expired" unless the provider itself refuses the refresh token (D4); a transient refresh failure stays transient.
+
+## Acceptance criteria
+
+C5a:
+- AC1 `failure.ParseRetryInfo` reads `retryDelay` as a string (`"3.5s"`, `"120s"`) and as `{seconds, nanos}`, rejects garbage, negative and zero, and finds the detail among others.
+- AC2 `failure.retryHint` honours `Input.RetryAfter`, then `Retry-After: N`, then a RetryInfo fragment, then "try again in N ..." (that order), 0 for garbage.
+- AC3 A usage-endpoint 429 with only `RetryInfo` in the body waits the RetryInfo delay (clamped by the existing [5 min, 6 h]); `Retry-After` still wins when both are present; the body read is capped; no extra provider call is made (count asserted).
+- AC4 The automatic transient-429 retry honours a provider delay in [1 s, 1 h]: 30 s is 30 s, 20 min is 20 min, 2 h is 1 h, 0.2 s is 1 s; no hint keeps 30 s / 2 min; the attempt cap stays 2.
+- AC5 A "subscription sharing" error text classifies as `account_blocked` (several phrasings), never as `plan_window_exhausted`, `auth_expired` or `rate_limited`; an unrelated text with "subscription" does not.
+- AC6 A run failing with `account_blocked` on a profile with `onRateLimit: fallback` starts no fallback successor, queues no retry item, sets no provider cooldown, and offers the fallback profile as `switch_profile`.
+- AC7 A run that streamed one assistant delta and then fails with a plan limit, on a `fallback` profile, starts **no** fallback successor and keeps its failure kind and action; the same run with no streamed output still falls back (control); a `wait` profile still queues its same-chat retry.
+- AC8 `account_blocked` is in `failure.AllKinds`, `IsKnown`, `IsHumanFix`, `Describe`, `Guidance`, the CLI failure text and MCP instructions, the web and mobile failure tables and the inbox severity; drift tests (Go, web, mobile) pass; the web run error box shows it (frames below).
+
+C5b:
+- AC9 After a terminal refresh error, `EnsureFresh` returns `ErrNeedsRelogin` and calls the refresher **exactly once for any number of further calls** (count asserted); a replaced credential allows exactly one new refresh.
+- AC10 The proxy skips a needs-re-login account when others exist (the request is served by the other account and the dead account's token endpoint is not called again), and answers 401 `authentication_error` with the sentence when none is left; a transient refresh error is not remembered.
+- AC11 The usage fetcher answers `ProblemExpired` for a needs-re-login account without touching the usage endpoint or the token endpoint (counts asserted).
+- AC12 `resumeWatch` reports a resume for a wall step much larger than the monotonic step, not for a plain long idle, not for a small skew.
+- AC13 After a resume, N non-forced fetches start spread by the injected jitter (each waits its own delay, none holds the global in-flight slot while waiting), make exactly N provider calls in total (count asserted), a forced refresh is immediate, and an expired token that refreshes successfully is not reported as expired.
+
+## Test scenarios (named)
+
+C5a: `internal/runs/failure/retryinfo_test.go`: `retryinfo_string_and_object_forms`, `retryinfo_rejects_garbage_negative_zero`, `retryinfo_found_among_other_details`; `classify_test.go`: `retry_hint_order_and_text_forms`, `subscription_sharing_text_is_account_blocked`, `subscription_word_alone_is_not_account_blocked`, `account_blocked_is_human_fix_and_known`; `internal/quota`: `usage_429_retryinfo_body_sets_the_wait`, `usage_429_retry_after_beats_retryinfo`, `usage_429_body_read_is_capped_and_one_call`; `internal/runs`: `transient_retry_honours_provider_delay_between_1s_and_1h`, `account_blocked_never_retried_failed_over_or_cooled`, `no_fallback_after_the_first_streamed_delta`, `fallback_still_starts_without_streamed_output`, `wait_retry_still_queued_after_streamed_output`; `cmd/smind/failure_text_test.go` and the web (`failure-text.test.ts`, `failure-class.test.ts`) and mobile (`failureText.test.ts`) drift tests; e2e `failure-classes.spec.ts` gains the `account-blocked` class (frames).
+
+C5b: `internal/accounts`: `ensurefresh_terminal_error_is_remembered_and_calls_the_refresher_once`, `ensurefresh_transient_error_is_not_remembered`, `ensurefresh_new_credential_clears_the_mark`; `internal/server`: `proxy_routes_around_a_needs_relogin_account`, `proxy_answers_401_sentence_when_every_account_needs_relogin`, `proxy_does_not_hit_the_token_endpoint_again`; `internal/quota`: `fetcher_needs_relogin_makes_no_provider_call`, `resumewatch_detects_wall_gap_not_idle`, `poller_spreads_fetches_after_a_resume`, `poller_forced_refresh_is_not_delayed_after_a_resume`, `poller_expired_token_after_resume_is_not_an_expiry_error`.
+
+Mutation per item on committed code (the Lead's, then the validator's and the reviewers'): item 1 drop the RetryInfo read / restore the 5 s...5 min clamp; item 2 let `EnsureFresh` call the refresher after a terminal error; item 3 remove the spread (or the gap test); item 4 drop the `account_blocked` regexp / remove it from `IsHumanFix`; item 5 remove the streamed-output guard.
+
+## Frames (web changes only)
+
+The web client gains one failure-kind sentence. Frames (light and dark, every state of the run error box for the new class, web harness with the real daemon socket rewritten as the other classes do) go in the C5a pull request, labelled; a real-window frame only if the screen is available.
+
+## Staffing
+
+GLM peers write all code from step briefs, one commit per step, at most two at a time; two fresh GLM reviewers per pull request; the Lead audits, specs, reviews every diff, runs the mutations. No live provider call: fakes only.
+
+## Progress
+
+- Spec written (this commit).
+
+## Validation
+
+- Pending.
+
+## Decisions for the Human
+
+1. **Item 5 reverses part of ADR-0041 F3.** A limit that hits mid-turn (after output) will no longer auto-continue on the fallback profile; the fallback is offered as a manual switch. Recommendation: keep, because the fallback replays the prompt into a different agent after the first one may already have changed your workspace. If you would rather keep the auto-continue and only guard the same-request replays (which the proxy never does), say so and I revert D5.
+2. **Wording of the "subscription sharing" match.** Recognised by the phrase; the research note has no verbatim message. If you have one real rejection text, it should become a test row.
+3. **Restart forgets "needs re-login".** One extra refresh attempt per such account after a daemon restart (bounded). A persisted flag would need a schema change; recommendation: not now.
