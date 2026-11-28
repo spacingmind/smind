@@ -20,6 +20,8 @@ export interface RelayConnectionLike {
     cb: (e: { topic: string; seq?: number; payload: unknown }) => void,
   ): () => void;
   onState(cb: (s: { kind: string }) => void): () => void;
+  /** The daemon's synthetic event.dropped (its per-connection queue overflowed); count is how many events were lost. */
+  onDropped(cb: (count: number) => void): () => void;
   readonly state: { kind: string };
 }
 
@@ -38,8 +40,10 @@ export class RelaySocket implements SocketLike {
   private readonly closeListeners: Array<() => void> = [];
   private readonly errorListeners: Array<() => void> = [];
   private readonly inflight = new Map<string, Inflight>();
+  /** One local dispatch registration per topic this socket subscribed to. */
   private readonly subs = new Map<string, () => void>();
   private offState: (() => void) | null = null;
+  private offDropped: (() => void) | null = null;
   private closed = false;
 
   constructor(private readonly conn: RelayConnectionLike) {
@@ -50,6 +54,12 @@ export class RelaySocket implements SocketLike {
     this.offState = conn.onState((s) => {
       if (s.kind !== 'connected') this.shutdown();
     });
+    // The daemon's synthetic notification, as it travels over a real WebSocket
+    // ({event: {topic: 'event.dropped', seq, payload: {count}}}); RelayConnection
+    // intercepts it, so it is rebuilt here for the UI's listeners.
+    this.offDropped = conn.onDropped((count) =>
+      this.emit({ event: { topic: 'event.dropped', seq: 0, payload: { count } } }),
+    );
   }
 
   addEventListener(type: 'message', l: (ev: { data: string }) => void): void;
@@ -88,17 +98,14 @@ export class RelaySocket implements SocketLike {
     const id = env.id;
 
     if (env.method === 'events.subscribe') {
-      const topics = topicsOf(env.params);
-      this.subs.get(id)?.();
-      const off = this.conn.subscribe(topics, (e) =>
-        this.emit({ event: { topic: e.topic, seq: e.seq ?? 0, payload: e.payload } }),
-      );
-      this.subs.set(id, off);
-      this.emit({ id, result: null });
+      this.subscribe(id, env.params);
       return;
     }
     if (env.method === 'events.unsubscribe') {
-      this.releaseTopics(topicsOf(env.params));
+      for (const topic of topicsOf(env.params)) {
+        this.subs.get(topic)?.();
+        this.subs.delete(topic);
+      }
       this.emit({ id, result: null });
       return;
     }
@@ -115,26 +122,50 @@ export class RelaySocket implements SocketLike {
         this.inflight.delete(id);
         this.emit({ id, result });
       },
-      (err: unknown) => {
-        if (this.inflight.get(id) !== call) return;
-        this.inflight.delete(id);
-        const e = err as { message?: unknown; code?: unknown; data?: unknown };
-        const error: { message: string; code?: string; data?: unknown } = {
-          message: typeof e?.message === 'string' ? e.message : 'call failed',
-        };
-        if (typeof e?.code === 'string') error.code = e.code;
-        if (e?.data !== undefined) error.data = e.data;
-        this.emit({ id, error });
-      },
+      (err: unknown) => this.failCall(id, call, err),
     );
   }
 
-  // events.unsubscribe carries topics, but a conn.subscribe handle covers its
-  // whole topic set, so a subscription is released when any of its request's
-  // topics is named; the browser app subscribes once and unsubscribes whole.
-  private releaseTopics(_topics: string[]): void {
-    for (const off of this.subs.values()) off();
-    this.subs.clear();
+  // events.subscribe is the daemon's own RPC, answered with its real outcome
+  // (so the UI's tolerant retry sees `unknown topic "x"`). Only after it
+  // succeeds is local dispatch registered, one conn.subscribe per topic and
+  // never twice for the same topic. conn.subscribe sends its own
+  // events.subscribe for the topic internally; that is harmless, the daemon
+  // dedups topics per connection.
+  private subscribe(id: string, params: unknown): void {
+    const topics = topicsOf(params);
+    const call = this.conn.call('events.subscribe', params ?? null);
+    this.inflight.set(id, call);
+    call.then(
+      (result) => {
+        if (this.inflight.get(id) !== call) return;
+        this.inflight.delete(id);
+        if (this.closed) return;
+        for (const topic of topics) {
+          if (this.subs.has(topic)) continue;
+          this.subs.set(
+            topic,
+            this.conn.subscribe([topic], (e) =>
+              this.emit({ event: { topic: e.topic, seq: e.seq ?? 0, payload: e.payload } }),
+            ),
+          );
+        }
+        this.emit({ id, result });
+      },
+      (err: unknown) => this.failCall(id, call, err),
+    );
+  }
+
+  private failCall(id: string, call: Inflight, err: unknown): void {
+    if (this.inflight.get(id) !== call) return;
+    this.inflight.delete(id);
+    const e = err as { message?: unknown; code?: unknown; data?: unknown };
+    const error: { message: string; code?: string; data?: unknown } = {
+      message: typeof e?.message === 'string' ? e.message : 'call failed',
+    };
+    if (typeof e?.code === 'string') error.code = e.code;
+    if (e?.data !== undefined) error.data = e.data;
+    this.emit({ id, error });
   }
 
   private emit(env: unknown): void {
@@ -150,6 +181,8 @@ export class RelaySocket implements SocketLike {
     this.closed = true;
     this.offState?.();
     this.offState = null;
+    this.offDropped?.();
+    this.offDropped = null;
     for (const off of this.subs.values()) off();
     this.subs.clear();
     this.inflight.clear();

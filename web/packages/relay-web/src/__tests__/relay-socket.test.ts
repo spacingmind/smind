@@ -21,8 +21,22 @@ class FakeConn implements RelayConnectionLike {
     cancelled: boolean;
   }> = [];
   subs: Array<(e: Ev) => void> = [];
+  /** Per-topic registrations made through subscribe(), in order. */
+  subTopics: Array<{ topics: string[]; cb: (e: Ev) => void }> = [];
+  droppedCbs: Array<(n: number) => void> = [];
+  /** events.subscribe answers: the daemon's real RPC, answered here without being recorded in calls. */
+  subscribeRpcs: unknown[] = [];
+  rejectUnknown = new Set<string>();
   stateCbs: Array<(s: { kind: string }) => void> = [];
   call(method: string, params?: unknown, opts?: { onEvent?: (e: string, p: unknown) => void }) {
+    if (method === 'events.subscribe') {
+      this.subscribeRpcs.push(params);
+      const topics = (params as { topics: string[] }).topics;
+      const bad = topics.find((t) => this.rejectUnknown.has(t));
+      const q = (bad ? Promise.reject(new DaemonError(`unknown topic "${bad}"`)) : Promise.resolve({ topics })) as Promise<unknown> & { cancel(): void };
+      q.cancel = () => undefined;
+      return q;
+    }
     let resolve!: (v: unknown) => void;
     let reject!: (e: unknown) => void;
     const p = new Promise<unknown>((a, b) => {
@@ -36,11 +50,23 @@ class FakeConn implements RelayConnectionLike {
     this.calls.push(rec);
     return p;
   }
-  subscribe(_t: string[], cb: (e: Ev) => void) {
+  subscribe(t: string[], cb: (e: Ev) => void) {
     this.subs.push(cb);
+    this.subTopics.push({ topics: t, cb });
     return () => {
       this.subs = this.subs.filter((x) => x !== cb);
+      this.subTopics = this.subTopics.filter((x) => x.cb !== cb);
     };
+  }
+  onDropped(cb: (n: number) => void) {
+    this.droppedCbs.push(cb);
+    return () => {
+      this.droppedCbs = this.droppedCbs.filter((x) => x !== cb);
+    };
+  }
+  /** What the daemon would push for topic: every local registration for it fires. */
+  push(topic: string, seq: number, payload: unknown) {
+    for (const r of [...this.subTopics]) if (r.topics.includes(topic)) r.cb({ topic, seq, payload });
   }
   onState(cb: (s: { kind: string }) => void) {
     this.stateCbs.push(cb);
@@ -102,6 +128,75 @@ describe('RelaySocket', () => {
     expect(got).toEqual([{ topic: 't', seq: 3, payload: { a: 1 } }]);
     await client.call('events.unsubscribe', { topics: ['t'] });
     expect(conn.subs.length).toBe(0);
+  });
+
+  it('relay_socket_relays_the_real_events_subscribe_answer', async () => {
+    const { conn, client } = setup();
+    conn.rejectUnknown.add('future.topic');
+    // What ui/src/hooks/use-daemon-events.ts's subscribeTolerant does (that module
+    // imports React and the app's path aliases, so the loop is mirrored here).
+    let rest = ['task.created', 'future.topic', 'run.status'];
+    for (;;) {
+      try {
+        await client.call('events.subscribe', { topics: rest });
+        break;
+      } catch (err) {
+        const unknown = /unknown topic "([^"]+)"/.exec((err as Error).message)?.[1];
+        if (!unknown || !rest.includes(unknown)) throw err;
+        rest = rest.filter((t) => t !== unknown);
+      }
+    }
+    expect(rest).toEqual(['task.created', 'run.status']);
+    expect(conn.subscribeRpcs.length).toBe(2); // the rejected one and the retry
+    expect(conn.subTopics.map((r) => r.topics)).toEqual([['task.created'], ['run.status']]);
+
+    const got: Array<{ topic: string; seq: number }> = [];
+    client.onNotification((n) => got.push({ topic: n.topic, seq: n.seq }));
+    conn.push('run.status', 4, {});
+    conn.push('future.topic', 5, {});
+    await tick();
+    expect(got).toEqual([{ topic: 'run.status', seq: 4 }]);
+  });
+
+  it('relay_socket_events_subscribe_is_idempotent_per_topic', async () => {
+    const { conn, client } = setup();
+    await client.call('events.subscribe', { topics: ['t'] });
+    await client.call('events.subscribe', { topics: ['t'] });
+    await client.call('events.subscribe', { topics: ['t', 'u'] });
+    expect(conn.subTopics.map((r) => r.topics)).toEqual([['t'], ['u']]);
+    const got: unknown[] = [];
+    client.onNotification((n) => got.push(n));
+    conn.push('t', 1, { a: 1 });
+    await tick();
+    expect(got).toEqual([{ topic: 't', seq: 1, payload: { a: 1 } }]);
+  });
+
+  it('relay_socket_events_unsubscribe_releases_only_the_named_topics', async () => {
+    const { conn, client } = setup();
+    await client.call('events.subscribe', { topics: ['a', 'b', 'c'] });
+    await client.call('events.unsubscribe', { topics: ['b'] });
+    expect(conn.subTopics.map((r) => r.topics[0])).toEqual(['a', 'c']);
+    const got: string[] = [];
+    client.onNotification((n) => got.push(n.topic));
+    conn.push('a', 1, null);
+    conn.push('b', 2, null);
+    conn.push('c', 3, null);
+    await tick();
+    expect(got).toEqual(['a', 'c']);
+    // a released topic can be subscribed again
+    await client.call('events.subscribe', { topics: ['b'] });
+    expect(conn.subTopics.map((r) => r.topics[0])).toEqual(['a', 'c', 'b']);
+  });
+
+  it('relay_socket_forwards_event_dropped', async () => {
+    const { conn, client, sock } = setup();
+    const got: Array<{ topic: string; seq: number; payload: unknown }> = [];
+    client.onNotification((n) => got.push(n));
+    conn.droppedCbs[0](7);
+    await tick();
+    expect(got).toEqual([{ topic: 'event.dropped', seq: 0, payload: { count: 7 } }]);
+    sock.close();
+    expect(conn.droppedCbs.length).toBe(0);
   });
 
   it('abort_cancels_the_in_flight_call', async () => {
