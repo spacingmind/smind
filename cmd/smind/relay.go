@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -355,6 +356,8 @@ const relayLinkWarning = "Treat this link like a password: anyone with it can re
 	"To revoke it, run `smind relay host rotate <id>` (then `smind relay connect` again with the new secret).\n" +
 	"Traffic is end-to-end encrypted; the relay cannot read your code or messages."
 
+const defaultWebPairURL = "https://app.spacingmind.com/"
+
 // runRelayOffer is cmdRelayOffer with its environment injected. stdout gets
 // only the pairing URL, exactly as before, so `$(smind relay offer)` stays
 // clean; everything meant for a person (the terminal QR, the warning, notes)
@@ -365,11 +368,14 @@ func runRelayOffer(args []string, dir string, stdout, stderr io.Writer, stdoutIs
 	fs := flag.NewFlagSet("relay offer", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		fmt.Fprint(stderr, `usage: smind relay offer [--window <duration>] [--max-devices <n>] [--qr] [--png <file> [--force]]
+		fmt.Fprint(stderr, `usage: smind relay offer [--web] [--web-url <base>] [--window <duration>] [--max-devices <n>] [--qr] [--png <file> [--force]]
 
 Prints a pairing link for a mobile device or the desktop app. The link goes to
 stdout; with a terminal on stdout, or --qr, a QR code is drawn on stderr too.
 --png writes the QR code to a file (mode 0600; --force overwrites).
+--web prints a browser pairing link instead.
+--web-url <base> uses a self-hosted browser bundle and implies --web; the base
+must be HTTPS (HTTP only for localhost), without a query or fragment.
 
 Printing the link also opens a pairing window (--window, default 10m): the next
 --max-devices (default 1) new devices that connect in that time are approved
@@ -377,6 +383,8 @@ automatically; any other new device waits for "smind relay devices approve".
 
 `+relayLinkWarning+"\n")
 	}
+	web := fs.Bool("web", false, "print a browser pairing link")
+	webURL := fs.String("web-url", "", "browser bundle base URL (implies --web)")
 	qr := fs.Bool("qr", false, "also draw the QR code on stderr (the default when stdout is a terminal)")
 	pngPath := fs.String("png", "", "write the QR code as a PNG to `file`")
 	force := fs.Bool("force", false, "with --png, overwrite an existing file")
@@ -395,6 +403,33 @@ automatically; any other new device waits for "smind relay devices approve".
 	if *window < time.Second || *maxDevices < 1 {
 		fmt.Fprintln(stderr, "smind relay offer: --window must be at least 1s and --max-devices at least 1")
 		return 2
+	}
+
+	webURLSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "web-url" {
+			webURLSet = true
+		}
+	})
+	base := ""
+	if webURLSet {
+		u, err := url.Parse(*webURL)
+		valid := false
+		if err == nil {
+			host := strings.ToLower(u.Hostname())
+			loopback := host == "localhost" || host == "127.0.0.1" || host == "::1"
+			valid = u.IsAbs() && host != "" &&
+				(u.Scheme == "https" || (u.Scheme == "http" && loopback)) &&
+				u.RawQuery == "" && !u.ForceQuery && !strings.Contains(*webURL, "#")
+		}
+		if !valid {
+			fmt.Fprintln(stderr, "smind relay offer: --web-url must be an https URL (http only for localhost) without a query or fragment")
+			return 2
+		}
+		*web = true
+		base = *webURL
+	} else if *web {
+		base = defaultWebPairURL
 	}
 
 	cfg, ok, err := bridge.LoadConfig(dir)
@@ -429,7 +464,7 @@ automatically; any other new device waits for "smind relay devices approve".
 		Secret:           secret,
 		WorkspaceID:      cfg.WorkspaceID, // the relay host id; the offer's "ws" key keeps the wire name
 	}
-	url, err := offer.URL("")
+	url, err := offer.URL(base)
 	if err != nil {
 		fmt.Fprintf(stderr, "smind relay offer: %v\n", err)
 		return 1
@@ -460,6 +495,9 @@ automatically; any other new device waits for "smind relay devices approve".
 		}
 	}
 	fmt.Fprintf(stderr, "\n%s\n", relayLinkWarning)
+	if !*web && showQR {
+		fmt.Fprintln(stderr, "To pair a browser instead of a phone, run `smind relay offer --web`.")
+	}
 	return 0
 }
 

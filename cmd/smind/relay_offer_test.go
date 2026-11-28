@@ -5,6 +5,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -231,5 +232,126 @@ func TestRelayOfferIsStableAcrossRuns(t *testing.T) {
 	_, b, _ := offer(t, dir, false)
 	if a != b {
 		t.Fatal("two offers from one home differ")
+	}
+}
+
+func Test_relay_offer_prints_the_web_link(t *testing.T) {
+	dir := offerDir(t, 12)
+	_, deepLink, _ := offer(t, dir, false)
+	path := filepath.Join(t.TempDir(), "web.png")
+	code, stdout, stderr := offer(t, dir, false, "--web", "--qr", "--png", path)
+	if code != 0 {
+		t.Fatalf("--web = %d, stderr %q", code, stderr)
+	}
+	link := urlOnly(t, stdout)
+	if !strings.HasPrefix(link, "https://app.spacingmind.com/#offer=") {
+		t.Fatalf("web link = %q", link)
+	}
+	got, err := pairing.ParseURL(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := pairing.ParseURL(strings.TrimSuffix(deepLink, "\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("web offer = %#v, want %#v", got, want)
+	}
+	qr, err := pairing.EncodeQRFit(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr, qr.Text()) {
+		t.Error("stderr lacks the QR for the web link")
+	}
+	wantPNG, err := qr.PNG(offerPNGModuleSize, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotPNG, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotPNG, wantPNG) {
+		t.Error("PNG does not encode the web link")
+	}
+	if strings.Contains(stderr, "To pair a browser") {
+		t.Error("web offer should not include the browser hint")
+	}
+}
+
+func Test_relay_offer_web_url_flag_sets_the_origin_and_implies_web(t *testing.T) {
+	code, stdout, stderr := offer(t, offerDir(t, 12), true, "--web-url", "https://pair.example.org/x/", "--web=false")
+	if code != 0 {
+		t.Fatalf("--web-url = %d, stderr %q", code, stderr)
+	}
+	if link := urlOnly(t, stdout); !strings.HasPrefix(link, "https://pair.example.org/x/#offer=") {
+		t.Fatalf("custom web link = %q", link)
+	}
+	if strings.Contains(stderr, "To pair a browser") {
+		t.Error("--web-url should imply --web and omit the browser hint")
+	}
+}
+
+func Test_relay_offer_web_url_is_validated(t *testing.T) {
+	dir := offerDir(t, 12)
+	for _, base := range []string{
+		"http://example.com", "https://example.com/?a=b", "https://example.com/#frag", "/relative/path",
+		"", "https:///path", "https://example.com/?", "https://example.com/#", "ftp://localhost/",
+		"http://localhost.example.com/", "http://127.0.0.2/",
+	} {
+		t.Run(base, func(t *testing.T) {
+			code, stdout, stderr := offer(t, dir, false, "--web-url", base)
+			want := "smind relay offer: --web-url must be an https URL (http only for localhost) without a query or fragment\n"
+			if code != 2 || stdout != "" || stderr != want {
+				t.Fatalf("--web-url %q = %d, %q, %q; want exit 2 and validation message", base, code, stdout, stderr)
+			}
+		})
+	}
+	for _, base := range []string{"http://localhost:5173/", "https://[::1]/", "http://127.0.0.1:5173/", "http://[::1]:5173/"} {
+		t.Run(base, func(t *testing.T) {
+			code, stdout, stderr := offer(t, dir, false, "--web-url", base)
+			if code != 0 {
+				t.Fatalf("--web-url %q = %d, stderr %q", base, code, stderr)
+			}
+			if link := urlOnly(t, stdout); !strings.HasPrefix(link, base+"#offer=") {
+				t.Fatalf("link = %q, want base %q", link, base)
+			}
+		})
+	}
+}
+
+func Test_relay_offer_default_output_is_unchanged(t *testing.T) {
+	dir := offerDir(t, 12)
+	code, stdout, stderr := offer(t, dir, false)
+	if code != 0 {
+		t.Fatalf("default offer = %d, stderr %q", code, stderr)
+	}
+	link := urlOnly(t, stdout)
+	parsed, err := pairing.ParseURL(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := parsed.URL("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stdout != want+"\n" || !strings.HasPrefix(link, "https://spacingmind.sh/pair#offer=") {
+		t.Fatalf("default stdout changed: %q", stdout)
+	}
+	const note = "To pair a browser instead of a phone, run `smind relay offer --web`.\n"
+	if strings.Contains(stderr, note) {
+		t.Error("non-terminal offer without --qr should not include the browser hint")
+	}
+	for _, tty := range []bool{false, true} {
+		args := []string(nil)
+		if !tty {
+			args = []string{"--qr"}
+		}
+		code, got, stderr := offer(t, dir, tty, args...)
+		if code != 0 || got != stdout || !strings.Contains(stderr, note) {
+			t.Fatalf("QR offer (tty=%t) = %d, %q, %q", tty, code, got, stderr)
+		}
 	}
 }
