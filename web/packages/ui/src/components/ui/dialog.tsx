@@ -138,6 +138,10 @@ function DialogContent({
     ...rest
   } = props
 
+  // Unmount when closed (Radix did): a closed native <dialog> stays in the DOM
+  // and keeps its children queryable. Costs the exit animation.
+  if (!open) return null
+
   return (
     <AstryxDialog
       {...(rest as object)}

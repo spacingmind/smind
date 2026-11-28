@@ -29,8 +29,17 @@ function Switch({
   ref,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
-  ...rest
+  ...restAll
 }: SwitchProps) {
+  // Radix put every data-*/aria-* prop (data-testid, aria-describedby, ...) on
+  // the role=switch element. Astryx sends rest props to the field wrapper, so
+  // those are applied to the input instead; the rest stays on the wrapper.
+  const forwarded: Record<string, unknown> = {}
+  const rest: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(restAll)) {
+    if (k.startsWith("data-") || k.startsWith("aria-")) forwarded[k] = v
+    else rest[k] = v
+  }
   const [inner, setInner] = React.useState(!!defaultChecked)
   const controlled = checked !== undefined
   const on = controlled ? !!checked : inner
@@ -43,6 +52,10 @@ function Switch({
     el.setAttribute("data-state", on ? "checked" : "unchecked")
     // Astryx disables with aria-disabled only; mirror Radix's native attribute.
     el.disabled = !!disabled
+    for (const [k, v] of Object.entries(forwarded)) {
+      if (v === undefined || v === false || v === null) el.removeAttribute(k)
+      else el.setAttribute(k, String(v))
+    }
   })
 
   const setRef = React.useCallback(
