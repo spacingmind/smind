@@ -5,7 +5,7 @@ Size M, **web UI only, NO new RPC** (`fs.listDir`, `workspace.create`, `workspac
 ## Human answers (2026-11-27), recorded
 
 1. **Host scope, phase 1:** the current connection plus the saved Connections; **fleet hosts are shown DISABLED with the reason** ("Not available yet"). Fleet create/clone comes later, after an ADR-0048 amendment: not now.
-2. **New folder (C2, later):** mkdir + `git init` + an empty initial commit, ticked and locked with the reason; an existing non-git folder only gets an explicit "Set it up with git init" click, never automatic. (C1 has no git-init button.)
+2. **New folder (C2, later) — SUPERSEDED by [ADR-0063](../../decisions/0063-workspaces-without-a-git-worktree.md) (Proposed, 2026-11-28): `git init` becomes an optional tick box, not a locked requirement.** Earlier answer, kept for the record: mkdir + `git init` + an empty initial commit, ticked and locked with the reason; an existing non-git folder only gets an explicit "Set it up with git init" click, never automatic. (C1 has no git-init button.)
 3. **Clone destination (C3, later):** ask each time, no remembered default (at most suggest the folder being browsed); credentials are the daemon host's own git/gh login only, never tokens through the UI.
 4. **Templates** need an ADR first (not planned). After create: select the project and offer "Start a task". A duplicate path does **find-or-switch**. **No native OS folder dialog** (the in-app chooser only). Mobile out of scope.
 

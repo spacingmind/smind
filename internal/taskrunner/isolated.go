@@ -257,6 +257,7 @@ func (r *Runner) RunPromptIsolated(ctx context.Context, taskID, chatID int64, pr
 		env = append(env, launchEnv...)
 	}
 	env = append(env, r.providerEnvEntries(provider)...)
+	env = withProxyLaunchDefaults(env)
 	opts = append(opts, claudecode.WithEnv(env...))
 	if model != "" && model != ClaudeModelDefault {
 		opts = append(opts, claudecode.WithModel(model))

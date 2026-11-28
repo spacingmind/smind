@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/spacingmind/smind/internal/netenv"
 	"github.com/spacingmind/smind/internal/providers"
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -67,8 +68,10 @@ func scrubEnvEntries(spec providers.Spec, policyOn bool) []string {
 // (an instance's spec.Env, providers.<id>.env), then one entry per
 // SecretEnv ref resolved from the secret store, then the PassthroughEnv
 // names found in the daemon's environment (absent ones are skipped). Each
-// group is sorted by name. A resolved value reaches the child process env
-// only -- never argv, never a log line, never an error string.
+// group is sorted by name. Last come the proxy launch defaults
+// (withProxyLaunchDefaults), so nothing above can override them either. A
+// resolved value reaches the child process env only -- never argv, never a
+// log line, never an error string.
 func (r *Runner) launchEnvEntries(provider Provider) ([]string, error) {
 	spec, _ := r.providerRegistry().Get(string(provider))
 	if spec.Plugin != "" {
@@ -120,7 +123,21 @@ func (r *Runner) launchEnvEntries(provider Provider) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(entries, managed...), nil
+	return withProxyLaunchDefaults(append(entries, managed...)), nil
+}
+
+// withProxyLaunchDefaults appends the proxy launch defaults to entries: the
+// extra entries netenv.ProxyLaunchEntries wants for the environment the
+// child will see, i.e. the daemon's own environment (os.Environ) followed by
+// entries -- last entry wins, so a proxy a provider configures in its own
+// env is seen and normalised too. The child then gets a proxy value with an
+// explicit scheme (a bare value is refused by older Claude Code headless
+// runs) and the loopback services of the daemon outside the proxy. entries
+// is copied first, so the caller's slice is never written to.
+func withProxyLaunchDefaults(entries []string) []string {
+	effective := append(append([]string(nil), os.Environ()...), entries...)
+	out := append([]string(nil), entries...)
+	return append(out, netenv.ProxyLaunchEntries(effective)...)
 }
 
 // providerSecretValues resolves the VALUES a launch of provider puts in
