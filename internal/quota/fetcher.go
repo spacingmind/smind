@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
@@ -130,7 +131,7 @@ func (f *AccountFetcher) Fetch(ctx context.Context, account accounts.Account) (R
 		case now.Before(expiredAt):
 			// Only inside the pre-expiry buffer: the current token still
 			// works, so use it rather than reporting the login as expired.
-		case accounts.IsTerminalRefreshError(err):
+		case errors.Is(err, accounts.ErrNeedsRelogin) || accounts.IsTerminalRefreshError(err):
 			// The error text is not copied: it can carry provider response
 			// text. A terminal refusal is "login expired".
 			t := expiredAt.UTC()
