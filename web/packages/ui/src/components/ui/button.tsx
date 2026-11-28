@@ -1,6 +1,7 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
 import { Slot } from "radix-ui"
+import { Button as AstryxButton } from "@astryxdesign/core/Button"
 
 import { cn } from "@/lib/utils"
 
@@ -58,6 +59,41 @@ const buttonVariants = cva(
   }
 )
 
+// Astryx Button (Wave 0) renders every non-asChild button. Mapping:
+//   default -> primary, outline/secondary -> secondary, ghost -> ghost,
+//   destructive -> destructive.
+// Astryx has no link / execute / approval / quiet variants: those render the
+// Astryx "ghost" element with our Tailwind classes on top (same classes as
+// buttonVariants). Astryx has only sm/md/lg heights: xs/sm -> "sm", default ->
+// "md", lg -> "lg"; xs and icon-xs keep their Tailwind height/size utilities.
+// asChild cannot be expressed (Astryx renders its own <button>/<a>), so that
+// path keeps the previous Radix Slot implementation.
+const ASTRYX_VARIANT = {
+  default: "primary",
+  outline: "secondary",
+  secondary: "secondary",
+  ghost: "ghost",
+  destructive: "destructive",
+} as const
+
+const ASTRYX_SIZE = {
+  default: "md",
+  xs: "sm",
+  sm: "sm",
+  lg: "lg",
+  icon: "md",
+  "icon-xs": "sm",
+  "icon-sm": "sm",
+  "icon-lg": "lg",
+} as const
+
+const TAILWIND_ONLY_VARIANTS = new Set(["link", "execute", "approval", "quiet"])
+const SIZE_OVERRIDE_CLASS: Record<string, string> = {
+  xs: "h-6",
+  "icon-xs": "size-6",
+  "icon-sm": "size-7",
+}
+
 function Button({
   className,
   variant = "default",
@@ -68,16 +104,52 @@ function Button({
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
   }) {
-  const Comp = asChild ? Slot.Root : "button"
+  if (asChild) {
+    return (
+      <Slot.Root
+        data-slot="button"
+        data-variant={variant}
+        data-size={size}
+        className={cn(buttonVariants({ variant, size, className }))}
+        {...props}
+      />
+    )
+  }
+
+  const v = variant ?? "default"
+  const sz = size ?? "default"
+  const { children, disabled, type, ref, onClick, ...rest } = props as typeof props & {
+    ref?: React.Ref<HTMLButtonElement>
+  }
+  const iconOnly = String(sz).startsWith("icon")
+  const tailwindOnly = TAILWIND_ONLY_VARIANTS.has(v as string)
+  const aria = (rest as { "aria-label"?: string })["aria-label"]
+  const label =
+    aria ?? (typeof children === "string" || typeof children === "number" ? String(children) : "")
 
   return (
-    <Comp
+    <AstryxButton
+      {...(rest as object)}
+      ref={ref}
       data-slot="button"
-      data-variant={variant}
-      data-size={size}
-      className={cn(buttonVariants({ variant, size, className }))}
-      {...props}
-    />
+      data-variant={v}
+      data-size={sz}
+      label={label}
+      variant={tailwindOnly ? "ghost" : ASTRYX_VARIANT[v as keyof typeof ASTRYX_VARIANT]}
+      size={ASTRYX_SIZE[sz as keyof typeof ASTRYX_SIZE]}
+      type={type ?? "button"}
+      isDisabled={disabled}
+      onClick={onClick}
+      isIconOnly={iconOnly}
+      icon={iconOnly ? children : undefined}
+      className={cn(
+        tailwindOnly && buttonVariants({ variant: v, size: sz }),
+        SIZE_OVERRIDE_CLASS[sz as string],
+        className
+      )}
+    >
+      {iconOnly ? undefined : children}
+    </AstryxButton>
   )
 }
 

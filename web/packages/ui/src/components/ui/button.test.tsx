@@ -42,3 +42,38 @@ describe("buttonVariants", () => {
     expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute("data-variant", "execute");
   });
 });
+
+const VARIANTS = ["default", "outline", "secondary", "ghost", "destructive", "link", "execute", "approval", "quiet"] as const;
+const SIZES = ["default", "xs", "sm", "lg", "icon", "icon-xs", "icon-sm", "icon-lg"] as const;
+
+describe("Button on Astryx", () => {
+  it("button_keeps_variants_sizes_and_data_attributes", () => {
+    for (const variant of VARIANTS) {
+      for (const size of SIZES) {
+        const { unmount } = render(
+          <Button variant={variant} size={size} className="my-extra" aria-label="X">
+            {size.startsWith("icon") ? <svg /> : "X"}
+          </Button>,
+        );
+        const el = screen.getByRole("button", { name: "X" });
+        expect(el).toHaveAttribute("data-slot", "button");
+        expect(el).toHaveAttribute("data-variant", variant);
+        expect(el).toHaveAttribute("data-size", size);
+        expect(el).toHaveClass("my-extra");
+        unmount();
+      }
+    }
+  });
+
+  it("button_as_child_renders_the_child_element", () => {
+    render(
+      <Button asChild variant="outline" size="sm">
+        <a href="/x">Go</a>
+      </Button>,
+    );
+    const el = screen.getByRole("link", { name: "Go" });
+    expect(el.tagName).toBe("A");
+    expect(el).toHaveAttribute("data-slot", "button");
+    expect(el).toHaveAttribute("data-variant", "outline");
+  });
+});
