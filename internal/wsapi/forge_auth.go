@@ -10,6 +10,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/crash"
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gitsafe"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -249,8 +250,9 @@ func (f *forgeAuth) networkGit(ctx context.Context, dir, remote string) []string
 	}
 	gctx, cancel := context.WithTimeout(ctx, forgeGitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(gctx, "git", "-c", "core.fsmonitor=false", "remote", "get-url", "--", remote)
+	cmd := exec.CommandContext(gctx, "git", gitsafe.Args("-c", "core.fsmonitor=false", "remote", "get-url", "--", remote)...)
 	cmd.Dir = dir
+	cmd.Env = gitsafe.Env(nil)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil

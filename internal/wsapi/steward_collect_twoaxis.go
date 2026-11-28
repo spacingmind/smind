@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/gitsafe"
 	"github.com/spacingmind/smind/internal/steward"
 )
 
@@ -78,7 +79,9 @@ func (c *stewardCollector) twoAxisInputs(ctx context.Context, dir, diffBase, hea
 
 // gitListDir lists the entry names of a directory at head.
 func gitListDir(ctx context.Context, dir, head, path string) ([]string, error) {
-	out, err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", dir, "ls-tree", "--name-only", head, path+"/").Output()
+	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("--no-optional-locks", "-C", dir, "ls-tree", "--name-only", head, path+"/")...)
+	cmd.Env = gitsafe.Env(nil)
+	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
 	}
@@ -97,6 +100,7 @@ func gitHasTestFunc(ctx context.Context, dir, head, name string) bool {
 	if !testFuncNameRe.MatchString(name) {
 		return false
 	}
-	err := exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", dir, "grep", "-q", "-F", "func "+name+"(", head, "--", "*_test.go").Run()
-	return err == nil
+	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("--no-optional-locks", "-C", dir, "grep", "-q", "-F", "func "+name+"(", head, "--", "*_test.go")...)
+	cmd.Env = gitsafe.Env(nil)
+	return cmd.Run() == nil
 }

@@ -378,7 +378,7 @@ func uncommittedStat(worktreePath string) (files, added, deleted int, err error)
 		return 0, 0, 0, err
 	}
 	defer cleanup()
-	out, err := runGitOutputEnv(worktreePath, env, "diff", "--cached", "--numstat", "HEAD")
+	out, err := runGitOutputEnv(worktreePath, env, "diff", "--no-ext-diff", "--no-textconv", "--cached", "--numstat", "HEAD")
 	if err != nil {
 		return 0, 0, 0, err
 	}
