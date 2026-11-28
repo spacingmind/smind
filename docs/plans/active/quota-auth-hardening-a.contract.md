@@ -9,7 +9,7 @@ acs:
     covers: { tests: [retryinfo_string_and_object_forms, retryinfo_rejects_garbage_negative_zero, retryinfo_found_among_other_details], frames: [] }
   - id: AC2
     text: "retryHint order and text forms."
-    covers: { tests: [retry_hint_order_and_text_forms], frames: [] }
+    covers: { tests: [retry_hint_order_and_text_forms, retry_hint_reads_a_retrydelay_in_a_quoted_error_string], frames: [] }
   - id: AC3
     text: "Usage 429 body RetryInfo sets the wait; Retry-After wins; capped read; one call."
     covers: { tests: [usage_429_retryinfo_body_sets_the_wait, usage_429_retry_after_beats_retryinfo, usage_429_body_read_is_capped_and_one_call], frames: [] }
@@ -18,7 +18,7 @@ acs:
     covers: { tests: [transient_retry_honours_provider_delay_between_1s_and_1h], frames: [] }
   - id: AC5
     text: "Subscription sharing text is account_blocked."
-    covers: { tests: [subscription_sharing_text_is_account_blocked, subscription_word_alone_is_not_account_blocked, account_blocked_is_human_fix_and_known], frames: [] }
+    covers: { tests: [subscription_sharing_text_is_account_blocked, subscription_word_alone_is_not_account_blocked, subscription_sharing_text_loses_to_a_signal_and_a_typed_code, account_blocked_is_human_fix_and_known], frames: [] }
   - id: AC6
     text: "account_blocked never retried, failed over, cooled."
     covers: { tests: [account_blocked_never_retried_failed_over_or_cooled], frames: [] }
@@ -36,6 +36,8 @@ tests:
   - { name: retryinfo_rejects_garbage_negative_zero, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/failure/ -run retryinfo_rejects_garbage_negative_zero -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: retryinfo_found_among_other_details, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/failure/ -run retryinfo_found_among_other_details -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: retry_hint_order_and_text_forms, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/failure/ -run retry_hint_order_and_text_forms -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: retry_hint_reads_a_retrydelay_in_a_quoted_error_string, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/failure/ -run retry_hint_reads_a_retrydelay_in_a_quoted_error_string -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
+  - { name: subscription_sharing_text_loses_to_a_signal_and_a_typed_code, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/failure/ -run subscription_sharing_text_loses_to_a_signal_and_a_typed_code -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: subscription_sharing_text_is_account_blocked, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/failure/ -run subscription_sharing_text_is_account_blocked -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: subscription_word_alone_is_not_account_blocked, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/failure/ -run subscription_word_alone_is_not_account_blocked -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }
   - { name: account_blocked_is_human_fix_and_known, run: "TMPDIR=/tmp/c5-tmp go test ./internal/runs/failure/ -run account_blocked_is_human_fix_and_known -count=1 -v | grep -E \"^(--- PASS|ok)\" | grep -q PASS", timeoutSec: 1200 }

@@ -65,11 +65,16 @@ GLM peers write all code from step briefs, one commit per step, at most two at a
 
 ## Progress
 
-- Spec written (this commit).
+- Spec written first; the C5a validation contract committed before code.
+- C5a code (RetryInfo/Retry-After hint, usage-429 body, transient bounds, `account_blocked`, no fallback after streamed output, CLI/web/mobile tables, e2e card) written by peers from step briefs, one commit per step, each diff reviewed and cherry-picked by the Lead. The first two C5a Go/web peers ran on the GLM profile and hit its plan window (`plan_window_exhausted`, 5-hour window, reset about 20:24 local); the remaining steps (Go steps 4-6) and the other peers ran on `peer-sonnet` after that logged limit.
+- Reviewer 1 (parsers/classifier) found one P1: the `account_blocked` phrase was checked first in `Classify` and beat a rejected signal and a typed code. Fixed: a rejected signal or a typed code wins, the phrase beats only text classes. Also fixed: an escaped `retryDelay` in a quoted error string, a zero-length delay reported as found, and a cap test that could not fail (now valid JSON with the RetryInfo after 12 KiB of padding).
+- C5b (the refresh path, items 2 and 3) is a separate pull request, sequential, not stacked.
 
 ## Validation
 
-- Pending.
+- Lead mutations on committed code (each fails its named test): M1 RetryInfo ignored (hint and quota body), M2 old 5 s / 5 min bounds, M3 phrase dropped, M4 `account_blocked` out of `IsHumanFix`, M5 streamed-output guard removed; plus the 8 KiB cap raised (cap test) and the precedence guard removed (`..._loses_to_a_signal_and_a_typed_code`).
+- `go test ./internal/runs/... ./internal/quota/... ./internal/inbox/... ./cmd/smind/ ./internal/hygiene/`, web tables (41 tests), mobile table test, e2e `failure-classes` (12 across light and dark), `sh scripts/verify.sh` PASS.
+- Frames: `account_blocked` run error box, light and dark, 1280 (web harness, real daemon socket rewritten as the other classes do): in the PR body.
 
 ## Decisions for the Human
 
