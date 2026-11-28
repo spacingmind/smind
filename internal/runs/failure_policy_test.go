@@ -98,6 +98,66 @@ func TestFinish_NewClassesNeverRetryNeverCooldownNeverFailover(t *testing.T) {
 	}
 }
 
+// TestFinish_CodexSpendLimitsFailOverLikeUsageLimit: the three Codex
+// spend-limit names (rust-v0.172.0) take the usageLimitExceeded path end to
+// end: a fallback-profile run classifies as a plan window and starts the
+// fallback successor; a wait-profile run enqueues nothing, because a spend
+// limit carries no reset time and the daemon never guesses one.
+func TestFinish_CodexSpendLimitsFailOverLikeUsageLimit(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"apiKeySpendLimitExceeded", "projectSpendLimitExceeded", "organizationSpendLimitExceeded"} {
+		t.Run(name, func(t *testing.T) {
+			e := newFallbackEnv(t, "")
+			fbMain, _ := fallbackProfiles(t, e.st)
+			r := e.failedRun(t, "sl-fallback", failedOpts{profileID: fbMain})
+			e.reg.finish(r, &codex.TurnError{Info: name, Message: "spend limit reached"})
+			if st := r.statusLocked(); st.FailureKind != failure.KindPlanWindowExhausted {
+				t.Fatalf("status kind = %q, want %q", st.FailureKind, failure.KindPlanWindowExhausted)
+			}
+			successorRow(t, e, "sl-fallback")
+			if n := len(extraChats(t, e, r.taskID)); n != 1 {
+				t.Fatalf("fallback chats = %d, want 1", n)
+			}
+
+			// A wait profile: no reset rode along, so nothing is queued.
+			wait := profileWith(t, e.st, "wait")
+			r2 := e.failedRun(t, "sl-wait", failedOpts{profileID: wait})
+			e.reg.finish(r2, &codex.TurnError{Info: name, Message: "spend limit reached"})
+			if n := len(retryItems(t, e.st, r2.chatID)); n != 0 {
+				t.Fatalf("wait retry items = %d, want 0", n)
+			}
+		})
+	}
+}
+
+// TestFinish_CodexPolicyRefusalsAreUnclassifiedAndNeverActed:
+// inferenceHookDenied and bioPolicy are deliberately unmapped (D2): no
+// failure kind, no fallback successor, no retry item, no cooldown; the
+// provider's own error text is what the run shows.
+func TestFinish_CodexPolicyRefusalsAreUnclassifiedAndNeverActed(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"inferenceHookDenied", "bioPolicy"} {
+		t.Run(name, func(t *testing.T) {
+			e := newFallbackEnv(t, "")
+			fbMain, _ := fallbackProfiles(t, e.st)
+			r := e.failedRun(t, "pr-fallback", failedOpts{profileID: fbMain})
+			e.reg.finish(r, &codex.TurnError{Info: name, Message: "request blocked by policy"})
+			if st := r.statusLocked(); st.FailureKind != "" {
+				t.Fatalf("status kind = %q, want none", st.FailureKind)
+			}
+			if n := len(extraChats(t, e, r.taskID)); n != 0 {
+				t.Fatalf("fallback chats = %d, want 0", n)
+			}
+			if n := len(retryItems(t, e.st, r.chatID)); n != 0 {
+				t.Fatalf("retry items = %d, want 0", n)
+			}
+			if _, ok, _ := e.st.GetProviderCooldown("glm", time.Now()); ok {
+				t.Fatal("provider cooldown set")
+			}
+		})
+	}
+}
+
 // TestFinish_NewClassesAreNotSessionResumable: a chat that does have a stored
 // session never offers a continue for the three human-action classes -- a
 // plain "continue" on the same session cannot fix them.

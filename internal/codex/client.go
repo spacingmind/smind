@@ -113,8 +113,10 @@ type turnStartParams struct {
 type turnError struct {
 	Message string `json:"message"`
 	// CodexErrorInfo is the app-server's typed error class: a bare string
-	// ("usageLimitExceeded", "unauthorized", "serverOverloaded", ...) or an
-	// object with one key ({"httpConnectionFailed": {"httpStatusCode": 503}}).
+	// ("usageLimitExceeded", "apiKeySpendLimitExceeded",
+	// "projectSpendLimitExceeded", "organizationSpendLimitExceeded",
+	// "unauthorized", "serverOverloaded", ...) or an object with one key
+	// ({"httpConnectionFailed": {"httpStatusCode": 503}}).
 	CodexErrorInfo json.RawMessage `json:"codexErrorInfo"`
 }
 
