@@ -107,7 +107,8 @@ describe("AutomationsPage", () => {
   it("ListRowsAndStatus: a budget-blocked row says the last run reached its budget; a globally paused daemon says so", async () => {
     await renderPage(daemonWith([automation({ budgetBlocked: true })], { paused: true }));
     expect(screen.getByTestId("automation-capped-1")).toHaveTextContent("capped: last run reached its budget");
-    expect(screen.getByTestId("automations-paused")).toHaveTextContent("automations.paused");
+    expect(screen.getByTestId("automations-paused")).toHaveTextContent("Signals are recorded but nothing fires.");
+    expect(screen.getByTestId("automations-paused")).not.toHaveTextContent("config.yaml");
   });
 
   it("PausedRowShowsReasonAndResume: the reason is visible with a Resume button that calls automation.resume", async () => {

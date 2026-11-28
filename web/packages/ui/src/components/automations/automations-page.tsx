@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 
 import { AutomationHistoryDialog } from "@/components/settings/automation-history";
 import { AutomationFormDialog } from "@/components/settings/automation-form";
+import { ConfigSwitchRow } from "@/components/settings/config-switch-row";
 import { SettingsEmptyCard } from "@/components/settings/settings-layout";
 import { AutomationsOffCard } from "@/components/automations/automations-off-card";
 import { DesktopWindowControls } from "@/components/desktop-window-controls";
@@ -12,6 +13,7 @@ import { FormError } from "@/components/ui/form-error";
 import { LoadingRows } from "@/components/ui/loading-rows";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useAutomationActions, useAutomations } from "@/hooks/use-automations";
+import { useConfigSet, useConfigWritable } from "@/hooks/use-config";
 import { useConfirmAction } from "@/hooks/use-confirm-action";
 import { useLastDefined } from "@/hooks/use-last-defined";
 import { usePageLeftInset } from "@/hooks/use-page-chrome";
@@ -37,7 +39,7 @@ function messageOf(err: unknown): string {
 /**
  * The Automations page (ADR-0044, AC20): rules that start a task from a signal (a cron schedule, a failed GitHub
  * workflow run). A full-screen view like Settings and the inbox, not a Settings section. The daemon switches
- * (`automations.enabled` / `paused`) are file edits only: this page shows their state and has no control for them.
+ * (`automations.enabled` / `paused`) are config.set switches (ADR-0062): the off card and the paused alert hold them, the header has Pause.
  * Every mutation except Disable is human + local only and may answer `forbidden` (a relay session, or a remote login
  * with automations.allowRemoteManage off); the page then goes read-only with the daemon's message, and Disable stays
  * available (a brake, never an accelerator). Live through `automation.fired/paused/updated` (the event bridge
@@ -78,6 +80,19 @@ export function AutomationsPage({ onNavigateBack, closeSettings }: { onNavigateB
       setRowError({ id: a.id, message: fail(err) });
     } finally {
       setBusy(null);
+    }
+  }
+
+  const canSwitchPause = useConfigWritable("automations.paused");
+  const configSet = useConfigSet();
+  const [pauseError, setPauseError] = useState<string | null>(null);
+  /** The brake needs no confirm: one config.set, a failure shown as the daemon's sentence. */
+  async function pauseEngine() {
+    setPauseError(null);
+    try {
+      await configSet.mutateAsync({ key: "automations.paused", value: true });
+    } catch (err) {
+      setPauseError(messageOf(err));
     }
   }
 
@@ -128,7 +143,14 @@ export function AutomationsPage({ onNavigateBack, closeSettings }: { onNavigateB
           <Icons.back className="size-4" />
         </Button>
         <h1 className="truncate text-ui-base font-medium">Automations</h1>
-        <div className="ml-auto">{newButton}</div>
+        <div className="ml-auto flex items-center gap-2">
+          {listing?.enabled && !listing.paused && canSwitchPause && (
+            <Button type="button" variant="ghost" size="sm" data-testid="automations-pause" disabled={configSet.isPending} onClick={() => void pauseEngine()}>
+              Pause
+            </Button>
+          )}
+          {newButton}
+        </div>
         <DesktopWindowControls />
       </header>
       <main className="min-h-0 flex-1 overflow-y-auto" data-testid="automations-content">
@@ -141,12 +163,18 @@ export function AutomationsPage({ onNavigateBack, closeSettings }: { onNavigateB
               title="Automations are paused"
               description={
                 <>
-                  Signals are recorded but nothing fires. Set <code className="font-mono text-ui-sm">automations.paused: false</code> in config.yaml on the computer to
-                  resume.
+                  Signals are recorded but nothing fires.
+                  <ConfigSwitchRow
+                    configKey="automations.paused"
+                    label="Pause automations"
+                    description="Switch off to resume; the engine asks first."
+                    testId="config-automations-paused"
+                  />
                 </>
               }
             />
           )}
+          {pauseError && <Alert variant="error" testId="automations-pause-error" description={pauseError} />}
           {readOnlyReason && (
             <Alert variant="info" testId="automations-read-only" title="Automations can't be managed from this connection" description={readOnlyReason} />
           )}

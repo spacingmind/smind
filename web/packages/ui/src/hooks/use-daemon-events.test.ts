@@ -81,6 +81,7 @@ describe("useDaemonEvents", () => {
         "inbox.changed",
         "steward.updated",
         "fleet.hosts.changed",
+        "config.updated",
       ],
     });
 

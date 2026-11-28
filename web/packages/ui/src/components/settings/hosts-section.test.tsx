@@ -1,11 +1,19 @@
 import { act } from "react";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/hosts-section";
 import { FleetDaemon, fleetHost } from "@/test/fleet-fixtures";
 import { renderWithDaemon } from "@/test/render-with-daemon";
+
+let desktopFlag = false;
+vi.mock("@/lib/platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/platform")>()),
+  get isDesktop() {
+    return desktopFlag;
+  },
+}));
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -39,7 +47,130 @@ function allText(): string {
     .join("\n");
 }
 
+/** Answers config.get with fleet.enabled = `on` on top of the fleet daemon's own methods. */
+function withFleetConfig(d: FleetDaemon, on: boolean): FleetDaemon {
+  const holder = d.client as unknown as { call: (m: string, p?: unknown) => Promise<unknown> };
+  const inner = holder.call.bind(holder);
+  holder.call = async (method, params) => {
+    if (method === "config.get") {
+      return {
+        keys: [{ key: "fleet.enabled", value: on ? "true" : "false", default: "false", source: "file", restart: true, writable: true }],
+      };
+    }
+    return inner(method, params);
+  };
+  return d;
+}
+
 describe("settings-hosts section", () => {
+  it("hosts_fleet_switch_is_a_normal_card_at_the_top", async () => {
+    for (const mode of ["off", "empty", "list"] as const) {
+      const d = withFleetConfig(new FleetDaemon(), mode !== "off");
+      d.off = mode === "off";
+      d.hosts = mode === "list" ? [fleetHost()] : [];
+      const view = await renderSection(d);
+      const sw = await screen.findByTestId("config-fleet-enabled-switch");
+      expect(screen.queryByTestId("hosts-off")).toBeNull();
+      expect(sw.closest('[data-testid="hosts-empty"]')).toBeNull();
+      const after = screen.queryByTestId("hosts-empty") ?? screen.queryByTestId("hosts-list");
+      if (mode === "off") expect(after).toBeNull();
+      else expect(sw.compareDocumentPosition(after!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  it("hosts_state_line_off", async () => {
+    const d = withFleetConfig(new FleetDaemon(), false);
+    d.off = true;
+    await renderSection(d);
+    expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet is off.");
+  });
+
+  it("hosts_state_line_pending_restart_after_turning_on", async () => {
+    const d = withFleetConfig(new FleetDaemon(), true);
+    d.off = true;
+    await renderSection(d);
+    expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet turns on after the daemon restarts.");
+    expect(allText()).not.toContain("Fleet is off");
+  });
+
+  it("hosts_state_line_pending_restart_after_turning_off", async () => {
+    const d = withFleetConfig(new FleetDaemon(), false);
+    d.hosts = [fleetHost()];
+    await renderSection(d);
+    expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet turns off after the daemon restarts.");
+  });
+
+  it("hosts_pending_restart_is_said_once_not_twice", async () => {
+    try {
+      desktopFlag = true;
+      const d = withFleetConfig(new FleetDaemon(), true);
+      d.off = true;
+      await renderSection(d);
+      await screen.findByTestId("hosts-fleet-state");
+      // The state line is the one place that says what a restart changes: the switch row adds neither its own
+      // restart line nor a second link (frame review of the real window showed both, twice).
+      expect(screen.queryByTestId("config-fleet-enabled-restart")).toBeNull();
+      expect(screen.getAllByRole("button", { name: /Open Daemon settings/ })).toHaveLength(1);
+    } finally {
+      desktopFlag = false;
+    }
+  });
+
+  it("hosts_pending_restart_offers_open_daemon_settings_on_desktop_only", async () => {
+    try {
+      desktopFlag = true;
+      const d = withFleetConfig(new FleetDaemon(), true);
+      d.off = true;
+      const v = await renderSection(d);
+      const line = await screen.findByTestId("hosts-fleet-state");
+      const btn = screen.getByTestId("hosts-open-daemon");
+      expect(line.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      const seen = vi.fn();
+      window.addEventListener("smind:open-settings", seen);
+      fireEvent.click(btn);
+      window.removeEventListener("smind:open-settings", seen);
+      expect((seen.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "daemon" });
+      v.unmount();
+
+      desktopFlag = false;
+      const d2 = withFleetConfig(new FleetDaemon(), true);
+      d2.off = true;
+      await renderSection(d2);
+      await screen.findByTestId("hosts-fleet-state");
+      expect(screen.queryByTestId("hosts-open-daemon")).toBeNull();
+    } finally {
+      desktopFlag = false;
+    }
+  });
+
+  it("hosts_state_line_running", async () => {
+    const d = withFleetConfig(new FleetDaemon(), true);
+    d.hosts = [fleetHost()];
+    await renderSection(d);
+    expect(await screen.findByTestId("hosts-fleet-state")).toHaveTextContent("Fleet is running.");
+  });
+
+  it("hosts_empty_card_only_when_running_with_no_hosts", async () => {
+    const off = withFleetConfig(new FleetDaemon(), false);
+    off.off = true;
+    const v1 = await renderSection(off);
+    await screen.findByTestId("hosts-fleet-state");
+    expect(screen.queryByTestId("hosts-empty")).toBeNull();
+    v1.unmount();
+
+    const pending = withFleetConfig(new FleetDaemon(), true);
+    pending.off = true;
+    const v2 = await renderSection(pending);
+    await screen.findByTestId("hosts-fleet-state");
+    expect(screen.queryByTestId("hosts-empty")).toBeNull();
+    v2.unmount();
+
+    const running = withFleetConfig(new FleetDaemon(), true);
+    await renderSection(running);
+    expect(await screen.findByTestId("hosts-empty")).toBeInTheDocument();
+  });
+
   it("ui_cleanup_b2_hosts_row_is_responsive", async () => {
     const d = new FleetDaemon();
     d.hosts = [fleetHost()];
@@ -113,9 +244,8 @@ describe("settings-hosts section", () => {
     d.off = true;
     await renderSection(d);
 
-    const off = screen.getByTestId("hosts-off");
-    expect(off).toHaveTextContent("Fleet is off");
-    expect(off).toHaveTextContent("fleet.enabled: true");
+    expect(screen.queryByTestId("hosts-off")).toBeNull();
+    expect(screen.getByTestId("settings-section-hosts")).not.toHaveTextContent("config.yaml");
     // no rows, so none of the row actions exist in any form
     expect(document.querySelectorAll('[data-testid^="host-row-"]')).toHaveLength(0);
     expect(screen.queryByRole("button", { name: "Revoke" })).toBeNull();

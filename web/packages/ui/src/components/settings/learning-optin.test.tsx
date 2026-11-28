@@ -46,21 +46,15 @@ describe("learning opt-in", () => {
     expect(d.countCalls("learning.status")).toBe(2);
   });
 
-  it("shows the read-only kill-switch notice and disables the control when learning is globally off", async () => {
+  it("disables the control when learning is globally off", async () => {
     const d = setup({ ...STATUS, enabled: false });
     await flush();
-    expect(screen.getByTestId("learning-kill-switch")).toBeTruthy();
+    expect(screen.queryByTestId("learning-kill-switch")).toBeNull();
     const propose = screen.getByRole("radio", { name: "Propose" });
     expect(propose.hasAttribute("disabled") || propose.getAttribute("data-disabled") !== null).toBe(true);
     fireEvent.click(propose);
     await flush();
     expect(d.countCalls("learning.setMode")).toBe(0);
-  });
-
-  it("no notice while learning is enabled", async () => {
-    setup();
-    await flush();
-    expect(screen.queryByTestId("learning-kill-switch")).toBeNull();
   });
 
   it("switching workspace shows that workspace's mode and targets it", async () => {

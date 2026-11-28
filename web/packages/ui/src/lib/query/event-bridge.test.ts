@@ -266,4 +266,11 @@ describe("applyDaemonEvent", () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.pluginPanels() });
     });
   });
+
+  it("config.updated re-reads config.get", () => {
+    const queryClient = createQueryClient();
+    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    applyDaemonEvent(queryClient, "config.updated", { key: "plugins.enabled" });
+    expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.configGet() });
+  });
 });
