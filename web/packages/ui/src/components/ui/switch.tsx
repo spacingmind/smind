@@ -48,6 +48,16 @@ function Switch({
     const el = inputRef.current
     if (!el) return
     el.setAttribute("data-slot", "switch") // the role=switch element, as with Radix
+    // Astryx's sm switch is 32x20; the previous look was a 36x20 track (16px thumb), primary
+    // when on and input-border when off. Utilities win over Astryx's layers, so the look
+    // holds whatever order they load in (the hidden native input must also stay invisible).
+    el.classList.add("w-9", "h-5", "opacity-0")
+    const track = el.nextElementSibling as HTMLElement | null
+    if (track) {
+      track.classList.add("w-9", "h-5", "p-0.5", "transition-colors")
+      track.classList.toggle("bg-primary", on)
+      track.classList.toggle("bg-input-border", !on)
+    }
     el.setAttribute("aria-checked", String(on))
     el.setAttribute("data-state", on ? "checked" : "unchecked")
     // Astryx disables with aria-disabled only; mirror Radix's native attribute.
@@ -75,6 +85,7 @@ function Switch({
       data-state={on ? "checked" : "unchecked"}
       label={"\u00a0"} // empty label: its text would duplicate the visible one; aria-label is forwarded to the input
       isLabelHidden
+      size="sm"
       aria-labelledby={ariaLabelledBy}
       value={on}
       isDisabled={disabled}
