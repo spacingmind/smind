@@ -3,6 +3,7 @@ package gitsafe
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,24 +27,23 @@ const (
 	sshTimeout = 10 * time.Second
 )
 
-// runGit runs `git argv...` in repo.Dir with env, feeding it stdin when
-// non-empty, and returns the combined output. The run's error is
-// deliberately dropped: git failing is fine in both modes (a neutralised
+// runGit runs `git argv...` in dir with env, feeding it stdin when
+// non-empty, and returns stdout. The run's error is deliberately dropped
+// (stderr with it): git failing is fine in both modes (a neutralised
 // merge conflicts, an armed program fails) — repo.Markers() is the
 // verdict, not git's exit status.
-func runGit(t *testing.T, repo *gitsafetest.StrippedRepo, timeout time.Duration, stdin string, argv []string, env []string) string {
+func runGit(t *testing.T, dir string, timeout time.Duration, stdin string, argv []string, env []string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", argv...)
-	cmd.Dir = repo.Dir
+	cmd.Dir = dir
 	cmd.Env = env
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	cmd.Stderr = &out
 	_ = cmd.Run()
 	return out.String()
 }
@@ -63,7 +63,7 @@ func runDaemonFor(t *testing.T, repo *gitsafetest.StrippedRepo, timeout time.Dur
 	if err != nil {
 		t.Fatalf("StrippedArgs(%q): %v", args, err)
 	}
-	return runGit(t, repo, timeout, stdin, argv, StrippedEnv(nil))
+	return runGit(t, repo.Dir, timeout, stdin, argv, StrippedEnv(nil))
 }
 
 // runHuman builds the human-mode argv (the baseline Args) and runs it
@@ -75,7 +75,18 @@ func runHuman(t *testing.T, repo *gitsafetest.StrippedRepo, args ...string) stri
 // runHumanFor is runHuman with an explicit timeout and stdin bytes.
 func runHumanFor(t *testing.T, repo *gitsafetest.StrippedRepo, timeout time.Duration, stdin string, args ...string) string {
 	t.Helper()
-	return runGit(t, repo, timeout, stdin, Args(args...), Env(nil))
+	return runGit(t, repo.Dir, timeout, stdin, Args(args...), Env(nil))
+}
+
+// runDaemonIn is runDaemon for a plain repository directory: the eol
+// attributes test runs against a fresh repository, not the armed fixture.
+func runDaemonIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	argv, err := StrippedArgs(context.Background(), dir, args...)
+	if err != nil {
+		t.Fatalf("StrippedArgs(%q): %v", args, err)
+	}
+	return runGit(t, dir, gitTimeout, "", argv, StrippedEnv(nil))
 }
 
 // modeRuns bundles the two runner shapes one mode provides, so the two
@@ -192,5 +203,108 @@ func Test_real_git_human_mode_runs_the_armed_programs(t *testing.T) {
 		if !seen[want] {
 			t.Errorf("human mode never ran %s", want)
 		}
+	}
+}
+
+// Test_real_git_daemon_mode_keeps_a_global_filter is AC3: only the
+// repository-controlled configuration is neutralised. A filter and a
+// credential helper defined in the person's global configuration keep
+// running in daemon mode, and the repository's own helper does not.
+func Test_real_git_daemon_mode_keeps_a_global_filter(t *testing.T) {
+	repo := gitsafetest.NewStrippedRepo(t)
+
+	// The person's global configuration: a filter for *.glb and a
+	// credential helper, each a script that touches its own marker.
+	script := func(path, body string) {
+		if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	glob := filepath.Join(repo.MarkerDir, "glob.sh")
+	gcred := filepath.Join(repo.MarkerDir, "gcred.sh")
+	script(glob, fmt.Sprintf("#!/bin/sh\ntouch %q\ncat\n", filepath.Join(repo.MarkerDir, "glob.ran")))
+	script(gcred, fmt.Sprintf("#!/bin/sh\ntouch %q\nexit 0\n", filepath.Join(repo.MarkerDir, "gcred.ran")))
+	global := fmt.Sprintf("[filter \"glob\"]\n\tclean = %s\n[credential]\n\thelper = %s\n", glob, gcred)
+	f, err := os.OpenFile(repo.Global, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open %s: %v", repo.Global, err)
+	}
+	if _, err := f.WriteString(global); err != nil {
+		t.Fatalf("append %s: %v", repo.Global, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close %s: %v", repo.Global, err)
+	}
+
+	// The *.glb attribute comes from the repository, the filter it names
+	// from the person's own configuration.
+	attrs := filepath.Join(repo.Dir, ".git", "info", "attributes")
+	f, err = os.OpenFile(attrs, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("open %s: %v", attrs, err)
+	}
+	if _, err := f.WriteString("*.glb filter=glob\n"); err != nil {
+		t.Fatalf("append %s: %v", attrs, err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close %s: %v", attrs, err)
+	}
+
+	// a.glb, added in daemon mode, runs the person's global clean filter.
+	if err := os.WriteFile(filepath.Join(repo.Dir, "a.glb"), []byte("glb\n"), 0o644); err != nil {
+		t.Fatalf("write a.glb: %v", err)
+	}
+	runDaemon(t, repo, "add", "a.glb")
+	if _, err := os.Stat(filepath.Join(repo.MarkerDir, "glob.ran")); err != nil {
+		t.Fatalf("the global filter did not run in daemon mode: %v", err)
+	}
+
+	// A daemon-mode credential fill runs the global helper only: the
+	// repository's own helper is reset away, the person's is re-added.
+	repo.ClearMarkers()
+	runDaemonFor(t, repo, gitTimeout, "protocol=https\nhost=example.com\n\n", "credential", "fill")
+	if _, err := os.Stat(filepath.Join(repo.MarkerDir, "gcred.ran")); err != nil {
+		t.Fatalf("the global credential helper did not run in daemon mode: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo.MarkerDir, "cred.ran")); err == nil {
+		t.Fatal("the repository's credential helper ran in daemon mode")
+	}
+}
+
+// Test_real_git_eol_attributes_do_not_show_spurious_changes is AC5: the
+// stripped mode must not drop the repository's attributes — the reason a
+// blanket --attr-source was rejected. A file the `text eol=crlf` attribute
+// governs, committed through the same conversion, shows no change in
+// daemon mode: git still converts it exactly the way it was committed.
+func Test_real_git_eol_attributes_do_not_show_spurious_changes(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	dir := t.TempDir()
+	plain := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	plain("init", "-b", "main")
+	plain("config", "user.name", "smind-test")
+	plain("config", "user.email", "smind-test@example.com")
+	writeFile := func(name string, content []byte) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	writeFile(".gitattributes", []byte("* text eol=crlf\n"))
+	// The working-tree copy carries CRLF; committing through plain git
+	// runs the clean conversion, so the index holds LF.
+	writeFile("crlf.txt", []byte("one\r\ntwo\r\n"))
+	plain("add", "-A")
+	plain("commit", "-m", "init")
+
+	if got := runDaemonIn(t, dir, "status", "--porcelain"); got != "" {
+		t.Fatalf("daemon-mode status --porcelain printed %q, want nothing: the eol attribute must still apply", got)
 	}
 }
