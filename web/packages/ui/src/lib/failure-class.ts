@@ -29,9 +29,10 @@ export const TRANSIENT_429 = "transient_429";
 export const CONTEXT_WINDOW_EXCEEDED = "context_window_exceeded";
 export const SESSION_BUDGET_EXCEEDED = "session_budget_exceeded";
 export const TOO_MANY_DENIALS = "too_many_denials";
+export const ACCOUNT_BLOCKED = "account_blocked";
 
-/** The human-action classes (R3a): a person must start a fresh chat, raise the provider's session budget or review the permission policy; never retried, never failed over. */
-export const HUMAN_ACTION_KINDS = new Set([CONTEXT_WINDOW_EXCEEDED, SESSION_BUDGET_EXCEEDED, TOO_MANY_DENIALS]);
+/** The human-action classes (R3a): a person must start a fresh chat, raise the provider's session budget, review the permission policy or check a blocked account; never retried, never failed over. */
+export const HUMAN_ACTION_KINDS = new Set([CONTEXT_WINDOW_EXCEEDED, SESSION_BUDGET_EXCEEDED, TOO_MANY_DENIALS, ACCOUNT_BLOCKED]);
 
 const ACTIONABLE = new Set([
   AUTH_EXPIRED,
@@ -42,6 +43,7 @@ const ACTIONABLE = new Set([
   CONTEXT_WINDOW_EXCEEDED,
   SESSION_BUDGET_EXCEEDED,
   TOO_MANY_DENIALS,
+  ACCOUNT_BLOCKED,
 ]);
 
 /** True for a class that has a next action to show (cli_exited keeps the footer's Continue). */
@@ -157,6 +159,9 @@ export function describeFailureCard(
       return { tone: "danger", message: failureSentence(SESSION_BUDGET_EXCEEDED, action), hint: action?.label ?? null, countdown: null, control: null, controlLabel: null };
     case TOO_MANY_DENIALS:
       return { tone: "danger", message: failureSentence(TOO_MANY_DENIALS, action), hint: null, countdown: null, control: "review_policy", controlLabel: "Review the permission policy" };
+    case ACCOUNT_BLOCKED:
+      // No control: the action's switch_profile offers the fallback profile through the picker, so the label is the hint.
+      return { tone: "danger", message: failureSentence(ACCOUNT_BLOCKED, action), hint: action?.label ?? null, countdown: null, control: null, controlLabel: null };
     case "cli_exited":
       return { tone: "warning", message: failureSentence("cli_exited", action), hint: null, countdown: null, control: null, controlLabel: null };
   }
