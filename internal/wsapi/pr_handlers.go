@@ -342,6 +342,7 @@ func (h *prHost) create(ctx context.Context, rc *requestContext, raw json.RawMes
 	if err := refuseRunScoped("task.createPr", rc); err != nil {
 		return nil, err
 	}
+	ctx = humanContext(ctx, rc)
 	var p struct {
 		TaskID     int64  `json:"taskId"`
 		BaseBranch string `json:"baseBranch"`
@@ -429,6 +430,7 @@ func (h *prHost) update(ctx context.Context, rc *requestContext, raw json.RawMes
 	if err := refuseRunScoped("task.updatePr", rc); err != nil {
 		return nil, err
 	}
+	ctx = humanContext(ctx, rc)
 	var p struct {
 		TaskID int64 `json:"taskId"`
 	}

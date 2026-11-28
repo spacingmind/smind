@@ -1022,7 +1022,8 @@ func handleTaskSearchIndex(wm *workspace.Manager) handlerFunc {
 // real index -- unlike task.diff's throwaway snapshot index, a real
 // mutation, which is the point (see ADR 0006 decision 1).
 func handleTaskStage(wm *workspace.Manager) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		ctx = humanContext(ctx, rc)
 		var p struct {
 			TaskID int64  `json:"taskId"`
 			Path   string `json:"path"`
@@ -1034,7 +1035,7 @@ func handleTaskStage(wm *workspace.Manager) handlerFunc {
 		if p.Path == "" {
 			return nil, fmt.Errorf("task.stage: path is required")
 		}
-		if err := wm.TaskStage(p.TaskID, p.Path, p.Staged); err != nil {
+		if err := wm.TaskStageAs(ctx, p.TaskID, p.Path, p.Staged); err != nil {
 			return nil, fmt.Errorf("task.stage: %w", err)
 		}
 		return struct{}{}, nil
@@ -1055,7 +1056,8 @@ type taskCommitResult struct {
 // non-empty agent (provider) name. Nothing staged surfaces as the clean
 // "nothing staged to commit" error rather than a git stderr leak.
 func handleTaskCommit(wm *workspace.Manager) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		ctx = humanContext(ctx, rc)
 		var p struct {
 			TaskID  int64  `json:"taskId"`
 			Message string `json:"message"`
@@ -1065,7 +1067,7 @@ func handleTaskCommit(wm *workspace.Manager) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.commit: invalid params: %w", err)
 		}
-		result, err := wm.CommitTask(p.TaskID, p.Message, p.Author, p.Agent)
+		result, err := wm.CommitTaskAs(ctx, p.TaskID, p.Message, p.Author, p.Agent)
 		if err != nil {
 			return nil, fmt.Errorf("task.commit: %w", err)
 		}
