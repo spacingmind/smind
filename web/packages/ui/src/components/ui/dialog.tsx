@@ -202,14 +202,17 @@ function DialogContent({
       {...(rest as object)}
       ref={setRef}
       isOpen={open}
+      padding={0} // our DialogHeader/Body/Footer wrapper carries p-6, as before
       onOpenChange={(next) => setOpen(next)}
       data-slot="dialog-content"
       role="dialog" // explicit, as Radix had it (a native <dialog> only has the implicit role)
       // Positioning, animation and focus handling now belong to Astryx; the
       // surface keeps our radius and grid so child layout is unchanged.
-      className={cn("w-full max-w-[calc(100%-2rem)] rounded-2xl sm:max-w-lg", className)}
+      // m-auto: the Tailwind preflight `* { margin: 0 }` outranks Astryx's margin:auto
+      // when the cascade layers are mis-ordered; the utility centers it either way.
+      className={cn("m-auto w-full max-w-[calc(100%-2rem)] rounded-2xl sm:max-w-lg", className)}
     >
-      <div className={cn("grid gap-4", childLayoutClasses(className))}>{children}</div>
+      <div className={cn("grid gap-4 p-6", childLayoutClasses(className))}>{children}</div>
       {showCloseButton && (
         <SheetPrimitive.Close
           data-slot="dialog-close"
