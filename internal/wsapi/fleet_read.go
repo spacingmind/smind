@@ -14,6 +14,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/fleet/serve"
 	"github.com/spacingmind/smind/internal/fleet/wire"
+	"github.com/spacingmind/smind/internal/gitsafe"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -96,7 +97,9 @@ func (s *fleetSource) ListWorkspaces() ([]serve.WorkspaceInfo, error) {
 func fleetOriginURL(path string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), gitRemoteTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "git", "-c", "core.fsmonitor=false", "-C", path, "remote", "get-url", "--", "origin").Output()
+	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("-c", "core.fsmonitor=false", "-C", path, "remote", "get-url", "--", "origin")...)
+	cmd.Env = gitsafe.Env(nil)
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

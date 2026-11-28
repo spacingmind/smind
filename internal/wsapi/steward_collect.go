@@ -13,6 +13,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/forge"
+	"github.com/spacingmind/smind/internal/gitsafe"
 	"github.com/spacingmind/smind/internal/gitstate"
 	"github.com/spacingmind/smind/internal/qaframes"
 	"github.com/spacingmind/smind/internal/runs"
@@ -154,8 +155,10 @@ func gitRefResolves(ctx context.Context, dir, ref string) bool {
 	}
 	ctx, cancel := context.WithTimeout(ctx, stewardRefTimeout)
 	defer cancel()
-	return exec.CommandContext(ctx, "git", "--no-optional-locks", "-C", dir,
-		"rev-parse", "--verify", "--quiet", ref+"^{commit}").Run() == nil
+	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("--no-optional-locks", "-C", dir,
+		"rev-parse", "--verify", "--quiet", ref+"^{commit}")...)
+	cmd.Env = gitsafe.Env(nil)
+	return cmd.Run() == nil
 }
 
 // safeStewardRef reports whether ref can be passed to git as a revision: not
