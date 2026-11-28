@@ -297,6 +297,14 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		enqueue(row)
 		writeProviderError(w, provider, status, err.Error())
 	}
+	reloginError := func(err error) {
+		row.Status = http.StatusUnauthorized
+		row.Outcome = store.RequestLogOutcomeRouteError
+		row.Error = truncatedError(err)
+		row.DurationMs = time.Since(start).Milliseconds()
+		enqueue(row)
+		writeProviderAuthError(w, provider, http.StatusUnauthorized, loginExpiredMessage)
+	}
 
 	forwardBody, contentLength, meta, metaOK, prefix := readRequestBody(r, provider)
 	model := meta.Model
@@ -329,6 +337,19 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		routeError(http.StatusServiceUnavailable, fmt.Errorf("no %s accounts configured", provider))
 		return
 	}
+	// An account whose refresh token the provider refused for good cannot
+	// serve anything: leave it out so the router never picks it.
+	live := make([]accounts.Account, 0, len(providerAccounts))
+	for _, a := range providerAccounts {
+		if !p.registry.NeedsRelogin(a.ID) {
+			live = append(live, a)
+		}
+	}
+	if len(live) == 0 {
+		reloginError(accounts.ErrNeedsRelogin)
+		return
+	}
+	providerAccounts = live
 	// When the model couldn't be determined (body over requestBodyParseCap
 	// or not parseable JSON, and not recoverable from the buffered prefix
 	// either), fail closed per ADR-0020 §5(b): only accounts with no model
@@ -376,6 +397,10 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 	forwardHeaders(outReq.Header, r.Header)
 
 	if err := p.injectCredentials(ctx, provider, account, refresher, outReq, r); err != nil {
+		if errors.Is(err, accounts.ErrNeedsRelogin) {
+			reloginError(err)
+			return
+		}
 		routeError(http.StatusServiceUnavailable, fmt.Errorf("credential refresh: %w", err))
 		return
 	}
@@ -792,6 +817,33 @@ func writeProviderError(w http.ResponseWriter, provider string, status int, mess
 				"message": message,
 				"type":    "overloaded_error",
 				"code":    nil,
+			},
+		})
+	}
+}
+
+// loginExpiredMessage is what a client sees when every account that could
+// serve its request needs to be signed in to again.
+const loginExpiredMessage = "This account's login has expired. Sign in to it again in sMind."
+
+// writeProviderAuthError writes an authentication error shaped like the given
+// provider's own, so a client's run classifier sees authentication_error.
+func writeProviderAuthError(w http.ResponseWriter, provider string, status int, message string) {
+	switch provider {
+	case providerAnthropic:
+		writeJSON(w, status, map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "authentication_error",
+				"message": message,
+			},
+		})
+	case providerOpenAI:
+		writeJSON(w, status, map[string]any{
+			"error": map[string]any{
+				"message": "401 Unauthorized: " + message,
+				"type":    "invalid_request_error",
+				"code":    "invalid_api_key",
 			},
 		})
 	}
