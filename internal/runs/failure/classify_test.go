@@ -522,3 +522,26 @@ func TestAllKinds_AreKnown(t *testing.T) {
 		seen[k] = true
 	}
 }
+
+func Test_retry_hint_order_and_text_forms(t *testing.T) {
+	cases := []struct {
+		name string
+		in   Input
+		want time.Duration
+	}{
+		{"field wins over text", Input{RetryAfter: 7 * time.Second, Err: "retry-after: 45 try again in 3 minutes"}, 7 * time.Second},
+		{"retry-after text", Input{Err: "429 retry-after: 45"}, 45 * time.Second},
+		{"retry-after fraction", Input{Err: "Retry-After=1.5"}, 1500 * time.Millisecond},
+		{"retryDelay in text", Input{Err: `429 {"error":{"details":[{"retryDelay": "12s"}]}}`}, 12 * time.Second},
+		{"try again", Input{Err: "try again in 3 minutes"}, 3 * time.Minute},
+		{"garbage", Input{Err: "boom"}, 0},
+		{"retry-after beats retryDelay", Input{Err: `"retryDelay": "12s" retry-after: 45`}, 45 * time.Second},
+		{"retryDelay beats try again", Input{Err: `try again in 3 minutes "retryDelay": "12s"`}, 12 * time.Second},
+		{"zero retry-after falls through", Input{Err: `retry-after: 0 try again in 2 seconds`}, 2 * time.Second},
+	}
+	for _, c := range cases {
+		if got := retryHint(c.in, time.Time{}); got != c.want {
+			t.Errorf("%s: got %v want %v", c.name, got, c.want)
+		}
+	}
+}

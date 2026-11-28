@@ -129,8 +129,9 @@ var (
 	// Sources: refs/codex protocol error.rs ("Selected model is at capacity",
 	// "We're currently experiencing high demand", "rate limit exceeded: ..."),
 	// Anthropic overloaded_error (529).
-	reTransient = regexp.MustCompile(`(?i)overloaded_error|selected model is at capacity|experiencing high demand|rate limit exceeded:|\boverloaded\b`)
-	reTryAgain  = regexp.MustCompile(`(?i)try again in (\d+)\s*(seconds?|secs?|s|minutes?|mins?|m)\b`)
+	reTransient      = regexp.MustCompile(`(?i)overloaded_error|selected model is at capacity|experiencing high demand|rate limit exceeded:|\boverloaded\b`)
+	reRetryAfterText = regexp.MustCompile(`(?i)retry-after[:=]\s*(\d+(?:\.\d+)?)`)
+	reTryAgain       = regexp.MustCompile(`(?i)try again in (\d+)\s*(seconds?|secs?|s|minutes?|mins?|m)\b`)
 )
 
 // Classify classifies a failed run. Unknown never classifies and no time is
@@ -205,10 +206,19 @@ func Classify(in Input, now time.Time) Result {
 }
 
 // retryHint is the provider's wait hint: the backend's Retry-After, else a
+// "retry-after: N" (seconds) or RetryInfo retryDelay in the text, else a
 // "try again in N seconds/minutes" in the text; 0 = none.
 func retryHint(in Input, _ time.Time) time.Duration {
 	if in.RetryAfter > 0 {
 		return in.RetryAfter
+	}
+	if m := reRetryAfterText.FindStringSubmatch(in.Err); m != nil {
+		if f, err := strconv.ParseFloat(m[1], 64); err == nil && f > 0 && f <= 1e9 {
+			return time.Duration(f * float64(time.Second))
+		}
+	}
+	if d, ok := retryInfoFromText(in.Err); ok {
+		return d
 	}
 	if m := reTryAgain.FindStringSubmatch(in.Err); m != nil {
 		n, err := strconv.Atoi(m[1])
