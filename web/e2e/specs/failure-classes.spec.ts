@@ -28,6 +28,10 @@ const CLASSES: Record<string, ClassSpec> = {
     kind: 'too_many_denials',
     action: { kind: 'review_policy', target: 'settings:permission-policy', label: 'Review the permission policy', summary: 'The agent kept asking for actions that were denied, so the provider stopped the run.' },
   },
+  'account-blocked': {
+    kind: 'account_blocked',
+    action: { kind: 'switch_profile', target: 'profile:1', label: 'Switch to the fallback profile', summary: "The provider rejected this account's use under its plan terms." },
+  },
   'cli-exited': {
     kind: 'cli_exited',
     action: { kind: 'continue', label: 'Continue the run', summary: 'The agent stopped before finishing; its session is saved, so you can continue where it left off.' },
@@ -134,6 +138,17 @@ test('F-04 a cli_exited failure reads as a sentence a person can act on', async 
   const page = await openFailedTask(app, testInfo, 'f04', spec)
   await expect(page.getByTestId('run-failure-hint')).toHaveCount(0)
   await frame(page, testInfo, 'd-cli-exited')
+})
+
+test('F-06 an account-blocked failure shows the sentence and the label as its hint, with no control', async ({ app }, testInfo) => {
+  const spec = CLASSES['account-blocked']
+  const page = await openFailedTask(app, testInfo, 'f06', spec)
+  await expect(page.getByTestId('run-failure-hint')).toHaveText(spec.action.label)
+  await expect(page.getByTestId('run-stop-reason').first()).toHaveText('Account blocked by the provider')
+  await expect(page.getByTestId('run-failure-signin')).toHaveCount(0)
+  await expect(page.getByTestId('run-failure-new-chat')).toHaveCount(0)
+  await expect(page.getByTestId('run-failure-review-policy')).toHaveCount(0)
+  await frame(page, testInfo, 'g-account-blocked')
 })
 
 test('F-05 the sidebar shows the failed tasks and each class action label', async ({ app }, testInfo) => {
