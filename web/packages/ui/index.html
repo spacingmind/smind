@@ -34,6 +34,9 @@
           pref === "dark" ||
           (pref !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
         document.documentElement.classList.toggle("dark", dark);
+        // Built Astryx theme (src/theme/theme-attributes.ts): keep in sync by hand.
+        document.documentElement.setAttribute("data-astryx-theme", "smind");
+        document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
       })();
     </script>
   </head>

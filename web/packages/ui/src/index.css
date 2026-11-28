@@ -11,7 +11,7 @@
 @import "tailwindcss/preflight.css" layer(base);
 @import "@astryxdesign/core/reset.css";
 @import "@astryxdesign/core/astryx.css";
-/* sMind theme import goes here (Wave 0 theme step) */
+@import "./theme/smind-theme.css";
 @import "tailwindcss/utilities.css" layer(utilities);
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";

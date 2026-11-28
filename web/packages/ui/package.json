@@ -11,6 +11,7 @@
     "build:demo": "tsc -b && vite build --mode demo && node scripts/check-demo-build.mjs",
     "preview:demo": "vite preview --mode demo",
     "check:demo": "node scripts/check-demo-build.mjs",
+    "build:theme": "node scripts/build-smind-theme.mjs",
     "test:scripts": "node --test scripts/*.test.mjs"
   },
   "dependencies": {
