@@ -147,17 +147,23 @@ func (c *stewardCollector) diffBase(ctx context.Context, dir string, pr *forge.P
 }
 
 // gitRefResolves reports whether ref names a commit in dir, via one
-// read-only git call. An option-shaped or whitespace-bearing ref is refused
-// before it ever reaches git.
+// read-only git call (rev-parse: ref-only, so it carries just the static
+// stripped overrides). An option-shaped or whitespace-bearing ref is refused
+// before it ever reaches git. A stripped-mode failure fails closed: the ref
+// reads as unresolved, never a plain git call.
 func gitRefResolves(ctx context.Context, dir, ref string) bool {
 	if !safeStewardRef(ref) {
 		return false
 	}
 	ctx, cancel := context.WithTimeout(ctx, stewardRefTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args("--no-optional-locks", "-C", dir,
-		"rev-parse", "--verify", "--quiet", ref+"^{commit}")...)
-	cmd.Env = gitsafe.Env(nil)
+	full, err := gitsafe.StrippedArgs(ctx, dir, "--no-optional-locks", "-C", dir,
+		"rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err != nil {
+		return false
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Env = gitsafe.StrippedEnv(nil)
 	return cmd.Run() == nil
 }
 
