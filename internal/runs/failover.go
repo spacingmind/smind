@@ -44,8 +44,10 @@ func (reg *Registry) FallbackProfileFor(profileID int64) int64 {
 var transientRetryBackoffs = []time.Duration{30 * time.Second, 2 * time.Minute}
 
 const (
-	transientRetryAfterMin = 5 * time.Second
-	transientRetryAfterMax = 5 * time.Minute
+	// The provider's own delay, bounded: floor 1 s, cap 1 h; the 30 s / 2 min
+	// steps are for a 429 with no hint.
+	transientRetryAfterMin = 1 * time.Second
+	transientRetryAfterMax = time.Hour
 )
 
 // transientRetryPreface leads the prompt of an automatic transient retry.

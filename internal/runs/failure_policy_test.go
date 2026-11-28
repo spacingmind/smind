@@ -303,9 +303,9 @@ func TestFinish_Transient429RetryRunsAreCounted(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("retry items = %d, want 1", len(items))
 	}
-	// Retry-After wins but is clamped to >= 5s.
-	if d := time.Until(*items[0].NotBefore); d < 3*time.Second || d > 8*time.Second {
-		t.Fatalf("backoff = %v, want the clamped 5s hint", d)
+	// The provider's hint wins, clamped to [1s, 1h].
+	if d := time.Until(*items[0].NotBefore); d < 500*time.Millisecond || d > 3*time.Second {
+		t.Fatalf("backoff = %v, want the 1s hint", d)
 	}
 	if err := (func() error { _, err := e.st.ReleaseHeldRetries("glm", time.Now()); return err })(); err != nil {
 		t.Fatal(err)

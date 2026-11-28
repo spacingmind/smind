@@ -311,3 +311,33 @@ func TestPolicy_QueueFullGivesUp(t *testing.T) {
 		t.Fatalf("retry items = %d, want 0 when the queue is full", n)
 	}
 }
+
+func Test_transient_retry_honours_provider_delay_between_1s_and_1h(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		hint time.Duration
+		want time.Duration
+	}{
+		{"30s", 30 * time.Second, 30 * time.Second},
+		{"20min", 20 * time.Minute, 20 * time.Minute},
+		{"2h capped", 2 * time.Hour, time.Hour},
+		{"200ms floored", 200 * time.Millisecond, time.Second},
+		{"no hint", 0, 30 * time.Second},
+	}
+	for _, c := range cases {
+		e := newQueuedTestEnv(t, "")
+		pid := profileWith(t, e.st, "wait")
+		r := e.failedRun(t, "failed-1", failedOpts{profileID: pid})
+		before := time.Now()
+		e.reg.enqueueTransientRetry(r, failure.Result{Kind: failure.KindTransient429, RetryAfter: c.hint})
+		items := retryItems(t, e.st, r.chatID)
+		if len(items) != 1 || items[0].NotBefore == nil {
+			t.Fatalf("%s: items = %+v, want one with not_before", c.name, items)
+		}
+		got := items[0].NotBefore.Sub(before)
+		if got < c.want-2*time.Second || got > c.want+2*time.Second {
+			t.Errorf("%s: not_before in %v, want about %v", c.name, got, c.want)
+		}
+	}
+}
