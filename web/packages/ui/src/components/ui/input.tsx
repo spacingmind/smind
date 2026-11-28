@@ -27,6 +27,12 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
 // field container. Text-level utilities (font, size, colour, tracking, ellipsis) belong
 // on the text element, so they are applied to the <input>; everything else (sizing,
 // flex, margin) lands on the container.
+// Same text look as the native input: size and grey placeholder.
+const TEXT_DEFAULTS = "text-ui-base placeholder:text-foreground-subtlest"
+// Same field box as the native input (h-8, 1px border, rounded-lg, px-2.5, fill). Utilities
+// win over Astryx's cascade layers, so the look does not depend on its field styles.
+const CONTROL_CLASSES =
+  "h-8 rounded-lg border border-input-border bg-input px-2.5 hover:border-input-border-hover focus-within:border-input-border-focused focus-within:bg-input-focused"
 const TEXT_LEVEL = /^(font-|text-|tracking-|leading-|placeholder:)/
 function splitClassName(className: string | undefined): { text: string; box: string } {
   const text: string[] = []
@@ -59,7 +65,7 @@ function AstryxInput({
   const inputRef = React.useRef<HTMLInputElement | null>(null)
   // React mirrors a controlled value into the value attribute; a password must
   // never sit in the DOM (a native uncontrolled input has no such attribute).
-  const { text: textClass, box: boxClass } = splitClassName(className)
+  const { text: textClass, box: boxClass } = splitClassName(cn(TEXT_DEFAULTS, className))
   React.useLayoutEffect(() => {
     const el = inputRef.current
     if (!el) return
@@ -125,7 +131,7 @@ function AstryxInput({
       // Not Astryx `status`: it adds a live region (second role=alert) and
       // overwrites aria-invalid. aria-invalid goes straight to the <input>.
       aria-invalid={invalid ? true : ariaInvalid}
-      controlClassName="has-[[aria-invalid=true]]:border-destructive has-[[aria-invalid=true]]:ring-3 has-[[aria-invalid=true]]:ring-destructive/20"
+      controlClassName={cn(CONTROL_CLASSES, "has-[[aria-invalid=true]]:border-destructive has-[[aria-invalid=true]]:ring-3 has-[[aria-invalid=true]]:ring-destructive/20")}
       onChange={(next, e) => {
         if (!controlled) setInner(next)
         onChange?.(e)
