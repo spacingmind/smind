@@ -123,6 +123,7 @@ func StrippedArgs(ctx context.Context, dir string, args ...string) ([]string, er
 		"-c", "core.hooksPath=" + os.DevNull,
 		"-c", "commit.gpgsign=false",
 		"-c", "tag.gpgsign=false",
+		"-c", "protocol.ext.allow=never",
 	}
 	overrides, err := strippedOverrides(ctx, dir, args)
 	if err != nil {

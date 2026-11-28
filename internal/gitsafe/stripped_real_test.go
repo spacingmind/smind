@@ -366,3 +366,31 @@ func Test_real_git_daemon_mode_equals_in_a_subsection_never_runs_the_program(t *
 		t.Fatal("the filter ran")
 	}
 }
+
+// Test_real_git_daemon_mode_never_runs_an_ext_transport_program: a local
+// protocol.ext.allow=always with an ext:: remote URL would run a program on
+// fetch and ls-remote; daemon mode turns the transport off.
+func Test_real_git_daemon_mode_never_runs_an_ext_transport_program(t *testing.T) {
+	dir, git, marker := labRepo(t)
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-m", "init")
+	script := labScript(t, marker, "exit 1")
+	git("config", "protocol.ext.allow", "always")
+	git("config", "remote.o.url", "ext::"+script+" %S")
+
+	for _, args := range [][]string{{"fetch", "o"}, {"ls-remote", "o"}} {
+		runDaemonIn(t, dir, args...)
+		if _, err := os.Stat(marker); err == nil {
+			t.Fatalf("daemon-mode %v ran the ext program", args)
+		}
+	}
+	for _, args := range [][]string{{"fetch", "o"}, {"ls-remote", "o"}} {
+		runGit(t, dir, gitTimeout, "", Args(args...), Env(nil))
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Log("human mode did not run the ext program on this platform's git; the lab is not armed")
+	}
+}

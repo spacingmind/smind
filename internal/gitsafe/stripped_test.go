@@ -64,6 +64,7 @@ var staticPrefix = []string{
 	"-c", "core.hooksPath=" + os.DevNull,
 	"-c", "commit.gpgsign=false",
 	"-c", "tag.gpgsign=false",
+	"-c", "protocol.ext.allow=never",
 }
 
 // wantArgv builds an expected argv: the static prefix, then tail.
