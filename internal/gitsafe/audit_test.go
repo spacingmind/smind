@@ -31,12 +31,15 @@ func repoRoot(t *testing.T) string {
 }
 
 // The markers a choke point must carry in its source: the import makes the
-// hardening reachable, gitsafe.Args builds the arguments, gitsafe.Env
-// scrubs the environment.
+// hardening reachable, gitsafe.Args (or gitsafe.StrippedArgs, since the
+// stripped-mode plan made that the daemon's default) builds the arguments,
+// gitsafe.Env (or gitsafe.StrippedEnv) scrubs the environment.
 const (
-	gitsafeImport = `"github.com/spacingmind/smind/internal/gitsafe"`
-	gitsafeArgs   = `gitsafe.Args(`
-	gitsafeEnv    = `gitsafe.Env(`
+	gitsafeImport      = `"github.com/spacingmind/smind/internal/gitsafe"`
+	gitsafeArgs        = `gitsafe.Args(`
+	gitsafeStrippedArg = `gitsafe.StrippedArgs(`
+	gitsafeEnv         = `gitsafe.Env(`
+	gitsafeStrippedEnv = `gitsafe.StrippedEnv(`
 )
 
 // chokePoints are the files D2 of the plan lists as the shared choke
@@ -78,11 +81,11 @@ func Test_audit_choke_points_use_gitsafe(t *testing.T) {
 		if !strings.Contains(text, gitsafeImport) {
 			t.Errorf("%s: does not import gitsafe, so a D2 choke point builds git commands without it", cp.path)
 		}
-		if !strings.Contains(text, gitsafeArgs) {
-			t.Errorf("%s: never calls gitsafe.Args, so a git command built here runs without the shared hardening", cp.path)
+		if !strings.Contains(text, gitsafeArgs) && !strings.Contains(text, gitsafeStrippedArg) {
+			t.Errorf("%s: never calls gitsafe.Args or gitsafe.StrippedArgs, so a git command built here runs without the shared hardening", cp.path)
 		}
-		if cp.env && !strings.Contains(text, gitsafeEnv) {
-			t.Errorf("%s: never calls gitsafe.Env, so the daemon's own GIT_EXTERNAL_DIFF reaches git", cp.path)
+		if cp.env && !strings.Contains(text, gitsafeEnv) && !strings.Contains(text, gitsafeStrippedEnv) {
+			t.Errorf("%s: never calls gitsafe.Env or gitsafe.StrippedEnv, so the daemon's own GIT_EXTERNAL_DIFF reaches git", cp.path)
 		}
 	}
 }

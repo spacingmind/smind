@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"fmt"
 	"strings"
 )
@@ -63,30 +64,40 @@ func (m *Manager) TaskFileDiff(id int64, path string) (string, error) {
 	return diff, nil
 }
 
-// TaskStage stages (staged=true, `git add -- <path>`) or unstages
+// TaskStageAs stages (staged=true, `git add -- <path>`) or unstages
 // (staged=false, `git restore --staged -- <path>`) a single file in the
 // task worktree's real index. Unlike Diff/TaskFiles/TaskFileDiff's
 // throwaway snapshot index, this is a real mutation -- that's the point.
-func (m *Manager) TaskStage(id int64, path string, staged bool) error {
+// ctx carries the initiator: a human-marked context (WithHumanInitiated)
+// runs the repository's clean filter, the default context runs stripped.
+func (m *Manager) TaskStageAs(ctx context.Context, id int64, path string, staged bool) error {
 	wt, _, err := m.taskWorktree(id)
 	if err != nil {
 		return err
 	}
-	if err := taskStageFile(wt, path, staged); err != nil {
+	if err := taskStageFile(ctx, wt, path, staged); err != nil {
 		return fmt.Errorf("task stage %d %q: %w", id, path, err)
 	}
 	return nil
 }
 
-// CommitTask commits exactly what is currently staged in the task
+// TaskStage is TaskStageAs with a daemon-initiated (stripped) context.
+func (m *Manager) TaskStage(id int64, path string, staged bool) error {
+	return m.TaskStageAs(context.Background(), id, path, staged)
+}
+
+// CommitTaskAs commits exactly what is currently staged in the task
 // worktree's index -- no -a, no implicit `git add`. The message is written
 // by the caller (ADR 0006: the daemon never generates commit messages).
+// ctx carries the initiator: a human-marked context (WithHumanInitiated)
+// keeps the repository's pre-commit hook, the default (daemon) context
+// runs stripped.
 //
 // author is "human" (message used verbatim) or "agent" (message gains
 // `Smind-Agent: <agent>` and `Smind-Task: <id>` trailers per ADR 0006;
 // agent must then be non-empty). Returns ErrNothingStaged when the index
 // has nothing staged.
-func (m *Manager) CommitTask(id int64, message, author, agent string) (CommitResult, error) {
+func (m *Manager) CommitTaskAs(ctx context.Context, id int64, message, author, agent string) (CommitResult, error) {
 	wt, _, err := m.taskWorktree(id)
 	if err != nil {
 		return CommitResult{}, err
@@ -107,11 +118,18 @@ func (m *Manager) CommitTask(id int64, message, author, agent string) (CommitRes
 		return CommitResult{}, fmt.Errorf("commit task %d: author must be \"human\" or \"agent\", got %q", id, author)
 	}
 
-	result, err := gitTaskCommit(wt, fullMessage)
+	result, err := gitTaskCommit(ctx, wt, fullMessage)
 	if err != nil {
 		return CommitResult{}, fmt.Errorf("commit task %d: %w", id, err)
 	}
 	return result, nil
+}
+
+// CommitTask is CommitTaskAs with a daemon-initiated (stripped) context:
+// the runner's agent commit and every other pre-existing caller stay
+// stripped.
+func (m *Manager) CommitTask(id int64, message, author, agent string) (CommitResult, error) {
+	return m.CommitTaskAs(context.Background(), id, message, author, agent)
 }
 
 // taskWorktree resolves id's worktree path and branch -- the fields every

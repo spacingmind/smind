@@ -129,10 +129,22 @@ func IsAncestor(ctx context.Context, dir, commit, of string) (bool, error) {
 	return true, nil
 }
 
+// gitCmd builds a git call for dir (the daemon's stripped mode: the
+// repository's own configuration cannot make git run a program). When the
+// stripped-mode config scan fails the call fails closed: the returned Cmd
+// carries the error in Err, so Run/Output return it without git starting.
+// GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE are dropped so the caller's
+// environment cannot override cmd.Dir.
 func gitCmd(ctx context.Context, dir string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", gitsafe.Args(args...)...)
+	full, err := gitsafe.StrippedArgs(ctx, dir, args...)
+	if err != nil {
+		cmd := exec.CommandContext(ctx, "git")
+		cmd.Err = err
+		return cmd
+	}
+	cmd := exec.CommandContext(ctx, "git", full...)
 	cmd.Dir = dir
-	for _, e := range gitsafe.Env(nil) {
+	for _, e := range gitsafe.StrippedEnv(nil) {
 		if strings.HasPrefix(e, "GIT_DIR=") || strings.HasPrefix(e, "GIT_WORK_TREE=") || strings.HasPrefix(e, "GIT_INDEX_FILE=") {
 			continue
 		}

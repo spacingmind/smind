@@ -36,7 +36,10 @@ func TestGitRunner_DeadlineKillsProcess(t *testing.T) {
 		t.Skip("needs a /bin/sh git stand-in")
 	}
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+	// The stub answers the stripped-mode config scan with "no match" (exit
+	// 1, no output) and hangs on everything else, so the call the deadline
+	// must bound is the runner's own status read, as before.
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte("#!/bin/sh\nfor a in \"$@\"; do\n\t[ \"$a\" = config ] && exit 1\ndone\nsleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
