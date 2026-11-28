@@ -112,7 +112,9 @@ func StrippedEnv(base []string) []string {
 // stripped overrides (hooks silenced, signing off) and, unless the
 // subcommand only reads refs or the configuration, one scanned set of
 // -c key=value pairs reasserting or emptying every program the
-// repository's own configuration names. It returns an error, and the
+// repository's own configuration names. fetch, ls-remote and push also
+// carry the flag that forces the default pack program, which no -c
+// override can do. It returns an error, and the
 // caller must not run git, when the config read fails: fail closed, never
 // a call without the overrides. Config values are never logged.
 func StrippedArgs(ctx context.Context, dir string, args ...string) ([]string, error) {
@@ -127,7 +129,64 @@ func StrippedArgs(ctx context.Context, dir string, args ...string) ([]string, er
 		return nil, err
 	}
 	extras = append(extras, overrides...)
-	return insertExtras(base, extras), nil
+	out := insertExtras(base, extras)
+	return insertPackFlag(args, out), nil
+}
+
+// insertPackFlag returns out with the pack-program flag (packProgramFlag)
+// for its subcommand inserted immediately after that subcommand, so it
+// lands before every pathspec and after the -c extras, which sit before
+// the subcommand: the subcommand is therefore found on the final slice.
+// The skip search uses the caller's arguments, so a value one of this
+// function's own -c pairs carries can never suppress the flag.
+func insertPackFlag(args, out []string) []string {
+	sub := subcommandIndex(out)
+	if sub < 0 {
+		return out
+	}
+	flag := packProgramFlag(out[sub], beforePathspecs(args))
+	if flag == "" {
+		return out
+	}
+	argv := make([]string, 0, len(out)+1)
+	argv = append(argv, out[:sub+1]...)
+	argv = append(argv, flag)
+	return append(argv, out[sub+1:]...)
+}
+
+// packProgramFlag returns the command-line flag that forces the default
+// pack program for subcommand, or "" when it needs none. A config
+// override cannot do this: git collects remote.<name>.uploadpack (and
+// receivepack) across scopes and uses the repository's value even when a
+// command-line -c names another ("more than one uploadpack given, using
+// the first", measured on git 2.54), while the command-line flag wins.
+// The flag is skipped when searched — the arguments before any bare "--"
+// — already carries the option in any of its shapes.
+func packProgramFlag(subcommand string, searched []string) string {
+	switch subcommand {
+	case "fetch", "ls-remote":
+		if hasFlag(searched, "--upload-pack") || hasOptionPrefix(searched, "--upload-pack=") || hasFlag(searched, "-u") {
+			return ""
+		}
+		return "--upload-pack=git-upload-pack"
+	case "push":
+		if hasFlag(searched, "--receive-pack") || hasOptionPrefix(searched, "--receive-pack=") || hasFlag(searched, "--exec") {
+			return ""
+		}
+		return "--receive-pack=git-receive-pack"
+	}
+	return ""
+}
+
+// hasOptionPrefix reports whether any element of args is opt with a value
+// attached, as in --opt=value.
+func hasOptionPrefix(args []string, opt string) bool {
+	for _, a := range args {
+		if strings.HasPrefix(a, opt) {
+			return true
+		}
+	}
+	return false
 }
 
 // insertExtras returns a copy of base with extras inserted right after the
@@ -298,9 +357,9 @@ func hasDotGitComponent(path string) bool {
 // and the sort is stable, so the credential reset keeps its re-added
 // helpers in their original order.
 //
-// For every filter, merge driver, ssh command, askpass, git proxy,
-// signing-program and pack-program key whose LAST entry is untrusted an
-// override is emitted:
+// For every filter, merge driver, ssh command, askpass, git proxy and
+// signing-program key whose LAST entry is untrusted an override is
+// emitted:
 // filters and merge drivers get the last trusted value of the same key
 // (so a local entry cannot hide the person's own "git lfs install"), the
 // rest get the neutral value that turns the program off. Credentials are
@@ -342,12 +401,6 @@ func overridePairs(entries []configEntry, dir string) []string {
 			pairs = append(pairs, pair{k, "gpgsm"})
 		case k == "gpg.ssh.program":
 			pairs = append(pairs, pair{k, "ssh-keygen"})
-		case isNamedKey(k, "remote.", ".uploadpack"):
-			pairs = append(pairs, pair{k, "git-upload-pack"})
-		case isNamedKey(k, "remote.", ".receivepack"):
-			pairs = append(pairs, pair{k, "git-receive-pack"})
-		case isNamedKey(k, "remote.", ".uploadarchive"):
-			pairs = append(pairs, pair{k, "git-upload-archive"})
 		}
 	}
 

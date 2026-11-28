@@ -137,9 +137,11 @@ func Test_stripped_scan_parse_scope_and_origin(t *testing.T) {
 
 // Test_stripped_neutralises_local_filter_merge_driver_ssh_askpass_pack
 // covers one local entry per class: every override comes out with the
-// neutral value (no trusted entry exists to reassert), the pack programs
-// with the default program name, and the credential helper as a bare
-// reset, all sorted by key.
+// neutral value (no trusted entry exists to reassert), and the credential
+// helper as a bare reset, all sorted by key. The local pack programs get
+// NO override: git collects remote.<name>.uploadpack across scopes and
+// uses the repository's value even against a -c, so StrippedArgs forces
+// the default pack program with a command-line flag instead.
 func Test_stripped_neutralises_local_filter_merge_driver_ssh_askpass_pack(t *testing.T) {
 	stubScan(t, nil,
 		scanRec{"local", "file:.git/config", "filter.evil.clean", "/m/clean.sh"},
@@ -161,8 +163,6 @@ func Test_stripped_neutralises_local_filter_merge_driver_ssh_askpass_pack(t *tes
 		"-c", "filter.evil.process=",
 		"-c", "filter.evil.smudge=",
 		"-c", "merge.evilm.driver=",
-		"-c", "remote.origin.receivepack=git-receive-pack",
-		"-c", "remote.origin.uploadpack=git-upload-pack",
 		"status",
 	))
 }
@@ -403,4 +403,59 @@ func Test_stripped_neutralises_a_local_gpg_program(t *testing.T) {
 		"-c", "gpg.x509.program=gpgsm",
 		"status",
 	))
+}
+
+// Test_stripped_adds_pack_program_flags_for_fetch_ls_remote_push covers
+// the flag form of the pack-program neutralisation: fetch, ls-remote and
+// push carry the default-program flag right after the subcommand; a
+// caller's own option suppresses it; anything after a bare "--" is a
+// pathspec and never does.
+func Test_stripped_adds_pack_program_flags_for_fetch_ls_remote_push(t *testing.T) {
+	stubScan(t, nil)
+	tests := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{
+			name: "fetch",
+			in:   []string{"fetch", "origin"},
+			want: wantArgv("fetch", "--upload-pack=git-upload-pack", "origin"),
+		},
+		{
+			name: "ls-remote",
+			in:   []string{"ls-remote", "origin"},
+			want: wantArgv("ls-remote", "--upload-pack=git-upload-pack", "origin"),
+		},
+		{
+			name: "push",
+			in:   []string{"push", "origin", "main"},
+			want: wantArgv("push", "--receive-pack=git-receive-pack", "origin", "main"),
+		},
+		{
+			name: "the caller's own upload-pack is left alone",
+			in:   []string{"fetch", "--upload-pack=x", "origin"},
+			want: wantArgv("fetch", "--upload-pack=x", "origin"),
+		},
+		{
+			name: "other subcommands get no flag",
+			in:   []string{"status"},
+			want: wantArgv("status"),
+		},
+		{
+			name: "an option after -- is a pathspec, not an option",
+			in:   []string{"fetch", "--", "--upload-pack=x"},
+			want: wantArgv("fetch", "--upload-pack=git-upload-pack", "--", "--upload-pack=x"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			before := append([]string(nil), tt.in...)
+			got, err := StrippedArgs(context.Background(), "", tt.in...)
+			assertArgv(t, got, err, tt.want)
+			if !reflect.DeepEqual(tt.in, before) {
+				t.Fatalf("StrippedArgs mutated its input: %q", tt.in)
+			}
+		})
+	}
 }
