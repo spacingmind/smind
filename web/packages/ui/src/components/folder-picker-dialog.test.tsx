@@ -221,6 +221,9 @@ describe("FolderPickerDialog", () => {
     const dialog = screen.getByRole("dialog");
     expect(dialog.className).toContain("[&>*]:min-w-0");
     // The ScrollArea and the path row are direct children, so [&>*]:min-w-0 covers them.
-    expect(dialog.querySelector('[data-slot="scroll-area"]')!.parentElement).toBe(dialog);
+    // On Astryx the children sit in the body grid inside the dialog; that grid carries the child selector too.
+    const scroll = dialog.querySelector('[data-slot="scroll-area"]')!;
+    expect(scroll.parentElement!.className).toContain("[&>*]:min-w-0");
+    expect(dialog.contains(scroll)).toBe(true);
   });
 });

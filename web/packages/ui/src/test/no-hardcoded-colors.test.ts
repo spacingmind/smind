@@ -40,7 +40,10 @@ function listFiles(dir: string): string[] {
  * landing Item 1; see docs/design.md's Decisions).
  */
 describe("no component hardcodes a color outside index.css", () => {
-  const files = listFiles(SRC_DIR).filter((f) => !f.endsWith("index.css") && !f.endsWith(".test.ts") && !f.endsWith(".test.tsx"));
+  // ADR-0064: the Astryx theme source holds colour literals by design; it is
+  // the one place (besides index.css) they may live.
+  const THEME_SOURCES = [join(SRC_DIR, "theme", "smind-theme.ts"), join(SRC_DIR, "theme", "smind-theme.css")];
+  const files = listFiles(SRC_DIR).filter((f) => !THEME_SOURCES.includes(f) && !f.endsWith("index.css") && !f.endsWith(".test.ts") && !f.endsWith(".test.tsx"));
 
   it("no .ts/.tsx file uses a Tailwind palette-color utility class", () => {
     const offenders = files

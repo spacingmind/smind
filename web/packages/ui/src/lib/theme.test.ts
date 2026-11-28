@@ -12,6 +12,8 @@ import {
 afterEach(() => {
   window.localStorage.clear();
   document.documentElement.classList.remove("dark");
+  document.documentElement.removeAttribute("data-theme");
+  document.documentElement.removeAttribute("data-astryx-theme");
 });
 
 describe("resolveTheme", () => {
@@ -46,6 +48,18 @@ describe("readStoredThemePreference", () => {
 });
 
 describe("applyResolvedTheme", () => {
+  it("apply_resolved_theme_sets_the_astryx_attributes", () => {
+    applyResolvedTheme("dark");
+    expect(document.documentElement.classList.contains("dark")).toBe(true);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(document.documentElement.getAttribute("data-astryx-theme")).toBe("smind");
+
+    applyResolvedTheme("light");
+    expect(document.documentElement.classList.contains("dark")).toBe(false);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    expect(document.documentElement.getAttribute("data-astryx-theme")).toBe("smind");
+  });
+
   it("adds the dark class for dark", () => {
     applyResolvedTheme("dark");
     expect(document.documentElement.classList.contains("dark")).toBe(true);

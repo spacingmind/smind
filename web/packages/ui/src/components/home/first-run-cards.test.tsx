@@ -74,8 +74,8 @@ describe("FirstRunCards", () => {
       expect(card).not.toHaveTextContent(/Open Providers/);
       expect(card.querySelector("svg")?.getAttribute("class")).toContain("lucide-check"); // the check icon, as in the Get started block
       const manage = within(card).getByRole("button", { name: "Manage" });
-      expect(manage.className).toContain("underline-offset-4"); // the quiet link variant
-      expect(manage.className).not.toContain("bg-primary");
+      expect(manage).toHaveAttribute("data-variant", "link"); // the quiet link variant
+      expect(manage).not.toHaveAttribute("data-variant", "default");
       expect(card).toHaveTextContent("(done)"); // for assistive tech, like the Get started step
     });
 
@@ -115,7 +115,7 @@ describe("FirstRunCards", () => {
 
     it("done leaves Add a project as the one primary action", () => {
       renderCards({ health: { "claude-native": READY } });
-      expect(screen.getByTestId("first-run-add-project").className).toContain("bg-primary");
+      expect(screen.getByTestId("first-run-add-project")).toHaveAttribute("data-variant", "default"); // the primary variant
     });
 
     it.each([
@@ -129,9 +129,9 @@ describe("FirstRunCards", () => {
       expect(card).toHaveTextContent("Set up providers");
       expect(screen.getByTestId("first-run-providers-status").textContent).toBe(sentence);
       const open = within(card).getByRole("button", { name: "Open Providers" });
-      expect(open.className).not.toContain("bg-primary");
+      expect(open).not.toHaveAttribute("data-variant", "default");
       expect(screen.queryByTestId("first-run-providers-done")).not.toBeInTheDocument();
-      expect(screen.getByTestId("first-run-add-project").className).not.toContain("bg-primary");
+      expect(screen.getByTestId("first-run-add-project")).not.toHaveAttribute("data-variant", "default");
     });
 
     it("while the agents are still being checked the card stays to-do (never done early)", () => {

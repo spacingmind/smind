@@ -545,14 +545,21 @@ describe("Add project open a folder", () => {
 
   it("add_project_tab_after_create_still_shows_the_ring", async () => {
     await landOnDone();
-    // The first Tab reaches the buttons, which keep their normal focus-visible ring.
+    // The first Tab reaches the buttons, which must not suppress the keyboard ring.
+    // The Start button is an Astryx Button (its ring lives in Astryx's own styles, not in
+    // Tailwind classes), so assert behaviour: no outline suppression on either button, the
+    // quiet Done button keeps its Tailwind ring, and after a keyboard Tab the focused Start
+    // button matches :focus-visible (jsdom's closest equivalent of "shows the ring").
     const start = screen.getByTestId("add-project-start-task");
     const done = screen.getByTestId("add-project-done-close");
     for (const el of [done, start]) {
-      expect(el.className).toContain("focus-visible:ring-3");
-      expect(el.className).not.toContain("outline-none focus:outline-none");
+      expect(el.className).not.toContain("focus:outline-none");
+      expect(el.className).not.toContain("focus-visible:outline-none");
     }
+    expect(done.className).toContain("focus-visible:ring-3");
+    fireEvent.keyDown(screen.getByTestId("add-project-dialog"), { key: "Tab" });
     act(() => start.focus());
+    expect(start.matches(":focus-visible")).toBe(true);
     expect(start).toHaveFocus();
   });
 

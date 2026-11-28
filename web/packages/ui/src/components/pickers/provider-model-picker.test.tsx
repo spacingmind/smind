@@ -5,6 +5,19 @@ import { ProviderModelPicker, type ProviderModelPickerProps, type PickerProfileR
 import { buildBrowserProviders, type BrowserProvider, type ProviderHealth } from "@/lib/model-browser";
 import type { ProviderInfo } from "@/lib/types";
 
+// A complete MediaQueryList stub (Astryx components call addEventListener etc.);
+// only "(pointer: fine)" matches, which is what these tests depend on.
+const finePointerMatchMedia = ((q: string) => ({
+  matches: q === "(pointer: fine)",
+  media: q,
+  onchange: null,
+  addListener: () => {},
+  removeListener: () => {},
+  addEventListener: () => {},
+  removeEventListener: () => {},
+  dispatchEvent: () => false,
+})) as unknown as typeof window.matchMedia;
+
 const mobile = vi.hoisted(() => ({ value: false }));
 vi.mock("@/hooks/use-mobile", () => ({ useIsMobile: () => mobile.value }));
 
@@ -495,7 +508,7 @@ describe("model picker", () => {
   it("sheet focuses search on open only with a fine pointer", () => {
     mobile.value = true;
     const original = window.matchMedia;
-    window.matchMedia = ((q: string) => ({ matches: q === "(pointer: fine)" })) as typeof window.matchMedia;
+    window.matchMedia = finePointerMatchMedia;
     try {
       renderPicker({ selectedProvider: "none" });
       open();
@@ -508,7 +521,7 @@ describe("model picker", () => {
   it("a narrow window with a fine pointer keeps the provider list while the search is focused", () => {
     mobile.value = true;
     const original = window.matchMedia;
-    window.matchMedia = ((q: string) => ({ matches: q === "(pointer: fine)" })) as typeof window.matchMedia;
+    window.matchMedia = finePointerMatchMedia;
     try {
       renderPicker({ selectedProvider: "none", profileRows: PROFILES });
       open();
@@ -533,7 +546,7 @@ describe("model picker", () => {
 
   it("Back keeps the search input focused for arrows and typing", () => {
     const original = window.matchMedia;
-    window.matchMedia = ((q: string) => ({ matches: q === "(pointer: fine)" })) as typeof window.matchMedia; // a desktop-class sheet
+    window.matchMedia = finePointerMatchMedia; // a desktop-class sheet
     try {
       renderPicker();
       open();
