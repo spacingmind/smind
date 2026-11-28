@@ -1,7 +1,14 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-type Listing = { enabled: boolean; paused: boolean; automations: unknown[] } | null;
+import { renderWithDaemon } from "@/test/render-with-daemon";
+import { FakeUsageDaemon } from "@/test/usage-test-client";
+
+type Listing = {
+  enabled: boolean;
+  paused: boolean;
+  automations: unknown[];
+} | null;
 
 /** The section only reads `useAutomations().data`, so the hook is mocked with a fixed listing. */
 async function renderSection(listing: Listing) {
@@ -13,7 +20,22 @@ async function renderSection(listing: Listing) {
   const section = listSettingsSections().find((s) => s.id === "automations");
   if (!section) throw new Error("automations section did not register");
   const closeSettings = vi.fn();
-  render(<>{section.render({ client: null, events: null, closeSettings })}</>);
+  const daemon = new FakeUsageDaemon([]);
+  const call = daemon.client.call.bind(daemon.client);
+  (daemon.client as { call: unknown }).call = async (method: string, params?: unknown) =>
+    method === "config.get"
+      ? {
+          keys: ["automations.enabled", "automations.paused"].map((key) => ({
+            key,
+            value: "false",
+            default: "false",
+            source: "file",
+            restart: false,
+            writable: true,
+          })),
+        }
+      : call(method, params);
+  renderWithDaemon(<>{section.render({ client: null, events: null, closeSettings })}</>, daemon);
   return { closeSettings };
 }
 

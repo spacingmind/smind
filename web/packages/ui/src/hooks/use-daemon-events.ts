@@ -69,6 +69,9 @@ const STEWARD_TOPICS = ["steward.updated"];
 /** `fleet.hosts.changed` {} (ADR-0048): a host was added, approved, revoked or removed, or a link or grant changed; the bridge re-reads the host list. */
 const FLEET_TOPICS = ["fleet.hosts.changed"];
 
+/** `config.updated` {key} (ADR-0062): a global config key was changed by `config.set`; the bridge re-reads config.get and the screens that key governs. */
+const CONFIG_TOPICS = ["config.updated"];
+
 const TOPICS = [
   "task.status",
   "run.status",
@@ -87,6 +90,7 @@ const TOPICS = [
   ...INBOX_TOPICS,
   ...STEWARD_TOPICS,
   ...FLEET_TOPICS,
+  ...CONFIG_TOPICS,
 ];
 
 /**

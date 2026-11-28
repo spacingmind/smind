@@ -4,6 +4,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ChangeList, ConsentSummary, linkWarningText } from "@/components/plugins/consent-summary";
 import { OwnerBadge } from "@/components/plugins/owner-badge";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { ConfigSwitchRow } from "@/components/settings/config-switch-row";
 import { SettingsEmptyCard, SettingsGroup, SettingsList, SettingsListRow } from "@/components/settings/settings-layout";
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { Alert } from "@/components/ui/alert";
@@ -33,7 +34,7 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Why Enable/Disable/... are not offered right now, or null. The switch is a file edit only: this page has no control for it. */
+/** Why Enable/Disable/... are not offered right now, or null. */
 function pluginsOffReason(globalEnabled: boolean): string | null {
   return globalEnabled ? null : "Plugins are off";
 }
@@ -41,8 +42,7 @@ function pluginsOffReason(globalEnabled: boolean): string | null {
 const SOURCE_PLACEHOLDER = "path, git+https://…@<sha> or archive#sha256=<hash>";
 
 /**
- * Settings -> Plugins (ADR-0042, AC15): the global switch's state (read-only here: only a human editing config.yaml
- * turns plugins on), every installed plugin with its status and last error, the consent summary before Enable, and
+ * Settings -> Plugins (ADR-0042, AC15): the global switch (config.set, ADR-0062), every installed plugin with its status and last error, the consent summary before Enable, and
  * Enable / Disable / Reload / Update / Remove / Install. Every mutation is human + local only: the daemon may answer
  * `forbidden` (a relay session, or a remote login with plugins.allowRemoteManage off); its message is shown inline
  * and the page goes read-only without retrying. Live through `plugin.updated` (the event bridge refetches the list).
@@ -158,19 +158,14 @@ function PluginsSection(_props: SettingsSectionContext) {
       <section className="flex flex-col gap-2">
         <SettingsSectionTitle title="Plugins" actions={installButton} />
 
-        {listing && !globalEnabled && (
-          <Alert
-            variant="info"
-            testId="plugins-off"
-            title="Plugins are off"
-            description={
-              <>
-                Set <code className="font-mono text-ui-sm">plugins.enabled: true</code> in config.yaml to turn them on; it applies without a
-                restart. Until then no plugin adds anything, and this page is read-only.
-              </>
-            }
+        <SettingsGroup>
+          <ConfigSwitchRow
+            configKey="plugins.enabled"
+            label="Plugins"
+            description="Lets installed plugins run. Each plugin still needs its own consent."
+            testId="config-plugins-enabled"
           />
-        )}
+        </SettingsGroup>
         {readOnlyReason && (
           <Alert variant="info" testId="plugins-read-only" title="Plugins can't be managed from this connection" description={readOnlyReason} />
         )}

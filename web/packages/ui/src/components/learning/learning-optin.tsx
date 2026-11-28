@@ -1,4 +1,3 @@
-import { Alert } from "@/components/ui/alert";
 import { FormError } from "@/components/ui/form-error";
 
 import { SegmentedControl } from "@/components/ui/segmented-control";
@@ -13,7 +12,7 @@ const MODE_OPTIONS: { value: LearningMode; label: string }[] = [
 /**
  * The workspace's opt-in: `off` (default) or `propose`. The subtitle says what turning it on
  * means, so consent is informed: excerpts of transcripts go to the model, and nothing a run
- * learns is used until the person approves it. Read-only while the daemon's global switch is off.
+ * learns is used until the person approves it. Disabled while the global switch (shown above it, in Settings) is off.
  */
 export function LearningOptIn({
   workspace,
@@ -26,14 +25,6 @@ export function LearningOptIn({
   const setMode = useSetLearningMode();
   return (
     <div className="flex flex-col gap-2" data-testid="learning-optin">
-      {!enabled && (
-        <Alert
-          variant="warning"
-          testId="learning-kill-switch"
-          title="Learning is switched off for this daemon"
-          description="Nothing is collected and no learned skill is offered to agents. Turn it on with learning.enabled in config.yaml or by unsetting SMIND_LEARNING=0."
-        />
-      )}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-ui-base font-medium text-foreground">Learn from {workspace.title}</h3>
