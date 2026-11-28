@@ -256,9 +256,17 @@ smind relay — self-hostable E2EE relay server
 
 Usage:
   smind relay [--listen <addr>] [--grpc-web-listen <addr>] [--data-dir <dir>] [--max-devices-per-host <n>]
+              [--allowed-origin <origin>] [--no-default-web-origin]
               [--tls-cert <pem> --tls-key <pem>]           start the relay server (default 16 devices per relay host);
                                                            with --tls-cert/--tls-key it serves your CA certificate
                                                            (e.g. Let's Encrypt) instead of a self-signed one
+                                                           --allowed-origin <origin> accepts one more browser origin
+                                                           on the grpc-web listener (repeatable; the comma-separated
+                                                           SMIND_RELAY_ALLOWED_ORIGINS environment variable does the
+                                                           same for containers); browsers are otherwise accepted
+                                                           only from https://app.spacingmind.com
+                                                           --no-default-web-origin drops that default origin,
+                                                           leaving only the ones you allowed
   smind relay host new <id>                               enroll a relay host (secret printed once)
   smind relay host ls                                     list enrolled relay hosts
   smind relay host rm <id>                                remove a relay host

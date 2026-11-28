@@ -19,8 +19,10 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/traefik/grpc-web/go/grpcweb"
@@ -35,21 +37,34 @@ import (
 // addition carries zero risk of changing native gRPC's existing,
 // already-tested behavior; Run wires the two listeners together.
 //
-// The relay's real access control is the SCRAM-style admission handshake
-// (internal/relay/admission) every RPC still requires, not same-origin
-// policy, so the CORS/websocket origin checks here are permissive by
-// design: tightening them would not add security (a browser's CORS
-// sandbox has no bearing on an admission-authenticated mobile client that
-// isn't a browser at all), only break legitimate clients that don't send a
-// browser-style Origin header.
-func serveGRPCWeb(ctx context.Context, gs *grpc.Server, getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), lis net.Listener) error {
+// The relay's real access control remains the SCRAM-style admission handshake
+// (internal/relay/admission) every RPC still requires. Browser origins are
+// additionally restricted to the hosted client and operator allowlist; native
+// clients that send no Origin header retain their existing behavior.
+func serveGRPCWeb(ctx context.Context, gs *grpc.Server, getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), lis net.Listener, policy *originPolicy) error {
 	wrapped := grpcweb.WrapServer(gs,
 		grpcweb.WithWebsockets(true),
-		grpcweb.WithWebsocketOriginFunc(func(*http.Request) bool { return true }),
-		grpcweb.WithOriginFunc(func(string) bool { return true }),
+		grpcweb.WithWebsocketOriginFunc(policy.check),
+		grpcweb.WithOriginFunc(policy.allows),
 	)
+	var refusals originRefusalLog
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !policy.check(r) {
+			origin := r.Header.Get("Origin")
+			if len(origin) > 200 {
+				origin = origin[:200]
+			}
+			if refusals.shouldLog(origin, time.Now()) {
+				log.Printf("relay: refused browser origin %q", origin)
+			}
+			http.Error(w, "origin not allowed", http.StatusForbidden)
+			return
+		}
+		wrapped.ServeHTTP(w, r)
+	})
+
 	httpSrv := &http.Server{
-		Handler:   wrapped,
+		Handler:   handler,
 		TLSConfig: &tls.Config{GetCertificate: getCert, MinVersion: tls.VersionTLS13},
 	}
 
@@ -70,4 +85,30 @@ func serveGRPCWeb(ctx context.Context, gs *grpc.Server, getCert func(*tls.Client
 		}
 		return nil
 	}
+}
+
+// Keep at most 256 origin strings for one minute. When full, suppress new
+// entries until one expires, rather than evicting an origin and logging it
+// repeatedly during a flood. Callers truncate the origin before storing it.
+type originRefusalLog struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+func (l *originRefusalLog) shouldLog(origin string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.last == nil {
+		l.last = make(map[string]time.Time)
+	}
+	for value, at := range l.last {
+		if now.Sub(at) >= time.Minute {
+			delete(l.last, value)
+		}
+	}
+	if _, seen := l.last[origin]; seen || len(l.last) >= 256 {
+		return false
+	}
+	l.last[origin] = now
+	return true
 }

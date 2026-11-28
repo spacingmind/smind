@@ -41,6 +41,12 @@ type Config struct {
 	// DefaultGRPCWebListenAddr, so real deployments still get a stable,
 	// documented port.
 	GRPCWebListenAddr string
+
+	// AllowedOrigins are extra browser origins (already validated by
+	// ParseAllowedOrigins) accepted on the grpc-web listener besides
+	// DefaultWebOrigin; NoDefaultWebOrigin drops the default (spec D2).
+	AllowedOrigins     []string
+	NoDefaultWebOrigin bool
 	// DataDir holds the persisted self-signed TLS certificate and
 	// relay host enrollments (config.Dir()/relay by default from the CLI).
 	DataDir string
@@ -91,6 +97,11 @@ func RelayDir() string {
 // matches the daemon serve lifecycle: cancellation stops accepting, drains
 // streams, exits 0.
 func Run(ctx context.Context, cfg Config) error {
+	origins, err := ParseAllowedOrigins(cfg.AllowedOrigins)
+	if err != nil {
+		return err
+	}
+	policy := newOriginPolicy(origins, cfg.NoDefaultWebOrigin)
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = DefaultListenAddr
 	}
@@ -206,7 +217,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// affects native gRPC, which is exactly the point of using a separate
 	// listener instead of multiplexing one port.
 	webErrCh := make(chan error, 1)
-	go func() { webErrCh <- serveGRPCWeb(ctx, gs, getCert, webLis) }()
+	go func() { webErrCh <- serveGRPCWeb(ctx, gs, getCert, webLis, policy) }()
 
 	fmt.Fprintf(os.Stderr, "smind relay listening on %s (%s), grpc-web on %s\n", lis.Addr(), tlsNote, webLis.Addr())
 
