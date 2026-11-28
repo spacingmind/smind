@@ -12,7 +12,7 @@ acs:
     covers: { tests: [astryx_layer_order_is_declared_first], frames: [] }
   - id: AC3
     text: "Typecheck, the full unit suite and the demo build check pass."
-    covers: { tests: [], frames: [] }
+    covers: { tests: [], frames: [], commands: [C1, C2, C3] }
   - id: AC4
     text: "The sMind theme has light and dark values for every token and its stylesheet is built, not compiled at runtime."
     covers: { tests: [smind_theme_covers_light_and_dark_for_every_token, smind_theme_stylesheet_is_built_not_compiled_at_runtime], frames: [] }
