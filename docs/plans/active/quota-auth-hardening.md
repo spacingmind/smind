@@ -79,6 +79,6 @@ GLM peers write all code from step briefs, one commit per step, at most two at a
 
 ## Decisions for the Human
 
-1. **Item 5 reverses part of ADR-0041 F3.** A limit that hits mid-turn (after output) will no longer auto-continue on the fallback profile; the fallback is offered as a manual switch. Recommendation: keep, because the fallback replays the prompt into a different agent after the first one may already have changed your workspace. If you would rather keep the auto-continue and only guard the same-request replays (which the proxy never does), say so and I revert D5.
+1. **Item 5 reverses part of ADR-0041 F3 (AGREED by the Human 2026-11-28; the ADR carries an "Amendment 2026-11-28" note).** A limit that hits mid-turn (after output) will no longer auto-continue on the fallback profile; the fallback is offered as a manual switch. Recommendation: keep, because the fallback replays the prompt into a different agent after the first one may already have changed your workspace. If you would rather keep the auto-continue and only guard the same-request replays (which the proxy never does), say so and I revert D5.
 2. **Wording of the "subscription sharing" match.** Recognised by the phrase; the research note has no verbatim message. If you have one real rejection text, it should become a test row.
 3. **Restart forgets "needs re-login".** One extra refresh attempt per such account after a daemon restart (bounded). A persisted flag would need a schema change; recommendation: not now.
