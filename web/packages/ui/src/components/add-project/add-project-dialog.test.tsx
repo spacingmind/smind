@@ -556,6 +556,16 @@ describe("Add project open a folder", () => {
     expect(start).toHaveFocus();
   });
 
+  it("add_project_path_placeholder_is_a_folder", async () => {
+    platformState.desktop = true;
+    platformState.current = ownHost("placeholder");
+    renderDialog();
+    await flush();
+    // A folder does not need to be a git repo, so the Path placeholder must not say "repo".
+    expect(screen.getByPlaceholderText("/path/to/folder")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("/path/to/repo")).toBeNull();
+  });
+
   it("add_project_tilde_is_expanded", async () => {
     platformState.desktop = true;
     platformState.current = ownHost("tilde");
