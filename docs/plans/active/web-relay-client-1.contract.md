@@ -12,7 +12,7 @@ acs:
     covers: { tests: [vectors_match_go_v2], frames: [] }
   - id: AC3
     text: "The package imports no React Native, Expo or DOM-only API."
-    covers: { tests: [relay_client_package_has_no_platform_imports], frames: [] }
+    covers: { tests: [relay_client_package_has_no_platform_imports, relay_client_noble_ranges_match_mobile], frames: [] }
   - id: AC4
     text: "A device identity may sign asynchronously."
     covers: { tests: [buildDeviceHello_awaits_an_async_signer], frames: [] }
@@ -25,6 +25,7 @@ tests:
   - { name: buildDeviceHello_awaits_an_async_signer, run: "cd web && bun install --frozen-lockfile && cd packages/relay-client && bunx vitest run src/__tests__/deviceIdentity.test.ts -t buildDeviceHello_awaits_an_async_signer", timeoutSec: 900 }
   - { name: mobile_imports_the_shared_package_only, run: "cd mobile && bun install --frozen-lockfile && bunx vitest run src/__tests__/relayShims.test.ts", timeoutSec: 900 }
   - { name: mobile_bundle_resolves_the_shared_package, run: "cd mobile && bun install --frozen-lockfile && npx expo export --platform ios --output-dir /tmp/wr1-export 2>&1 | tail -3 | grep -q Exported", timeoutSec: 1800 }
+  - { name: relay_client_noble_ranges_match_mobile, run: "cd web && bun install --frozen-lockfile && cd packages/relay-client && bunx vitest run src/__tests__/package-guards.test.ts -t relay_client_noble_ranges_match_mobile", timeoutSec: 900 }
   - { name: hygiene_and_scope, run: "go test ./internal/hygiene/ -count=1 && test -z \"$(git diff origin/develop...HEAD --name-only -- internal cmd desktop)\"", timeoutSec: 900 }
 mutations:
   - { id: M1, file: web/packages/relay-client/src/e2ee.ts, change: "change one byte of an HKDF info label", expectFail: [vectors_match_go_v2] }
@@ -33,7 +34,7 @@ mutations:
 frames: []
 commands:
   - { id: C1, run: "cd web/packages/relay-client && bunx tsc --noEmit && bunx vitest run", timeoutSec: 1800 }
-  - { id: C2, run: "cd mobile && bunx tsc --noEmit; bunx vitest run --exclude \"**/*.node.test.ts\"", timeoutSec: 2400 }
+  - { id: C2, run: "cd mobile && bunx tsc --noEmit && bunx vitest run --exclude \"**/*.node.test.ts\"", timeoutSec: 2400 }
 limits: { budgetUsd: 5, maxMinutes: 120 }
 ---
 
