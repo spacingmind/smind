@@ -138,6 +138,23 @@ function DialogContent({
     ...rest
   } = props
 
+  // Radix hid everything outside the modal from assistive tech (and from
+  // role queries); a native modal <dialog> only does so in real browsers.
+  React.useLayoutEffect(() => {
+    const el = innerRef.current
+    if (!el || !open) return
+    const hidden: Element[] = []
+    for (let node: Element = el; node.parentElement; node = node.parentElement) {
+      for (const sib of Array.from(node.parentElement.children)) {
+        if (sib !== node && !sib.hasAttribute("aria-hidden") && !["SCRIPT", "STYLE"].includes(sib.tagName)) {
+          sib.setAttribute("aria-hidden", "true")
+          hidden.push(sib)
+        }
+      }
+    }
+    return () => hidden.forEach((n) => n.removeAttribute("aria-hidden"))
+  }, [open])
+
   // Unmount when closed (Radix did): a closed native <dialog> stays in the DOM
   // and keeps its children queryable. Costs the exit animation.
   if (!open) return null

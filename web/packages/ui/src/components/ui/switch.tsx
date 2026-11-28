@@ -27,7 +27,6 @@ function Switch({
   id,
   value: _value,
   ref,
-  "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
   ...restAll
 }: SwitchProps) {
@@ -74,7 +73,7 @@ function Switch({
       id={id}
       data-slot="switch"
       data-state={on ? "checked" : "unchecked"}
-      label={ariaLabel ?? "Toggle"}
+      label={"\u00a0"} // empty label: its text would duplicate the visible one; aria-label is forwarded to the input
       isLabelHidden
       aria-labelledby={ariaLabelledBy}
       value={on}

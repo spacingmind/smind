@@ -33,21 +33,67 @@ function AstryxInput({
   readOnly,
   placeholder,
   ref,
-  "aria-label": ariaLabel,
   "aria-invalid": ariaInvalid,
   ...rest
 }: React.ComponentProps<"input">) {
   const [inner, setInner] = React.useState(String(defaultValue ?? ""))
   const controlled = value !== undefined
+  const controlledRef = React.useRef(controlled)
+  controlledRef.current = controlled
   const current = controlled ? String(value) : inner
   const invalid = ariaInvalid === true || ariaInvalid === "true"
+  const inputRef = React.useRef<HTMLInputElement | null>(null)
+  // React mirrors a controlled value into the value attribute; a password must
+  // never sit in the DOM (a native uncontrolled input has no such attribute).
+  React.useLayoutEffect(() => {
+    const el = inputRef.current
+    if (!el) return
+    if (type === "password") el.removeAttribute("value")
+    // Astryx writes aria-invalid itself (from `status`, unused here).
+    if (invalid) el.setAttribute("aria-invalid", "true")
+    else if (ariaInvalid === undefined || ariaInvalid === false) el.removeAttribute("aria-invalid")
+    else el.setAttribute("aria-invalid", String(ariaInvalid))
+  })
+  const setRef = React.useCallback(
+    (node: HTMLInputElement | null) => {
+      inputRef.current = node
+      // Uncontrolled callers (e.g. clearing a field with `el.value = ""`) write
+      // the DOM value directly; mirror such writes into our state, otherwise
+      // the controlled Astryx field would put the old text back.
+      if (node && !controlledRef.current && !(node as { __smindSync?: boolean }).__smindSync) {
+        ;(node as { __smindSync?: boolean }).__smindSync = true
+        const own = Object.getOwnPropertyDescriptor(node, "value")
+        const proto = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")
+        const base = own ?? proto
+        if (base?.get && base.set) {
+          Object.defineProperty(node, "value", {
+            configurable: true,
+            get() {
+              return base.get!.call(this)
+            },
+            set(v: string) {
+              base.set!.call(this, v)
+              setInner(String(v))
+            },
+          })
+        }
+      }
+      if (typeof ref === "function") ref(node)
+      else if (ref) (ref as React.RefObject<HTMLInputElement | null>).current = node
+    },
+    [ref]
+  )
   return (
     <TextInput
       {...(rest as object)}
-      ref={ref}
+      ref={setRef}
       data-slot="input"
       type={type as "text" | undefined}
-      label={ariaLabel ?? placeholder ?? "Input"}
+      // Astryx needs a label but renders its text in the DOM (a second copy of
+      // any visible label, found by getByText). A non-breaking space keeps it
+      // empty; the name comes from aria-label (in rest), a real <label>, or the
+      // placeholder.
+      label={"\u00a0"}
       isLabelHidden
       value={current}
       placeholder={placeholder}
@@ -56,8 +102,10 @@ function AstryxInput({
       // (it reaches the <input> through the field's rest props).
       {...({ disabled } as object)}
       isReadOnly={readOnly}
-      status={invalid ? { type: "error", message: "Invalid value" } : undefined}
-      statusVariant="tooltip"
+      // Not Astryx `status`: it adds a live region (second role=alert) and
+      // overwrites aria-invalid. aria-invalid goes straight to the <input>.
+      aria-invalid={invalid ? true : ariaInvalid}
+      controlClassName="has-[[aria-invalid=true]]:border-destructive has-[[aria-invalid=true]]:ring-3 has-[[aria-invalid=true]]:ring-destructive/20"
       onChange={(next, e) => {
         if (!controlled) setInner(next)
         onChange?.(e)
