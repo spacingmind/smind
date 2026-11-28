@@ -337,19 +337,6 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		routeError(http.StatusServiceUnavailable, fmt.Errorf("no %s accounts configured", provider))
 		return
 	}
-	// An account whose refresh token the provider refused for good cannot
-	// serve anything: leave it out so the router never picks it.
-	live := make([]accounts.Account, 0, len(providerAccounts))
-	for _, a := range providerAccounts {
-		if !p.registry.AccountNeedsRelogin(a) {
-			live = append(live, a)
-		}
-	}
-	if len(live) == 0 {
-		reloginError(accounts.ErrNeedsRelogin)
-		return
-	}
-	providerAccounts = live
 	// When the model couldn't be determined (body over requestBodyParseCap
 	// or not parseable JSON, and not recoverable from the buffered prefix
 	// either), fail closed per ADR-0020 §5(b): only accounts with no model
@@ -871,5 +858,7 @@ func writeProviderAuthError(w http.ResponseWriter, provider string, status int, 
 				"code":    "invalid_api_key",
 			},
 		})
+	default:
+		writeJSON(w, status, map[string]any{"error": map[string]any{"message": message}})
 	}
 }

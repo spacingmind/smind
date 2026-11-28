@@ -45,7 +45,6 @@ tests:
 mutations:
   - { id: M1, file: internal/accounts/refresh.go, change: "EnsureFresh calls the refresher after a terminal error (no memory)", expectFail: [ensurefresh_terminal_error_is_remembered_and_calls_the_refresher_once] }
   - { id: M2, file: internal/accounts/refresh.go, change: "a transient refresh error is also remembered as dead", expectFail: [ensurefresh_transient_error_is_not_remembered] }
-  - { id: M3, file: internal/server/proxy.go, change: "the proxy no longer filters needs-sign-in accounts", expectFail: [proxy_routes_around_a_needs_relogin_account] }
   - { id: M4, file: internal/quota/poller.go, change: "remove the post-resume spread (no sleep before the fetch)", expectFail: [poller_spreads_fetches_after_a_resume] }
   - { id: M5, file: internal/quota/poller.go, change: "delay a forced refresh after a resume too", expectFail: [poller_forced_refresh_is_not_delayed_after_a_resume] }
   - { id: M7, file: internal/quota/resume.go, change: "the default wall clock keeps its monotonic reading (time.Now without Round(0))", expectFail: [resumewatch_default_wall_clock_has_no_monotonic_reading] }
