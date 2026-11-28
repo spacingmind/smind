@@ -39,7 +39,7 @@ tests:
 mutations:
   - { id: M1, file: web/packages/relay-web/src/identity.ts, change: "generate the identity key extractable: true", expectFail: [identity_key_is_non_extractable, relay_web_has_no_extractable_key_or_logging] }
   - { id: M2, file: web/packages/relay-web/src/controller.ts, change: "console.log the admission secret on connect", expectFail: [no_secret_reaches_console_or_storage, relay_web_has_no_extractable_key_or_logging] }
-  - { id: M3, file: web/packages/relay-web/src/controller.ts, change: "create a fresh identity when the stored one is missing", expectFail: [identity_key_missing_means_repair_not_new_identity] }
+  - { id: M3, file: web/packages/relay-web/src/identity-manager.ts, change: "create a fresh identity when the stored one is missing", expectFail: [identity_key_missing_means_repair_not_new_identity] }
   - { id: M4, file: web/packages/relay-web/src/fragment.ts, change: "leave the offer fragment in the address bar", expectFail: [fragment_is_removed_after_pairing] }
 frames: []
 commands:
