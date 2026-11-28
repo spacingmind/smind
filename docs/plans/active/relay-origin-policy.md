@@ -43,4 +43,6 @@ Codex (profile 10) writes the relay server change; GLM (profile 8) the CLI flag,
 
 ## Validation
 
-- Pending.
+- Validator 72 on 562f11139: blocked (branch predated #1006, relay-web integration test missing); no defect found. Validator 73 on b8e2da839 (develop merged): pass, all 12 named tests, M1-M4, C1, C2.
+- Two fresh reviewers on b8e2da839 (Codex: security; GLM: tests/scope/compat): no P1/P2. P3s fixed in the next commit: the CLI tests now use the real parser (the stub variable and fake are gone, plus a path-origin case), the doc names the loopback rule exactly. Accepted as is: the refusal log stops logging new origins while 256 are retained within a minute (deliberate, bounded).
+- Not verified: a real browser against a real relay (comes with the PR 3 e2e).

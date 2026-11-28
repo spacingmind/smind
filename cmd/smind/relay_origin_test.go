@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,30 +12,7 @@ import (
 	"github.com/spacingmind/smind/internal/relay/server"
 )
 
-// fakeRelayOriginParse stands in for server.ParseAllowedOrigins while its
-// real implementation lands: https:// origins (and http://localhost, for
-// development) pass through unchanged, anything else is invalid.
-func fakeRelayOriginParse(values []string) ([]string, error) {
-	var out []string
-	for _, v := range values {
-		if v != "http://localhost" && !strings.HasPrefix(v, "https://") {
-			return nil, fmt.Errorf("origin %q is not an https origin", v)
-		}
-		out = append(out, v)
-	}
-	return out, nil
-}
-
-// stubRelayOriginsParse swaps parseRelayOrigins for the test and restores it.
-func stubRelayOriginsParse(t *testing.T, parse func(values []string) ([]string, error)) {
-	t.Helper()
-	old := parseRelayOrigins
-	parseRelayOrigins = parse
-	t.Cleanup(func() { parseRelayOrigins = old })
-}
-
 func Test_relay_allowed_origin_flag_and_env_are_merged_with_the_default(t *testing.T) {
-	stubRelayOriginsParse(t, fakeRelayOriginParse)
 	relayHome(t)
 
 	// Flag values first, then the env values, de-duplicated by exact
@@ -82,7 +58,6 @@ func Test_relay_allowed_origin_flag_and_env_are_merged_with_the_default(t *testi
 }
 
 func Test_relay_allowed_origin_invalid_stops_startup(t *testing.T) {
-	stubRelayOriginsParse(t, fakeRelayOriginParse)
 	relayHome(t)
 
 	// An invalid flag value: exit 2 before anything listens, naming the
@@ -96,6 +71,9 @@ func Test_relay_allowed_origin_invalid_stops_startup(t *testing.T) {
 	}
 
 	// An invalid env value: the same, with the environment variable named.
+	if code, _, stderr := runRelay(t, "--allowed-origin", "https://a.example/path"); code != 2 || !strings.Contains(stderr, "https://a.example/path") {
+		t.Fatalf("path origin: code=%d stderr=%q (the real parser must refuse a path)", code, stderr)
+	}
 	t.Setenv(relayAllowedOriginsEnv, "https://good.example,http://evil.example")
 	code, _, stderr = runRelay(t)
 	if code != 2 || !strings.Contains(stderr, "smind relay: "+relayAllowedOriginsEnv+":") || !strings.Contains(stderr, "http://evil.example") {

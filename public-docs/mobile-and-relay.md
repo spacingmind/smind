@@ -160,7 +160,7 @@ smind relay --allowed-origin https://my.example.com
 
 The flag is repeatable. `SMIND_RELAY_ALLOWED_ORIGINS` holds the same list as a
 comma-separated environment variable, which is easier in a container. An origin
-must be `https://`, except `http://localhost` for development. Pass
+must be `https://`, except `http://` for a loopback host (`localhost`, `127.0.0.1`, `[::1]`) for development. Pass
 `--no-default-web-origin` to drop the default and accept only the origins you
 listed. An invalid origin stops the relay from starting, with a message that
 names it.

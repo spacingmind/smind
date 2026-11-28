@@ -136,9 +136,7 @@ func parseRelayServeFlags(args []string, stderr io.Writer) (server.Config, int) 
 // the flag.
 const relayAllowedOriginsEnv = "SMIND_RELAY_ALLOWED_ORIGINS"
 
-// parseRelayOrigins is the browser-origin validator the relay server owns
-// (server.ParseAllowedOrigins); a variable only so tests can stand in for
-// it while its implementation lands.
+// parseRelayOrigins is the browser-origin validator the relay server owns.
 var parseRelayOrigins = server.ParseAllowedOrigins
 
 // originValues is the repeatable --allowed-origin flag: every occurrence
