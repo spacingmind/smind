@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed. Not accepted. No code.** Written 2026-11-28 for the Human to decide.
+**Accepted, 2026-11-28, by the Human: all ten recommendations** (the answers are recorded as decided in [Decisions](#decisions-made-by-the-human)). Written 2026-11-28. No code yet; slice 1 is next.
 
 The direction is **already decided** by the Human (2026-11-28): **a folder does not need to be a git repository.** A folder without git is a valid project. This record does not argue that again. It lays out the choices that are still open, with options, trade-offs and a recommendation for each. The last section lists what the Human has to answer.
 
@@ -27,8 +27,8 @@ Builds on [ADR-0039](0039-git-pr-state.md) (git and PR state per task), [ADR-004
 | | State |
 |---|---|
 | A folder does not need to be a git repo | **Decided** (Human, 2026-11-28) |
-| A git folder keeps one worktree per task, as today | **Decided for now**: nothing here changes it. Whether worktrees become optional for git folders is **open** (choice 6). |
-| How a task runs in a folder without git (1), parallel tasks (2), what replaces diff / branch / PR (3), permissions (4), the browser and other per-workspace features (5), create-project (7) | **Open**: each has a recommendation below. |
+| A git folder keeps one worktree per task, as today | **Decided for now**: nothing here changes it. Whether worktrees become optional for git folders is **decided: not now** (choice 6). |
+| How a task runs in a folder without git (1), parallel tasks (2), what replaces diff / branch / PR (3), permissions (4), the browser and other per-workspace features (5), create-project (7) | **Decided** (2026-11-28): the recommendation of each choice below. |
 
 ## The choices
 
@@ -133,9 +133,9 @@ Each slice is its own pull request to `develop`. Sizes are my estimate.
 | **5. Relink a moved folder** | "Folder not found" and relink, grants stop matching | S | Medium (permissions) |
 | **6. Optional in-place for git folders** | only if the Human wants choice 6's setting | M | Medium |
 
-## Decisions needed from the Human
+## Decisions made by the Human
 
-Each has my recommended answer.
+All ten were **accepted as recommended on 2026-11-28**. Each line is the decided answer.
 
 1. **In place or in a copy?** Recommended: **in place** (choice 1A).
 2. **Parallel tasks on one folder?** Recommended: **one writer at a time**, others wait and say why (choice 2A).
