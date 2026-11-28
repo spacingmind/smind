@@ -58,7 +58,7 @@ type grpcWebTestRelay struct {
 	secret     []byte
 }
 
-func startGRPCWebTestRelay(t *testing.T) (*grpcWebTestRelay, func()) {
+func startGRPCWebTestRelay(t *testing.T, configs ...Config) (*grpcWebTestRelay, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	const workspaceID = "ws-grpcweb"
@@ -81,13 +81,14 @@ func startGRPCWebTestRelay(t *testing.T) (*grpcWebTestRelay, func()) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() {
-		done <- Run(ctx, Config{
-			DataDir:         dir,
-			Listener:        nativeLis,
-			GRPCWebListener: webLis,
-		})
-	}()
+	var cfg Config
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
+	cfg.DataDir = dir
+	cfg.Listener = nativeLis
+	cfg.GRPCWebListener = webLis
+	go func() { done <- Run(ctx, cfg) }()
 
 	pool := x509.NewCertPool()
 	pool.AddCert(certLeaf(t, cert))
@@ -370,10 +371,15 @@ type wsGRPCWebStream struct {
 // stream: the "grpc-websockets" subprotocol, then one initial binary
 // message carrying the gRPC metadata headers as raw HTTP-header text
 // (exactly what parseHeaders on the server side expects).
-func openGRPCWebSocketStream(t *testing.T, ctx context.Context, wsBaseURL, method string, tlsConfig *tls.Config, headers map[string]string) *wsGRPCWebStream {
+func openGRPCWebSocketStream(t *testing.T, ctx context.Context, wsBaseURL, method string, tlsConfig *tls.Config, headers map[string]string, httpHeaders ...http.Header) *wsGRPCWebStream {
 	t.Helper()
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}}
+	var requestHeaders http.Header
+	if len(httpHeaders) > 0 {
+		requestHeaders = httpHeaders[0]
+	}
 	conn, _, err := websocket.Dial(ctx, wsBaseURL+"/relay.v1.Relay/"+method, &websocket.DialOptions{
+		HTTPHeader:   requestHeaders,
 		HTTPClient:   httpClient,
 		Subprotocols: []string{"grpc-websockets"},
 	})
@@ -478,6 +484,11 @@ func (s *wsGRPCWebStream) close() {
 // why the E2EE-layered OpenData case itself is left to Item 3's real
 // TypeScript client).
 func TestGRPCWeb_OpenControlPingPongOverWebsocket(t *testing.T) {
+	grpcWebOriginPingPong(t, "")
+}
+
+func grpcWebOriginPingPong(t *testing.T, origin string) {
+	t.Helper()
 	relay, stop := startGRPCWebTestRelay(t)
 	defer stop()
 
@@ -486,9 +497,13 @@ func TestGRPCWeb_OpenControlPingPongOverWebsocket(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	var originHeaders http.Header
+	if origin != "" {
+		originHeaders = http.Header{"Origin": []string{origin}}
+	}
 	stream := openGRPCWebSocketStream(t, ctx, "wss://"+relay.webAddr, "OpenControl", relay.tlsConfig, map[string]string{
 		"admission-id": hex.EncodeToString(admissionID),
-	})
+	}, originHeaders)
 	defer stream.close()
 
 	// The first frame must carry a Ping body -- internal/relay/server's

@@ -97,6 +97,11 @@ func RelayDir() string {
 // matches the daemon serve lifecycle: cancellation stops accepting, drains
 // streams, exits 0.
 func Run(ctx context.Context, cfg Config) error {
+	origins, err := ParseAllowedOrigins(cfg.AllowedOrigins)
+	if err != nil {
+		return err
+	}
+	policy := newOriginPolicy(origins, cfg.NoDefaultWebOrigin)
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = DefaultListenAddr
 	}
@@ -212,7 +217,7 @@ func Run(ctx context.Context, cfg Config) error {
 	// affects native gRPC, which is exactly the point of using a separate
 	// listener instead of multiplexing one port.
 	webErrCh := make(chan error, 1)
-	go func() { webErrCh <- serveGRPCWeb(ctx, gs, getCert, webLis) }()
+	go func() { webErrCh <- serveGRPCWeb(ctx, gs, getCert, webLis, policy) }()
 
 	fmt.Fprintf(os.Stderr, "smind relay listening on %s (%s), grpc-web on %s\n", lis.Addr(), tlsNote, webLis.Addr())
 
