@@ -421,3 +421,74 @@ func Test_stripped_scan_ignores_inherited_git_dir(t *testing.T) {
 		t.Fatalf("scan read the wrong repository: keya=%v keyb=%v", hasA, hasB)
 	}
 }
+
+// Test_real_git_daemon_mode_does_not_run_a_submodule_filter: a clean filter
+// armed in a submodule's own config must not run for the daemon's status,
+// add -A, diff or diff --cached; human mode runs it.
+func Test_real_git_daemon_mode_does_not_run_a_submodule_filter(t *testing.T) {
+	repo := gitsafetest.NewStrippedRepo(t)
+	sub := t.TempDir()
+	mustGit := func(dir string, args ...string) {
+		t.Helper()
+		if _, err := runPlain(dir, args...); err != nil {
+			t.Fatalf("git %v in %s: %v", args, dir, err)
+		}
+	}
+	mustGit(sub, "init", "-b", "main")
+	mustGit(sub, "config", "user.name", "t")
+	mustGit(sub, "config", "user.email", "t@example.com")
+	if err := os.WriteFile(filepath.Join(sub, "f.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, ".gitattributes"), []byte("*.txt filter=x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit(sub, "add", "-A")
+	mustGit(sub, "commit", "-m", "sub")
+
+	repo.Git(t, "-c", "protocol.file.allow=always", "submodule", "add", sub, "sm")
+	repo.Git(t, "-c", "commit.gpgsign=false", "commit", "-m", "add sm")
+
+	marker := filepath.Join(repo.MarkerDir, "filter.ran")
+	script := filepath.Join(repo.MarkerDir, "subclean.sh")
+	if err := os.WriteFile(script, []byte(fmt.Sprintf("#!/bin/sh\ntouch %q\ncat\n", marker)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo.Git(t, "-C", "sm", "config", "filter.x.clean", script)
+	arm := func() {
+		repo.ClearMarkers()
+		past := time.Now().Add(-time.Hour)
+		_ = os.Chtimes(filepath.Join(repo.Dir, "sm", "f.txt"), past, past)
+		if err := os.WriteFile(filepath.Join(repo.Dir, "sm", "f.txt"), []byte("two\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"status"}, {"add", "-A"}, {"diff"}, {"diff", "--cached"}} {
+		arm()
+		runDaemon(t, repo, args...)
+		if got := repo.Markers(); len(got) != 0 {
+			t.Errorf("daemon %v ran %q", args, got)
+		}
+	}
+	ran := false
+	for _, args := range [][]string{{"status"}, {"add", "-A"}} {
+		arm()
+		runHuman(t, repo, args...)
+		got := repo.Markers()
+		t.Logf("human %v ran %q", args, got)
+		if len(got) != 0 {
+			ran = true
+		}
+	}
+	if !ran {
+		t.Errorf("human mode never ran the submodule filter")
+	}
+}
+
+// runPlain runs unhardened git in dir (setup only), under the fixture's
+// process environment.
+func runPlain(dir string, args ...string) ([]byte, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	return cmd.CombinedOutput()
+}

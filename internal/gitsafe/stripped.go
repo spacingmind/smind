@@ -228,14 +228,161 @@ func strippedOverrides(ctx context.Context, dir string, args []string) ([]string
 	if err != nil {
 		return nil, err
 	}
-	if out == nil {
-		return nil, nil // no match: nothing to override
+	var entries []configEntry
+	if out != nil {
+		entries, err = parseConfigRecords(out)
+		if err != nil {
+			return nil, err
+		}
 	}
-	entries, err := parseConfigRecords(out)
+	subs, err := submoduleEntries(ctx, dir)
 	if err != nil {
 		return nil, err
 	}
+	entries = append(entries, subs...)
+	if len(entries) == 0 {
+		return nil, nil
+	}
 	return overridePairs(entries, dir)
+}
+
+// scanRegexp selects the configuration the overrides act on.
+const scanRegexp = `^(filter|merge|remote|credential|core|gpg)\.`
+
+// maxSubmoduleConfigs caps the submodule config files one call scans; more
+// fails closed.
+const maxSubmoduleConfigs = 32
+
+// submoduleDepth is how deep under <gitdir>/modules the walk looks.
+const submoduleDepth = 6
+
+// submoduleGitDirs and scanSubmoduleFile are package variables so the
+// tests can drive the submodule scan without a repository.
+var (
+	submoduleGitDirs  = defaultSubmoduleGitDirs
+	scanSubmoduleFile = defaultScanFile
+)
+
+// submoduleEntries returns the entries of every submodule's own config
+// file, scope forced to local: git descends into a submodule's worktree and
+// runs the clean filter its own config names, and that config lives under
+// the (agent-writable) git dir. No .gitmodules, no extra work.
+func submoduleEntries(ctx context.Context, dir string) ([]configEntry, error) {
+	root := dir
+	if root == "" {
+		root = "."
+	}
+	if _, err := os.Stat(filepath.Join(root, ".gitmodules")); err != nil {
+		return nil, nil
+	}
+	files, err := submoduleGitDirs(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(files) > maxSubmoduleConfigs {
+		return nil, fmt.Errorf("gitsafe: more than %d submodule config files; refusing to run git", maxSubmoduleConfigs)
+	}
+	var entries []configEntry
+	for _, f := range files {
+		out, err := scanSubmoduleFile(ctx, dir, f)
+		if err != nil {
+			return nil, err
+		}
+		if out == nil {
+			continue
+		}
+		recs, err := parseConfigRecords(out)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range recs {
+			e.scope = "local" // submodule config is never trusted
+			entries = append(entries, e)
+		}
+	}
+	return entries, nil
+}
+
+// defaultSubmoduleGitDirs runs one rev-parse and returns the submodule
+// config files under <absolute-git-dir>/modules and <common-dir>/modules.
+func defaultSubmoduleGitDirs(ctx context.Context, dir string) ([]string, error) {
+	out, err := runGitScan(ctx, dir, "rev-parse", "--absolute-git-dir", "--git-common-dir")
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimRight(string(out), "\n"), "\n")
+	if len(lines) != 2 {
+		return nil, errors.New("gitsafe: unexpected rev-parse output while scanning submodules")
+	}
+	gitDir, common := lines[0], lines[1]
+	if !filepath.IsAbs(common) {
+		base := dir
+		if base == "" {
+			base = "."
+		}
+		common = filepath.Join(base, common)
+	}
+	var files []string
+	seen := map[string]bool{}
+	for _, root := range []string{filepath.Join(gitDir, "modules"), filepath.Join(common, "modules")} {
+		root = filepath.Clean(root)
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		found, err := walkSubmoduleConfigs(root)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, found...)
+		if len(files) > maxSubmoduleConfigs {
+			break
+		}
+	}
+	return files, nil
+}
+
+// walkSubmoduleConfigs collects every regular file named config whose
+// directory also holds a file named HEAD, to submoduleDepth levels.
+func walkSubmoduleConfigs(root string) ([]string, error) {
+	var files []string
+	var walk func(d string, depth int) error
+	walk = func(d string, depth int) error {
+		ents, err := os.ReadDir(d)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) && depth == 0 {
+				return nil
+			}
+			return fmt.Errorf("gitsafe: reading submodule git dirs: %w", err)
+		}
+		isFile := func(name string) bool {
+			fi, err := os.Lstat(filepath.Join(d, name))
+			return err == nil && fi.Mode().IsRegular()
+		}
+		if isFile("config") && isFile("HEAD") {
+			files = append(files, filepath.Join(d, "config"))
+		}
+		if depth >= submoduleDepth {
+			return nil
+		}
+		for _, e := range ents {
+			if e.IsDir() { // a symlink is not followed
+				if err := walk(filepath.Join(d, e.Name()), depth+1); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	if err := walk(root, 0); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+// defaultScanFile reads one config file with the same scan as defaultScan.
+func defaultScanFile(ctx context.Context, dir, file string) ([]byte, error) {
+	return runGitScan(ctx, dir, "config", "--file", file, "--show-scope", "--show-origin", "--null", "--get-regexp", scanRegexp)
 }
 
 // defaultScan is the one git run behind the overrides: a config read that
@@ -245,10 +392,12 @@ func strippedOverrides(ctx context.Context, dir string, args []string) ([]string
 // missing, another exit status, a timeout, a cancelled context — is an
 // error, so the caller fails closed.
 func defaultScan(ctx context.Context, dir string) ([]byte, error) {
-	args := []string{
-		"config", "--show-scope", "--show-origin", "--null", "--get-regexp",
-		`^(filter|merge|remote|credential|core|gpg)\.`,
-	}
+	return runGitScan(ctx, dir, "config", "--show-scope", "--show-origin", "--null", "--get-regexp", scanRegexp)
+}
+
+// runGitScan runs one hardened, program-free git read in dir and returns
+// stdout; exit status 1 with empty stdout is (nil, nil).
+func runGitScan(ctx context.Context, dir string, args ...string) ([]byte, error) {
 	if dir != "" && filepath.IsAbs(dir) {
 		args = append([]string{"-C", dir}, args...)
 	}

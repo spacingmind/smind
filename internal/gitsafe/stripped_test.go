@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"reflect"
@@ -494,5 +495,100 @@ func Test_stripped_scans_describe(t *testing.T) {
 	}
 	if *calls != 1 {
 		t.Fatalf("describe made %d scans, want 1", *calls)
+	}
+}
+
+// stubSubmodules replaces the submodule discovery and per-file scans.
+// files maps a config file to its canned records; calls counts both hooks.
+func stubSubmodules(t *testing.T, files map[string][]scanRec) *int {
+	t.Helper()
+	calls := 0
+	origDirs, origFile := submoduleGitDirs, scanSubmoduleFile
+	t.Cleanup(func() { submoduleGitDirs, scanSubmoduleFile = origDirs, origFile })
+	submoduleGitDirs = func(ctx context.Context, dir string) ([]string, error) {
+		calls++
+		var names []string
+		for f := range files {
+			names = append(names, f)
+		}
+		return names, nil
+	}
+	scanSubmoduleFile = func(ctx context.Context, dir, file string) ([]byte, error) {
+		calls++
+		return scanBytes(files[file]...), nil
+	}
+	return &calls
+}
+
+// hasOverride reports whether argv carries "-c" followed by pair.
+func hasOverride(argv []string, pair string) bool {
+	for i := 0; i+1 < len(argv); i++ {
+		if argv[i] == "-c" && argv[i+1] == pair {
+			return true
+		}
+	}
+	return false
+}
+
+// Test_stripped_scans_submodule_config_files covers the submodule scan: a
+// submodule's own entries are repository-controlled whatever scope --file
+// reports, a trusted global key of the same name is re-asserted, and a repo
+// without .gitmodules costs no extra call.
+func Test_stripped_scans_submodule_config_files(t *testing.T) {
+	dir := t.TempDir()
+	stubScan(t, nil, scanRec{"global", "file:/home/u/.gitconfig", "filter.x.clean", "trusted-clean"})
+	calls := stubSubmodules(t, map[string][]scanRec{
+		"/g/modules/sm/config": {
+			{"command", "file:/g/modules/sm/config", "filter.x.clean", "evil"},
+			{"command", "file:/g/modules/sm/config", "filter.only.smudge", "evil2"},
+		},
+	})
+
+	got, err := StrippedArgs(context.Background(), dir, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *calls != 0 {
+		t.Fatalf("no .gitmodules: %d submodule calls, want 0", *calls)
+	}
+	if strings.Contains(strings.Join(got, " "), "evil") {
+		t.Fatalf("unexpected override without .gitmodules: %q", got)
+	}
+
+	if err := os.WriteFile(dir+"/.gitmodules", []byte("[submodule \"sm\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err = StrippedArgs(context.Background(), dir, "status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *calls != 2 {
+		t.Fatalf("submodule calls = %d, want 2", *calls)
+	}
+	for _, want := range []string{"filter.x.clean=trusted-clean", "filter.only.smudge="} {
+		if !hasOverride(got, want) {
+			t.Errorf("missing override %q in %q", want, got)
+		}
+	}
+	if strings.Contains(strings.Join(got, " "), "evil") {
+		t.Fatalf("a submodule value leaked into the overrides: %q", got)
+	}
+}
+
+// Test_stripped_submodule_cap_fails_closed: more than 32 submodule config
+// files is an error, never a call without overrides.
+func Test_stripped_submodule_cap_fails_closed(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(dir+"/.gitmodules", nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stubScan(t, nil)
+	files := map[string][]scanRec{}
+	for i := 0; i <= maxSubmoduleConfigs; i++ {
+		files[fmt.Sprintf("/g/modules/m%d/config", i)] = nil
+	}
+	stubSubmodules(t, files)
+	if got, err := StrippedArgs(context.Background(), dir, "status"); err == nil || got != nil {
+		t.Fatalf("got (%q, %v), want (nil, error)", got, err)
 	}
 }
