@@ -10,6 +10,7 @@ import (
 
 	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // fallbackTailMax bounds the previous attempt's output quoted into a
@@ -59,7 +60,9 @@ const transientRetryPreface = "(Retrying after a short provider throttle. Your e
 // user runs launched with a profile. A transient_429 is retried on the same
 // chat with a bounded backoff (D3). auth_expired and model_not_in_plan do
 // nothing here, by design: no wait, no fallback, no retry; a person fixes
-// setup (AC12). Never for system runs (purpose != "").
+// setup (AC12). A fallback is never started after streamed output: replaying
+// a half-answered prompt on another profile would repeat work. Never for
+// system runs (purpose != "").
 func (reg *Registry) applyRateLimitPolicy(r *run, fail failure.Result) {
 	if r.purpose != "" {
 		return
@@ -79,6 +82,10 @@ func (reg *Registry) applyRateLimitPolicy(r *run, fail failure.Result) {
 		case "wait":
 			reg.enqueueRateLimitRetry(r, fail)
 		case "fallback":
+			if r.streamedText() {
+				log.Printf("runs: fallback for run %s: the run had already streamed output; not replaying it on another profile (the action offers the switch)", r.id)
+				return
+			}
 			reg.startFallbackSuccessor(r, prof)
 		}
 	}
@@ -272,4 +279,18 @@ func (reg *Registry) startFallbackSuccessor(r *run, prof store.AgentProfile) {
 	}
 	reg.notifyQueueUpdated(chat.ID)
 	reg.deliverOne(chat.ID)
+}
+
+// streamedText reports whether the run already streamed assistant text. The
+// agent's own "[error] ..." cause chunk (how GLM reports a usage limit) is a
+// failure message, not output, so it does not count.
+func (r *run) streamedText() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, e := range r.history {
+		if e.Type == taskrunner.EventTypeText && strings.TrimSpace(e.Text) != "" && !strings.HasPrefix(strings.TrimSpace(e.Text), "[error]") {
+			return true
+		}
+	}
+	return false
 }

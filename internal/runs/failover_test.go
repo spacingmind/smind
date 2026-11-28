@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/runs/failure"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -339,5 +340,60 @@ func Test_transient_retry_honours_provider_delay_between_1s_and_1h(t *testing.T)
 		if got < c.want-2*time.Second || got > c.want+2*time.Second {
 			t.Errorf("%s: not_before in %v, want about %v", c.name, got, c.want)
 		}
+	}
+}
+
+func streamPartial(r *run) {
+	r.mu.Lock()
+	r.history = append(r.history, taskrunner.Event{Type: taskrunner.EventTypeText, Text: "partial"})
+	r.mu.Unlock()
+}
+
+func Test_no_fallback_after_the_first_streamed_delta(t *testing.T) {
+	t.Parallel()
+	e := newFallbackEnv(t, "")
+	fbMain, _ := fallbackProfiles(t, e.st)
+	r := e.failedRun(t, "streamed", failedOpts{profileID: fbMain})
+	streamPartial(r)
+	e.reg.finish(r, &codex.TurnError{Info: "usageLimitExceeded", Message: "limit"})
+	st := r.statusLocked()
+	if st.FailureKind != failure.KindPlanWindowExhausted {
+		t.Fatalf("kind = %q", st.FailureKind)
+	}
+	// The run's own action never knew the fallback; the wire layer rebuilds it
+	// with the profile's fallback, which stays a switch.
+	act := failure.NextAction(st.FailureKind, failure.ActionContext{FallbackProfileID: e.reg.FallbackProfileFor(fbMain), Now: time.Now()})
+	if act == nil || act.Kind != failure.ActionSwitchProfile {
+		t.Fatalf("action = %+v, want switch_profile", act)
+	}
+	// finish applies the policy synchronously; nothing may have started.
+	for _, s := range e.reg.List(0) {
+		if s.FailoverOf == "streamed" {
+			t.Fatalf("a fallback successor %s started after streamed output", s.ID)
+		}
+	}
+	if n := len(extraChats(t, e, r.taskID)); n != 0 {
+		t.Fatalf("fallback chats = %d, want 0", n)
+	}
+}
+
+func Test_fallback_still_starts_without_streamed_output(t *testing.T) {
+	t.Parallel()
+	e := newFallbackEnv(t, "")
+	fbMain, _ := fallbackProfiles(t, e.st)
+	r := e.failedRun(t, "silent", failedOpts{profileID: fbMain})
+	e.reg.finish(r, &codex.TurnError{Info: "usageLimitExceeded", Message: "limit"})
+	successorRow(t, e, "silent")
+}
+
+func Test_wait_retry_still_queued_after_streamed_output(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "")
+	pid := profileWith(t, e.st, "wait")
+	r := e.failedRun(t, "waiter", failedOpts{profileID: pid})
+	streamPartial(r)
+	e.reg.applyRateLimitPolicy(r, futureFail(time.Hour))
+	if n := len(retryItems(t, e.st, r.chatID)); n != 1 {
+		t.Fatalf("retry items = %d, want 1", n)
 	}
 }
