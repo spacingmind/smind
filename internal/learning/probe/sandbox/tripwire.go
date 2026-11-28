@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/fsutil"
+	"github.com/spacingmind/smind/internal/gitsafe"
 )
 
 // Finding kinds. "arm_escape" is raised by the caller (the arm's own
@@ -157,10 +158,11 @@ func takeRepo(dir string) (repoSnapshot, error) {
 func sum(b []byte) string { h := sha256.Sum256(b); return hex.EncodeToString(h[:]) }
 
 // git runs one read-only git command in dir with a scrubbed environment.
+// The env is built from scratch below, so no GIT_EXTERNAL_DIFF can be in it.
 func git(dir string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"--no-optional-locks", "-C", dir}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", gitsafe.Args(append([]string{"--no-optional-locks", "-C", dir}, args...)...)...)
 	cmd.Env = []string{"PATH=" + os.Getenv("PATH"), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_OPTIONAL_LOCKS=0", "LC_ALL=C"}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
