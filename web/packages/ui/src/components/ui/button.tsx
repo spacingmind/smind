@@ -94,28 +94,33 @@ const SIZE_OVERRIDE_CLASS: Record<string, string> = {
   "icon-sm": "size-7",
 }
 
-function Button({
-  className,
-  variant = "default",
-  size = "default",
-  asChild = false,
-  ...props
-}: React.ComponentProps<"button"> &
+type ButtonProps = React.ComponentProps<"button"> &
   VariantProps<typeof buttonVariants> & {
     asChild?: boolean
-  }) {
+  }
+
+function Button({ asChild = false, ...props }: ButtonProps) {
   if (asChild) {
+    const { className, variant = "default", size = "default", ...rest } = props
     return (
       <Slot.Root
         data-slot="button"
         data-variant={variant}
         data-size={size}
         className={cn(buttonVariants({ variant, size, className }))}
-        {...props}
+        {...rest}
       />
     )
   }
+  return <AstryxBackedButton {...props} />
+}
 
+function AstryxBackedButton({
+  className,
+  variant = "default",
+  size = "default",
+  ...props
+}: Omit<ButtonProps, "asChild">) {
   const v = variant ?? "default"
   const sz = size ?? "default"
   const { children, disabled, type, ref, onClick, ...rest } = props as typeof props & {
@@ -127,10 +132,28 @@ function Button({
   const label =
     aria ?? (typeof children === "string" || typeof children === "number" ? String(children) : "")
 
+  // Astryx renders an always-present hidden role="status" live region that only
+  // speaks while isLoading (never used here). Mark it presentational so it does
+  // not add a stray "status" landmark next to every button.
+  const localRef = React.useRef<HTMLButtonElement | null>(null)
+  const setRef = React.useCallback(
+    (node: HTMLButtonElement | null) => {
+      localRef.current = node
+      if (typeof ref === "function") ref(node)
+      else if (ref) (ref as React.RefObject<HTMLButtonElement | null>).current = node
+    },
+    [ref]
+  )
+  React.useLayoutEffect(() => {
+    localRef.current
+      ?.querySelectorAll(':scope > [role="status"]')
+      .forEach((n) => n.setAttribute("role", "presentation"))
+  })
+
   return (
     <AstryxButton
       {...(rest as object)}
-      ref={ref}
+      ref={setRef}
       data-slot="button"
       data-variant={v}
       data-size={sz}
@@ -138,7 +161,10 @@ function Button({
       variant={tailwindOnly ? "ghost" : ASTRYX_VARIANT[v as keyof typeof ASTRYX_VARIANT]}
       size={ASTRYX_SIZE[sz as keyof typeof ASTRYX_SIZE]}
       type={type ?? "button"}
+      // Astryx disables with aria-disabled (still focusable); the native
+      // attribute is forwarded too so `disabled` keeps today's semantics.
       isDisabled={disabled}
+      {...({ disabled } as object)}
       onClick={onClick}
       isIconOnly={iconOnly}
       icon={iconOnly ? children : undefined}

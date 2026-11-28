@@ -41,6 +41,8 @@ function Switch({
     if (!el) return
     el.setAttribute("aria-checked", String(on))
     el.setAttribute("data-state", on ? "checked" : "unchecked")
+    // Astryx disables with aria-disabled only; mirror Radix's native attribute.
+    el.disabled = !!disabled
   })
 
   const setRef = React.useCallback(

@@ -52,6 +52,9 @@ function AstryxInput({
       value={current}
       placeholder={placeholder}
       isDisabled={disabled}
+      // Astryx disables with aria-disabled; forward the native attribute too
+      // (it reaches the <input> through the field's rest props).
+      {...({ disabled } as object)}
       isReadOnly={readOnly}
       status={invalid ? { type: "error", message: "Invalid value" } : undefined}
       statusVariant="tooltip"
